@@ -48,6 +48,25 @@ const LOGIN_REMIND_INTERVAL_MS = millisecondsFromEnvSecOrMs(
   "LOGIN_REMIND_INTERVAL_MS",
   60
 );
+const SMS_REMIND_INTERVAL_MS = millisecondsFromEnvSecOrMs(
+  "SMS_REMIND_INTERVAL_SEC",
+  "SMS_REMIND_INTERVAL_MS",
+  5 * 60
+);
+const SMS_SENT_CLICK_INTERVAL_MS = millisecondsFromEnvSecOrMs(
+  "SMS_SENT_CLICK_INTERVAL_SEC",
+  "SMS_SENT_CLICK_INTERVAL_MS",
+  1
+);
+const LOGIN_VERIFY_METHOD = (() => {
+  const raw = String(process.env.LOGIN_VERIFY_METHOD || "qr")
+    .trim()
+    .toLowerCase();
+  if (raw === "sms" || raw === "qr") {
+    return raw;
+  }
+  return "qr";
+})();
 const qrDataUrlStateByPage = new WeakMap();
 
 async function ensureDir(dir) {
@@ -347,6 +366,35 @@ async function isVerificationUiVisible(page) {
     return true;
   }
   return false;
+}
+
+async function detectLoginStep(page) {
+  if (await isLoggedInAtTarget(page)) return "logged_in";
+  if (await isSmsVerifyPanelVisible(page)) return "sms_panel";
+
+  const identityVisible = await page
+    .locator("text=身份验证")
+    .first()
+    .isVisible({ timeout: 300 })
+    .catch(() => false);
+  if (identityVisible) return "identity_verify";
+
+  const faceTitleVisible = await page
+    .locator("text=手机刷脸验证")
+    .first()
+    .isVisible({ timeout: 300 })
+    .catch(() => false);
+  if (faceTitleVisible) return "face_verify";
+
+  const qrTitleVisible = await page
+    .locator("text=扫码登录")
+    .first()
+    .isVisible({ timeout: 300 })
+    .catch(() => false);
+  if (qrTitleVisible) return "qr_login";
+
+  if (await hasVisibleQr(page).catch(() => false)) return "qr_login";
+  return "unknown";
 }
 
 async function shouldRetryTargetAfterLogin(page) {
@@ -684,6 +732,142 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
 const smsNotifySentByAccount = new Set();
 const faceNotifySentByAccount = new Set();
 const loginStageHintByAccount = new Map();
+const lastSmsConfirmClickAtByAccount = new Map();
+
+async function readSmsVerifyInfoFromPage(page) {
+  const bodyText = await page
+    .locator("body")
+    .innerText()
+    .catch(() => "");
+  const phoneMatch = bodyText.match(/请使用手机号\s*([0-9*]+)\s*发送短信验证/);
+  const smsContentMatch = bodyText.match(/编辑短信内容[:：]\s*([A-Za-z0-9]+)/);
+  const smsTargetMatch = bodyText.match(/发送至[:：]\s*([0-9]+)/);
+
+  return {
+    maskedPhone: phoneMatch ? phoneMatch[1] : "",
+    smsContent: smsContentMatch ? smsContentMatch[1] : "",
+    smsTarget: smsTargetMatch ? smsTargetMatch[1] : ""
+  };
+}
+
+async function clickSmsSentButtonIfNeeded(page, accountName) {
+  const now = Date.now();
+  const lastClickAt = lastSmsConfirmClickAtByAccount.get(accountName) || 0;
+  if (now - lastClickAt < SMS_SENT_CLICK_INTERVAL_MS) {
+    return false;
+  }
+
+  const clickedByDomExactText = await page
+    .evaluate(() => {
+      const normalize = (s) => String(s || "").replace(/\s+/g, "");
+      const panels = Array.from(document.querySelectorAll("article"));
+      for (const panel of panels) {
+        const title = panel.querySelector("[class*='title']");
+        if (!title || normalize(title.textContent) !== "发送短信验证") continue;
+        const btns = Array.from(
+          panel.querySelectorAll("[class*='btn'], [class*='primary']")
+        );
+        for (const btn of btns) {
+          if (normalize(btn.textContent) !== "我已发送") continue;
+          const el = /** @type {HTMLElement} */ (btn);
+          el.click();
+          return true;
+        }
+      }
+      return false;
+    })
+    .catch(() => false);
+  if (!clickedByDomExactText) {
+    const sentBtnCandidates = [
+      page
+        .locator("article:has-text('发送短信验证') [class*='primary']")
+        .filter({ hasText: /^我已发送$/ })
+        .first(),
+      page
+        .locator("[class*='footer'] [class*='btn']")
+        .filter({ hasText: /^我已发送$/ })
+        .first(),
+      page.getByText("我已发送", { exact: true }).first()
+    ];
+    let clicked = false;
+    for (const btn of sentBtnCandidates) {
+      const visible = await btn.isVisible({ timeout: 250 }).catch(() => false);
+      if (!visible) continue;
+      await btn.click().catch(() => {});
+      clicked = true;
+      break;
+    }
+    if (!clicked) return false;
+  }
+
+  lastSmsConfirmClickAtByAccount.set(accountName, now);
+  console.log(`账号 [${accountName}] 已尝试点击“我已发送”。`);
+  return true;
+}
+
+async function isSmsVerifyPanelVisible(page) {
+  const markers = [
+    page.locator("text=编辑短信内容").first(),
+    page.locator("text=发送至").first(),
+    page.getByText("我已发送", { exact: true }).first()
+  ];
+  for (const marker of markers) {
+    if (await marker.isVisible({ timeout: 300 }).catch(() => false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function clickSmsVerifyEntry(page) {
+  const clickedByDomExactText = await page
+    .evaluate(() => {
+      const normalize = (s) => String(s || "").replace(/\s+/g, "");
+      const target = "发送短信验证";
+      const panel = document.querySelector("[id*='uc-second-verify']");
+      if (!panel) return false;
+
+      const items = Array.from(
+        panel.querySelectorAll("[class*='list_item'], [class*='list-item']")
+      );
+      for (const item of items) {
+        if (normalize(item.textContent) !== target) continue;
+        const el = /** @type {HTMLElement} */ (item);
+        el.click();
+        return true;
+      }
+      return false;
+    })
+    .catch(() => false);
+  if (clickedByDomExactText) {
+    await page.waitForTimeout(500);
+    return true;
+  }
+
+  const entryCandidates = [
+    page
+      .locator("[id*='uc-second-verify'] [class*='list_item']")
+      .filter({ hasText: /^发送短信验证$/ })
+      .first(),
+    page
+      .locator("[role='dialog']")
+      .filter({ hasText: "身份验证" })
+      .last()
+      .getByText("发送短信验证", { exact: true })
+      .first(),
+    page.locator("[id*='uc-second-verify'] div:has-text('发送短信验证')").last(),
+    page.getByText("发送短信验证", { exact: true }).first()
+  ];
+
+  for (const entry of entryCandidates) {
+    const visible = await entry.isVisible({ timeout: 400 }).catch(() => false);
+    if (!visible) continue;
+    await entry.click().catch(() => {});
+    await page.waitForTimeout(500);
+    return true;
+  }
+  return false;
+}
 
 async function captureVerifyDialogScreenshot(page, paths, accountName, suffix) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -833,7 +1017,17 @@ async function hasVisibleQr(page) {
   return false;
 }
 
-async function handleFaceVerificationIfPresent(page, paths, accountName) {
+async function handleFaceVerificationIfPresent(
+  page,
+  paths,
+  accountName,
+  options = {}
+) {
+  const { skipFaceVerify = false } = options;
+  if (skipFaceVerify) {
+    return false;
+  }
+
   const identityVisible = await page
     .locator("text=身份验证")
     .first()
@@ -915,95 +1109,103 @@ async function resendLoginReminderByStage(
     return;
   }
 
+  if (stageHint.includes("短信验证")) {
+    const screenshotPath = await captureVerifyDialogScreenshot(
+      page,
+      paths,
+      accountName,
+      "sms-verify"
+    );
+    const { maskedPhone, smsContent, smsTarget } =
+      await readSmsVerifyInfoFromPage(page);
+    await sendSmsVerifyEmail({
+      accountName,
+      screenshotPath,
+      maskedPhone,
+      smsContent,
+      smsTarget
+    }).catch((error) => {
+      console.error(
+        `账号 [${accountName}] 短信验证重发邮件失败:`,
+        error.message || error
+      );
+    });
+    return;
+  }
+
   const resendReason = stageHint
     ? `${baseReason}（${stageHint}，二维码可能过期，定时重发）`
     : `${baseReason}（二维码可能过期，定时重发）`;
   await notifyLoginRequired(page, paths, accountName, resendReason);
 }
 
-async function handleSmsVerificationIfPresent(page, paths, accountName) {
-  const smsTitleVisible = await page
-    .locator("text=发送短信验证")
-    .first()
-    .isVisible({ timeout: 800 })
-    .catch(() => false);
+async function handleSmsVerificationIfPresent(
+  page,
+  paths,
+  accountName,
+  options = {}
+) {
+  const { alwaysTrySmsEntry = false, autoClickSentButton = false } = options;
   const identityVisible = await page
     .locator("text=身份验证")
     .first()
     .isVisible({ timeout: 800 })
     .catch(() => false);
-  if (!smsTitleVisible && !identityVisible) {
+  let smsPanelVisible = await isSmsVerifyPanelVisible(page);
+  if (!smsPanelVisible && !identityVisible) {
     return false;
   }
 
-  if (identityVisible && !smsTitleVisible) {
-    const hasFaceEntry = await page
-      .getByText("手机刷脸验证")
-      .first()
-      .isVisible({ timeout: 400 })
-      .catch(() => false);
-    if (hasFaceEntry) {
-      return false;
+  if (!smsPanelVisible && identityVisible) {
+    const clicked = await clickSmsVerifyEntry(page);
+    if (!clicked && !alwaysTrySmsEntry) {
+      const hasFaceEntry = await page
+        .getByText("手机刷脸验证")
+        .first()
+        .isVisible({ timeout: 400 })
+        .catch(() => false);
+      if (hasFaceEntry) {
+        return false;
+      }
     }
-
-    const smsEntry = page.getByText("发送短信验证").first();
-    const entryVisible = await smsEntry
-      .isVisible({ timeout: 500 })
-      .catch(() => false);
-    if (entryVisible) {
-      await smsEntry.click().catch(() => {});
-      await page.waitForTimeout(600);
-    }
+    smsPanelVisible = await isSmsVerifyPanelVisible(page);
   }
 
-  const panelVisible = await page
-    .locator("text=发送短信验证")
-    .first()
-    .isVisible({ timeout: 1000 })
-    .catch(() => false);
-  if (!panelVisible) {
+  if (!smsPanelVisible) {
     return false;
   }
 
   loginStageHintByAccount.set(accountName, "当前处于短信验证阶段");
-  const screenshotPath = await captureVerifyDialogScreenshot(
-    page,
-    paths,
-    accountName,
-    "sms-verify"
-  );
-
-  const bodyText = await page
-    .locator("body")
-    .innerText()
-    .catch(() => "");
-  const phoneMatch = bodyText.match(/请使用手机号\s*([0-9*]+)\s*发送短信验证/);
-  const smsContentMatch = bodyText.match(/编辑短信内容[:：]\s*([A-Za-z0-9]+)/);
-  const smsTargetMatch = bodyText.match(/发送至[:：]\s*([0-9]+)/);
-
-  const maskedPhone = phoneMatch ? phoneMatch[1] : "";
-  const smsContent = smsContentMatch ? smsContentMatch[1] : "";
-  const smsTarget = smsTargetMatch ? smsTargetMatch[1] : "";
+  const { maskedPhone, smsContent, smsTarget } =
+    await readSmsVerifyInfoFromPage(page);
 
   const notifyKey = `${accountName}:${maskedPhone}:${smsContent}:${smsTarget}`;
-  if (smsNotifySentByAccount.has(notifyKey)) {
-    return true;
+  if (!smsNotifySentByAccount.has(notifyKey)) {
+    const screenshotPath = await captureVerifyDialogScreenshot(
+      page,
+      paths,
+      accountName,
+      "sms-verify"
+    );
+    await sendSmsVerifyEmail({
+      accountName,
+      screenshotPath,
+      maskedPhone,
+      smsContent,
+      smsTarget
+    }).catch((error) => {
+      console.error(
+        `账号 [${accountName}] 发送短信验证邮件失败:`,
+        error.message || error
+      );
+    });
+
+    smsNotifySentByAccount.add(notifyKey);
   }
 
-  await sendSmsVerifyEmail({
-    accountName,
-    screenshotPath,
-    maskedPhone,
-    smsContent,
-    smsTarget
-  }).catch((error) => {
-    console.error(
-      `账号 [${accountName}] 发送短信验证邮件失败:`,
-      error.message || error
-    );
-  });
-
-  smsNotifySentByAccount.add(notifyKey);
+  if (autoClickSentButton) {
+    await clickSmsSentButtonIfNeeded(page, accountName);
+  }
   return true;
 }
 
@@ -1045,16 +1247,49 @@ async function waitForManualLoginFlow(
   resendEveryMs = LOGIN_REMIND_INTERVAL_MS
 ) {
   console.log(`账号 [${accountName}] 等待手动完成登录（扫码 + 验证）。`);
+  const smsVerifyMode = LOGIN_VERIFY_METHOD === "sms";
+  let lastStep = "";
   const start = Date.now();
-  let lastNotifyAt = Date.now();
+  let lastGeneralNotifyAt = Date.now();
+  let lastSmsNotifyAt = Date.now();
   let lastRetryToTargetAt = 0;
   while (Date.now() - start < timeoutMs) {
-    if (await isLoggedInAtTarget(page)) {
+    const step = await detectLoginStep(page);
+    if (step !== lastStep) {
+      const stageMap = {
+        logged_in: "当前处于已登录阶段",
+        sms_panel: "当前处于短信验证阶段",
+        identity_verify: "当前处于身份验证选择阶段",
+        face_verify: "当前处于手机刷脸验证阶段",
+        qr_login: "当前处于扫码登录阶段",
+        unknown: "当前阶段未知，等待页面稳定"
+      };
+      const hint = stageMap[step] || stageMap.unknown;
+      loginStageHintByAccount.set(accountName, hint);
+      console.log(`账号 [${accountName}] 登录阶段识别: ${hint}`);
+      lastStep = step;
+    }
+
+    if (step === "logged_in") {
       return;
     }
 
-    await handleFaceVerificationIfPresent(page, paths, accountName);
-    await handleSmsVerificationIfPresent(page, paths, accountName);
+    if (smsVerifyMode) {
+      if (step === "identity_verify" || step === "sms_panel") {
+        await handleSmsVerificationIfPresent(page, paths, accountName, {
+          alwaysTrySmsEntry: true,
+          autoClickSentButton: true
+        });
+      }
+    } else {
+      await handleFaceVerificationIfPresent(page, paths, accountName, {
+        skipFaceVerify: false
+      });
+      await handleSmsVerificationIfPresent(page, paths, accountName, {
+        alwaysTrySmsEntry: false,
+        autoClickSentButton: false
+      });
+    }
 
     if (await shouldRetryTargetAfterLogin(page)) {
       const now = Date.now();
@@ -1074,10 +1309,21 @@ async function waitForManualLoginFlow(
       }
     }
 
-    if (Date.now() - lastNotifyAt >= resendEveryMs) {
+    const now = Date.now();
+    const inSmsNotifyStage = step === "sms_panel";
+    const smsNotifyIntervalMs = SMS_REMIND_INTERVAL_MS;
+    const reachedSmsNotifyTime =
+      inSmsNotifyStage && now - lastSmsNotifyAt >= smsNotifyIntervalMs;
+    const reachedGeneralNotifyTime =
+      !inSmsNotifyStage && now - lastGeneralNotifyAt >= resendEveryMs;
+    if (reachedSmsNotifyTime || reachedGeneralNotifyTime) {
       console.log(`账号 [${accountName}] 仍未登录，重新截图并发送提醒邮件。`);
       await resendLoginReminderByStage(page, paths, accountName, reason);
-      lastNotifyAt = Date.now();
+      if (inSmsNotifyStage) {
+        lastSmsNotifyAt = now;
+      } else {
+        lastGeneralNotifyAt = now;
+      }
     }
     await page.waitForTimeout(1200);
   }
@@ -1378,6 +1624,9 @@ async function main() {
     await splitAccountsByStorageState(accounts);
   console.log(`导出通道A(已有登录态): ${withAuth.length} 个账号`);
   console.log(`导出通道B(需登录验证): ${withoutAuth.length} 个账号`);
+  console.log(
+    `登录验证方式: ${LOGIN_VERIFY_METHOD === "sms" ? "发送短信验证" : "二维码/默认流程"}`
+  );
 
   const [authResults, loginResults] = await Promise.all([
     runAccountQueue(browser, withAuth, "export", {
