@@ -3,6 +3,8 @@ const path = require("path");
 require("dotenv").config();
 const { chromium } = require("playwright");
 const nodemailer = require("nodemailer");
+const { ImapFlow } = require("imapflow");
+const { simpleParser } = require("mailparser");
 
 const TARGET_URL =
   "https://creator.douyin.com/creator-micro/data-center/content";
@@ -58,12 +60,33 @@ const SMS_SENT_CLICK_INTERVAL_MS = millisecondsFromEnvSecOrMs(
   "SMS_SENT_CLICK_INTERVAL_MS",
   1
 );
+const OTP_EMAIL_POLL_INTERVAL_MS = millisecondsFromEnvSecOrMs(
+  "OTP_EMAIL_POLL_INTERVAL_SEC",
+  "OTP_EMAIL_POLL_INTERVAL_MS",
+  5
+);
+const OTP_EMAIL_MAX_AGE_MS = millisecondsFromEnvSecOrMs(
+  "OTP_EMAIL_MAX_AGE_SEC",
+  "OTP_EMAIL_MAX_AGE_MS",
+  10 * 60
+);
+const OTP_RESEND_INTERVAL_MS = millisecondsFromEnvSecOrMs(
+  "OTP_RESEND_INTERVAL_SEC",
+  "OTP_RESEND_INTERVAL_MS",
+  5 * 60
+);
 const LOGIN_VERIFY_METHOD = (() => {
   const raw = String(process.env.LOGIN_VERIFY_METHOD || "qr")
     .trim()
     .toLowerCase();
-  if (raw === "sms" || raw === "qr") {
-    return raw;
+  if (raw === "sms" || raw === "qr") return raw;
+  if (
+    raw === "receive_sms_code" ||
+    raw === "receive_sms" ||
+    raw === "receive-otp" ||
+    raw === "otp"
+  ) {
+    return "receive_sms_code";
   }
   return "qr";
 })();
@@ -355,7 +378,8 @@ async function isVerificationUiVisible(page) {
     page.locator("text=扫码登录").first(),
     page.locator("text=身份验证").first(),
     page.locator("text=手机刷脸验证").first(),
-    page.locator("text=发送短信验证").first()
+    page.locator("text=发送短信验证").first(),
+    page.locator("text=接收短信验证码").first()
   ];
   for (const locator of checks) {
     if (await locator.isVisible({ timeout: 400 }).catch(() => false)) {
@@ -370,6 +394,7 @@ async function isVerificationUiVisible(page) {
 
 async function detectLoginStep(page) {
   if (await isLoggedInAtTarget(page)) return "logged_in";
+  if (await isReceiveOtpPanelVisible(page)) return "receive_sms_code_panel";
   if (await isSmsVerifyPanelVisible(page)) return "sms_panel";
 
   const identityVisible = await page
@@ -419,6 +444,130 @@ function getMailConfig() {
   return { enabled, host, port, secure, user, pass, from, to };
 }
 
+function createSmtpTransport(cfg) {
+  return nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    auth: {
+      user: cfg.user,
+      pass: cfg.pass
+    }
+  });
+}
+
+function getOtpInboxConfig() {
+  const host = process.env.OTP_IMAP_HOST || process.env.SMTP_HOST || "";
+  const port = Number(process.env.OTP_IMAP_PORT || 993);
+  const secure =
+    String(process.env.OTP_IMAP_SECURE || "true").toLowerCase() !== "false";
+  const user =
+    process.env.OTP_IMAP_USER ||
+    process.env.ALERT_EMAIL_USER ||
+    process.env.SMTP_USER ||
+    "";
+  const pass =
+    process.env.OTP_IMAP_PASS ||
+    process.env.ALERT_EMAIL_PASS ||
+    process.env.SMTP_PASS ||
+    "";
+  const mailbox = process.env.OTP_IMAP_MAILBOX || "INBOX";
+  const subjectPrefix = process.env.OTP_REPLY_SUBJECT_PREFIX || "[抖音验证码回复]";
+  const fromIncludes = process.env.OTP_REPLY_FROM_INCLUDES || "";
+  return {
+    host,
+    port,
+    secure,
+    user,
+    pass,
+    mailbox,
+    subjectPrefix,
+    fromIncludes
+  };
+}
+
+function extractOtpCode(text) {
+  if (!text) return "";
+  const raw = String(text).replace(/\r/g, "\n");
+  const replyPart = raw.split(/---\s*原始邮件\s*---/)[0] || raw;
+  // 跳过脚本自己发出的“接收验证码提醒”模板邮件，避免把时间年份误判成验证码。
+  if (
+    /请直接回复本邮件，正文仅填写验证码/.test(replyPart) &&
+    /已进入\s*接收短信验证码\s*阶段/.test(replyPart)
+  ) {
+    return "";
+  }
+  const lines = replyPart
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^发件人[:：]/.test(line))
+    .filter((line) => !/^发送时间[:：]/.test(line))
+    .filter((line) => !/^收件人[:：]/.test(line))
+    .filter((line) => !/^主题[:：]/.test(line));
+
+  // 优先识别“整行仅验证码”的场景（最可靠）。
+  for (const line of lines) {
+    if (/^[0-9]{4,8}$/.test(line)) {
+      return line;
+    }
+  }
+
+  const compact = lines.join("\n");
+
+  // 跳过常见日期/时间片段中的数字，避免把 2026/4/15 误识别为验证码。
+  const candidates = [];
+  const tokenRegex = /\b[0-9]{4,8}\b/g;
+  let tokenMatch;
+  while ((tokenMatch = tokenRegex.exec(compact)) !== null) {
+    const token = tokenMatch[0];
+    const start = tokenMatch.index;
+    const end = start + token.length;
+    const left = start > 0 ? compact[start - 1] : "";
+    const right = end < compact.length ? compact[end] : "";
+    if (/[0-9/:\-]/.test(left) || /[0-9/:\-]/.test(right)) {
+      continue;
+    }
+    candidates.push(token);
+  }
+  if (candidates.length === 0) return "";
+  const preferSix = candidates.find((item) => item.length === 6);
+  return preferSix || candidates[0] || "";
+}
+
+function extractOtpCodeFromParsedEmail(parsed, envelopeSubject = "", rawSource = "") {
+  const htmlText = parsed?.html
+    ? String(parsed.html).replace(/<[^>]+>/g, " ")
+    : "";
+  const candidates = [
+    parsed?.text || "",
+    parsed?.textAsHtml || "",
+    htmlText,
+    parsed?.subject || "",
+    envelopeSubject || "",
+    rawSource || ""
+  ];
+  for (const item of candidates) {
+    const otp = extractOtpCode(item);
+    if (otp) return otp;
+  }
+  return "";
+}
+
+function summarizeReplyBeforeOriginal(text, maxLen = 160) {
+  if (!text) return "";
+  const raw = String(text).replace(/\r/g, "\n");
+  const replyPart = raw.split(/---\s*原始邮件\s*---/)[0] || raw;
+  const compact = replyPart
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" | ");
+  if (!compact) return "";
+  if (compact.length <= maxLen) return compact;
+  return `${compact.slice(0, maxLen)}...`;
+}
+
 async function sendAlertEmail({ accountName, screenshotPath, reason }) {
   const cfg = getMailConfig();
   if (!cfg.enabled) {
@@ -433,15 +582,7 @@ async function sendAlertEmail({ accountName, screenshotPath, reason }) {
     return;
   }
 
-  const transporter = nodemailer.createTransport({
-    host: cfg.host,
-    port: cfg.port,
-    secure: cfg.secure,
-    auth: {
-      user: cfg.user,
-      pass: cfg.pass
-    }
-  });
+  const transporter = createSmtpTransport(cfg);
 
   const subject = `[抖音导出告警] 账号${accountName}需要重新扫码登录`;
   const html = `
@@ -469,7 +610,6 @@ async function sendAlertEmail({ accountName, screenshotPath, reason }) {
 
 async function sendSmsVerifyEmail({
   accountName,
-  screenshotPath,
   maskedPhone,
   smsContent,
   smsTarget
@@ -484,15 +624,7 @@ async function sendSmsVerifyEmail({
     return;
   }
 
-  const transporter = nodemailer.createTransport({
-    host: cfg.host,
-    port: cfg.port,
-    secure: cfg.secure,
-    auth: {
-      user: cfg.user,
-      pass: cfg.pass
-    }
-  });
+  const transporter = createSmtpTransport(cfg);
 
   const subject = `[抖音短信验证] 账号${accountName}需要发送验证短信`;
   const html = `
@@ -509,15 +641,177 @@ async function sendSmsVerifyEmail({
     from: cfg.from,
     to: cfg.to,
     subject,
-    html,
-    attachments: [
-      {
-        filename: path.basename(screenshotPath),
-        path: screenshotPath
-      }
-    ]
+    html
   });
   console.log(`账号 [${accountName}] 已发送短信验证提醒邮件到: ${cfg.to}`);
+}
+
+async function sendReceiveOtpEmail({
+  accountName,
+  maskedPhone,
+  reason
+}) {
+  const cfg = getMailConfig();
+  if (!cfg.enabled) {
+    console.log("邮件告警已关闭，跳过发送。");
+    return;
+  }
+  if (!cfg.user || !cfg.pass || !cfg.from || !cfg.to) {
+    console.log("邮件配置不完整，跳过发送接收验证码提醒。");
+    return;
+  }
+
+  const subjectPrefix = getOtpInboxConfig().subjectPrefix;
+  const subject = `${subjectPrefix} 账号${accountName}`;
+  const html = `
+    <div>
+      <p>账号 <b>${accountName}</b> 已进入 <b>接收短信验证码</b> 阶段。</p>
+      <p>手机号(掩码): <b>${maskedPhone || "未识别"}</b></p>
+      <p>请直接回复本邮件，正文仅填写验证码（4-8位数字）。</p>
+      <p>说明: ${reason || "等待用户回复验证码"}</p>
+      <p>时间: ${new Date().toLocaleString("zh-CN", { hour12: false })}</p>
+    </div>
+  `;
+
+  const transporter = createSmtpTransport(cfg);
+  await transporter.sendMail({
+    from: cfg.from,
+    to: cfg.to,
+    subject,
+    html
+  });
+  console.log(`账号 [${accountName}] 已发送接收验证码提醒邮件到: ${cfg.to}`);
+}
+
+async function fetchOtpCodeFromEmail({ accountName, sinceMs }) {
+  const cfg = getOtpInboxConfig();
+  if (!cfg.host || !cfg.user || !cfg.pass) {
+    return {
+      otpCode: "",
+      checkedCount: 0,
+      matchedSubjectCount: 0,
+      missingConfig: true
+    };
+  }
+
+  const client = new ImapFlow({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    logger: false,
+    emitLogs: false,
+    logRaw: false,
+    auth: {
+      user: cfg.user,
+      pass: cfg.pass
+    }
+  });
+
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock(cfg.mailbox);
+    try {
+      const hasSinceMs = Number.isFinite(sinceMs) && sinceMs > 0;
+      const effectiveSinceMs = hasSinceMs
+        ? sinceMs
+        : Date.now() - OTP_EMAIL_MAX_AGE_MS;
+      const searchSince = new Date(
+        Math.max(effectiveSinceMs - OTP_EMAIL_MAX_AGE_MS, 0)
+      );
+      const uids = await client.search({ since: searchSince });
+      const reversed = uids.slice().reverse();
+      let checkedCount = 0;
+      let matchedSubjectCount = 0;
+      for (const uid of reversed) {
+        checkedCount += 1;
+        const msg = await client.fetchOne(uid, {
+          envelope: true,
+          internalDate: true
+        });
+        if (!msg) continue;
+        const internalTimeMs = msg.internalDate
+          ? msg.internalDate.getTime()
+          : 0;
+        const envelopeTimeMs = msg.envelope?.date
+          ? new Date(msg.envelope.date).getTime()
+          : 0;
+        const messageTimeMs =
+          internalTimeMs ||
+          (Number.isFinite(envelopeTimeMs) ? envelopeTimeMs : 0);
+        // 仅处理“发送提醒邮件之后”的回复，避免误读历史验证码邮件。
+        if (hasSinceMs && messageTimeMs && messageTimeMs < sinceMs) {
+          continue;
+        }
+        if (
+          msg.internalDate &&
+          msg.internalDate.getTime() + OTP_EMAIL_MAX_AGE_MS < Date.now()
+        ) {
+          continue;
+        }
+
+        const subject = msg.envelope?.subject || "";
+        if (!subject.includes(cfg.subjectPrefix)) continue;
+        if (accountName && !subject.includes(accountName)) continue;
+        matchedSubjectCount += 1;
+        const fromText = (msg.envelope?.from || [])
+          .map((item) => `${item.name || ""} <${item.address || ""}>`)
+          .join(" ");
+        if (cfg.fromIncludes && !fromText.includes(cfg.fromIncludes)) continue;
+
+        const sourceMsg = await client.fetchOne(uid, { source: true });
+        if (!sourceMsg || !sourceMsg.source) continue;
+        const parsed = await simpleParser(sourceMsg.source);
+        const fullText = String(parsed?.text || "").replace(/\r/g, "\n");
+        console.log(
+          `账号 [${accountName}] 监听到验证码回复邮件: subject="${subject}" from="${fromText || "unknown"}"\n----- 邮件正文开始 -----\n${fullText || "(empty)"}\n----- 邮件正文结束 -----`
+        );
+        const otpCode = extractOtpCodeFromParsedEmail(
+          parsed,
+          subject,
+          sourceMsg.source.toString("utf-8")
+        );
+        if (otpCode) {
+          console.log(
+            `账号 [${accountName}] 已提取验证码: ${otpCode}（来自回复邮件）\n----- 提取命中邮件正文开始 -----\n${fullText || "(empty)"}\n----- 提取命中邮件正文结束 -----`
+          );
+          return {
+            otpCode,
+            checkedCount,
+            matchedSubjectCount,
+            missingConfig: false
+          };
+        }
+        console.log(
+          `账号 [${accountName}] 未提取到验证码，以下为该邮件完整正文(原文):\n----- 邮件开始 -----\n${parsed?.text || "(empty)"}\n----- 邮件结束 -----`
+        );
+        console.log(
+          `账号 [${accountName}] 已匹配回复邮件但未提取到验证码（仅识别 4-8 位数字）。`
+        );
+      }
+      return {
+        otpCode: "",
+        checkedCount,
+        matchedSubjectCount,
+        missingConfig: false
+      };
+    } finally {
+      lock.release();
+    }
+  } catch (error) {
+    console.error(
+      `账号 [${accountName}] 拉取回复验证码邮件失败:`,
+      error.message || error
+    );
+  } finally {
+    await client.logout().catch(() => {});
+  }
+
+  return {
+    otpCode: "",
+    checkedCount: 0,
+    matchedSubjectCount: 0,
+    missingConfig: false
+  };
 }
 
 async function sendFaceVerifyEmail({ accountName, screenshotPath, reason }) {
@@ -531,15 +825,7 @@ async function sendFaceVerifyEmail({ accountName, screenshotPath, reason }) {
     return;
   }
 
-  const transporter = nodemailer.createTransport({
-    host: cfg.host,
-    port: cfg.port,
-    secure: cfg.secure,
-    auth: {
-      user: cfg.user,
-      pass: cfg.pass
-    }
-  });
+  const transporter = createSmtpTransport(cfg);
 
   const subject = `[抖音刷脸验证] 账号${accountName}需要手机刷脸扫码`;
   const html = `
@@ -730,9 +1016,16 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
 }
 
 const smsNotifySentByAccount = new Set();
+const receiveOtpNotifySentByAccount = new Set();
 const faceNotifySentByAccount = new Set();
 const loginStageHintByAccount = new Map();
 const lastSmsConfirmClickAtByAccount = new Map();
+const otpRequestSinceByAccount = new Map();
+const otpLastPollAtByAccount = new Map();
+const otpLastAppliedByAccount = new Map();
+const otpLastStatusLogAtByAccount = new Map();
+const otpLastResendAtByAccount = new Map();
+const otpReceiveWaitLoggedByAccount = new Set();
 
 async function readSmsVerifyInfoFromPage(page) {
   const bodyText = await page
@@ -747,6 +1040,17 @@ async function readSmsVerifyInfoFromPage(page) {
     maskedPhone: phoneMatch ? phoneMatch[1] : "",
     smsContent: smsContentMatch ? smsContentMatch[1] : "",
     smsTarget: smsTargetMatch ? smsTargetMatch[1] : ""
+  };
+}
+
+async function readReceiveOtpInfoFromPage(page) {
+  const bodyText = await page
+    .locator("body")
+    .innerText()
+    .catch(() => "");
+  const phoneMatch = bodyText.match(/请使用手机号\s*([0-9*]+)\s*(?:接收|获取)短信验证码/);
+  return {
+    maskedPhone: phoneMatch ? phoneMatch[1] : ""
   };
 }
 
@@ -819,11 +1123,155 @@ async function isSmsVerifyPanelVisible(page) {
   return false;
 }
 
-async function clickSmsVerifyEntry(page) {
-  const clickedByDomExactText = await page
+async function isReceiveOtpPanelVisible(page) {
+  const hasReceiveTitle = await page
+    .getByText("接收短信验证码", { exact: true })
+    .first()
+    .isVisible({ timeout: 200 })
+    .catch(() => false);
+  if (!hasReceiveTitle) {
+    return false;
+  }
+
+  const markers = [
+    page
+      .locator("article:has-text('接收短信验证码') input[placeholder*='验证码']")
+      .first(),
+    page
+      .locator("[role='dialog']:has-text('接收短信验证码') input[placeholder*='验证码']")
+      .first()
+  ];
+  for (const marker of markers) {
+    if (await marker.isVisible({ timeout: 250 }).catch(() => false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function fillReceiveOtpCodeAndSubmit(page, otpCode) {
+  const inputCandidates = [
+    page
+      .locator("article:has-text('接收短信验证码') input[placeholder*='验证码']")
+      .first(),
+    page
+      .locator("[role='dialog']:has-text('接收短信验证码') input[placeholder*='验证码']")
+      .first()
+  ];
+  let filled = false;
+  for (const input of inputCandidates) {
+    const visible = await input.isVisible({ timeout: 250 }).catch(() => false);
+    if (!visible) continue;
+    await input.fill(otpCode).catch(() => {});
+    filled = true;
+    break;
+  }
+  if (!filled) return false;
+
+  const buttonCandidates = [
+    page
+      .locator("article:has-text('接收短信验证码') [class*='primary']")
+      .filter({ hasText: /(确认|提交|登录|验证|完成)/ })
+      .first(),
+    page
+      .locator("[role='dialog']:has-text('接收短信验证码') button")
+      .filter({ hasText: /(确认|提交|登录|验证|完成)/ })
+      .first(),
+    page.getByText(/确认|提交|登录|验证|完成/).first()
+  ];
+  for (const button of buttonCandidates) {
+    const visible = await button.isVisible({ timeout: 250 }).catch(() => false);
+    if (!visible) continue;
+    await button.click().catch(() => {});
+    await page.waitForTimeout(500);
+    return true;
+  }
+  return true;
+}
+
+async function clickReceiveOtpResendButton(page) {
+  const clickedByDom = await page
     .evaluate(() => {
       const normalize = (s) => String(s || "").replace(/\s+/g, "");
-      const target = "发送短信验证";
+      const panels = Array.from(document.querySelectorAll("article"));
+      for (const panel of panels) {
+        const title = panel.querySelector("[class*='title']");
+        if (!title || normalize(title.textContent) !== "接收短信验证码") continue;
+        const resendCandidates = Array.from(
+          panel.querySelectorAll("[class*='button_text'], span, div")
+        );
+        for (const node of resendCandidates) {
+          if (normalize(node.textContent) !== "重新发送") continue;
+          const el = /** @type {HTMLElement} */ (node);
+          el.click();
+          return true;
+        }
+      }
+      return false;
+    })
+    .catch(() => false);
+  if (clickedByDom) {
+    await page.waitForTimeout(400);
+    return true;
+  }
+
+  const candidates = [
+    page
+      .locator("article:has-text('接收短信验证码') div:has-text('重新发送')")
+      .last(),
+    page
+      .locator("[role='dialog']:has-text('接收短信验证码') div:has-text('重新发送')")
+      .last(),
+    page
+      .locator("article:has-text('接收短信验证码')")
+      .getByText("重新发送", { exact: true })
+      .first(),
+    page
+      .locator("[role='dialog']:has-text('接收短信验证码')")
+      .getByText("重新发送", { exact: true })
+      .first(),
+    page.getByText("重新发送", { exact: true }).first()
+  ];
+  for (const node of candidates) {
+    const visible = await node.isVisible({ timeout: 250 }).catch(() => false);
+    if (!visible) continue;
+    await node.click().catch(() => {});
+    await page.waitForTimeout(400);
+    return true;
+  }
+  return false;
+}
+
+async function hasReceiveOtpResendButton(page) {
+  const candidates = [
+    page
+      .locator("article:has-text('接收短信验证码') div:has-text('重新发送')")
+      .last(),
+    page
+      .locator("[role='dialog']:has-text('接收短信验证码') div:has-text('重新发送')")
+      .last(),
+    page
+      .locator("article:has-text('接收短信验证码')")
+      .getByText("重新发送", { exact: true })
+      .first(),
+    page
+      .locator("[role='dialog']:has-text('接收短信验证码')")
+      .getByText("重新发送", { exact: true })
+      .first(),
+    page.getByText("重新发送", { exact: true }).first()
+  ];
+  for (const node of candidates) {
+    if (await node.isVisible({ timeout: 200 }).catch(() => false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function clickVerifyEntryByText(page, targetText) {
+  const clickedByDomExactText = await page
+    .evaluate((target) => {
+      const normalize = (s) => String(s || "").replace(/\s+/g, "");
       const panel = document.querySelector("[id*='uc-second-verify']");
       if (!panel) return false;
 
@@ -845,28 +1293,35 @@ async function clickSmsVerifyEntry(page) {
   }
 
   const entryCandidates = [
-    page
-      .locator("[id*='uc-second-verify'] [class*='list_item']")
-      .filter({ hasText: /^发送短信验证$/ })
-      .first(),
+    page.locator("[id*='uc-second-verify'] [class*='list_item']").first(),
     page
       .locator("[role='dialog']")
       .filter({ hasText: "身份验证" })
       .last()
-      .getByText("发送短信验证", { exact: true })
+      .getByText(targetText, { exact: true })
       .first(),
-    page.locator("[id*='uc-second-verify'] div:has-text('发送短信验证')").last(),
-    page.getByText("发送短信验证", { exact: true }).first()
+    page.locator(`[id*='uc-second-verify'] div:has-text('${targetText}')`).last(),
+    page.getByText(targetText, { exact: true }).first()
   ];
 
   for (const entry of entryCandidates) {
     const visible = await entry.isVisible({ timeout: 400 }).catch(() => false);
     if (!visible) continue;
+    const txt = await entry.textContent().catch(() => "");
+    if (txt && String(txt).replace(/\s+/g, "") !== targetText) continue;
     await entry.click().catch(() => {});
     await page.waitForTimeout(500);
     return true;
   }
   return false;
+}
+
+async function clickSmsVerifyEntry(page) {
+  return clickVerifyEntryByText(page, "发送短信验证");
+}
+
+async function clickReceiveOtpEntry(page) {
+  return clickVerifyEntryByText(page, "接收短信验证码");
 }
 
 async function captureVerifyDialogScreenshot(page, paths, accountName, suffix) {
@@ -1109,18 +1564,26 @@ async function resendLoginReminderByStage(
     return;
   }
 
-  if (stageHint.includes("短信验证")) {
-    const screenshotPath = await captureVerifyDialogScreenshot(
-      page,
-      paths,
+  if (stageHint.includes("接收短信验证码")) {
+    const { maskedPhone } = await readReceiveOtpInfoFromPage(page);
+    await sendReceiveOtpEmail({
       accountName,
-      "sms-verify"
-    );
+      maskedPhone,
+      reason: `${baseReason}（仍在等待用户邮件回复验证码）`
+    }).catch((error) => {
+      console.error(
+        `账号 [${accountName}] 接收验证码重发邮件失败:`,
+        error.message || error
+      );
+    });
+    return;
+  }
+
+  if (stageHint.includes("短信验证")) {
     const { maskedPhone, smsContent, smsTarget } =
       await readSmsVerifyInfoFromPage(page);
     await sendSmsVerifyEmail({
       accountName,
-      screenshotPath,
       maskedPhone,
       smsContent,
       smsTarget
@@ -1181,15 +1644,8 @@ async function handleSmsVerificationIfPresent(
 
   const notifyKey = `${accountName}:${maskedPhone}:${smsContent}:${smsTarget}`;
   if (!smsNotifySentByAccount.has(notifyKey)) {
-    const screenshotPath = await captureVerifyDialogScreenshot(
-      page,
-      paths,
-      accountName,
-      "sms-verify"
-    );
     await sendSmsVerifyEmail({
       accountName,
-      screenshotPath,
       maskedPhone,
       smsContent,
       smsTarget
@@ -1205,6 +1661,130 @@ async function handleSmsVerificationIfPresent(
 
   if (autoClickSentButton) {
     await clickSmsSentButtonIfNeeded(page, accountName);
+  }
+  return true;
+}
+
+async function handleReceiveSmsCodeIfPresent(
+  page,
+  paths,
+  accountName,
+  options = {}
+) {
+  const { alwaysTryReceiveEntry = false } = options;
+  const identityVisible = await page
+    .locator("text=身份验证")
+    .first()
+    .isVisible({ timeout: 800 })
+    .catch(() => false);
+  let panelVisible = await isReceiveOtpPanelVisible(page);
+  if (!panelVisible && !identityVisible) {
+    return false;
+  }
+
+  if (!panelVisible && identityVisible) {
+    const clicked = await clickReceiveOtpEntry(page);
+    if (!clicked && !alwaysTryReceiveEntry) {
+      return false;
+    }
+    panelVisible = await isReceiveOtpPanelVisible(page);
+  }
+  if (!panelVisible) {
+    return false;
+  }
+
+  loginStageHintByAccount.set(accountName, "当前处于接收短信验证码阶段");
+  const { maskedPhone } = await readReceiveOtpInfoFromPage(page);
+  const notifyKey = `${accountName}:${maskedPhone}`;
+  if (!receiveOtpNotifySentByAccount.has(notifyKey)) {
+    await sendReceiveOtpEmail({
+      accountName,
+      maskedPhone,
+      reason: "首次进入接收短信验证码阶段，请回复验证码"
+    }).catch((error) => {
+      console.error(
+        `账号 [${accountName}] 首次发送接收验证码提醒邮件失败:`,
+        error.message || error
+      );
+    });
+    receiveOtpNotifySentByAccount.add(notifyKey);
+    otpRequestSinceByAccount.set(accountName, Date.now());
+    otpLastResendAtByAccount.set(accountName, Date.now());
+    otpReceiveWaitLoggedByAccount.delete(accountName);
+  }
+
+  const now = Date.now();
+  const lastResendAt = otpLastResendAtByAccount.get(accountName) || 0;
+  if (now - lastResendAt >= OTP_RESEND_INTERVAL_MS) {
+    otpLastResendAtByAccount.set(accountName, now);
+    const hasResendButton = await hasReceiveOtpResendButton(page);
+    if (!hasResendButton) {
+      if (!otpReceiveWaitLoggedByAccount.has(accountName)) {
+        console.log(
+          `账号 [${accountName}] 接收验证码弹窗暂未出现“重新发送”按钮，跳过本轮邮件提醒。`
+        );
+        otpReceiveWaitLoggedByAccount.add(accountName);
+      }
+    } else {
+      otpReceiveWaitLoggedByAccount.delete(accountName);
+      const resent = await clickReceiveOtpResendButton(page);
+      if (resent) {
+        otpRequestSinceByAccount.set(accountName, now);
+        await sendReceiveOtpEmail({
+          accountName,
+          maskedPhone,
+          reason: "已先点击“重新发送”，请回复最新验证码"
+        }).catch((error) => {
+          console.error(
+            `账号 [${accountName}] 重发验证码后邮件提醒失败:`,
+            error.message || error
+          );
+        });
+        console.log(
+          `账号 [${accountName}] 已先点击“重新发送”，再发送验证码回复邮件提醒。`
+        );
+      }
+    }
+  }
+
+  const lastPollAt = otpLastPollAtByAccount.get(accountName) || 0;
+  if (now - lastPollAt < OTP_EMAIL_POLL_INTERVAL_MS) {
+    return true;
+  }
+  otpLastPollAtByAccount.set(accountName, now);
+
+  const sinceMs = otpRequestSinceByAccount.get(accountName) || now;
+  const pollResult = await fetchOtpCodeFromEmail({ accountName, sinceMs });
+  const otpCode = pollResult.otpCode || "";
+  const lastStatusLogAt = otpLastStatusLogAtByAccount.get(accountName) || 0;
+  const shouldLogStatus = now - lastStatusLogAt >= 15000;
+  if (!otpCode && shouldLogStatus) {
+    if (pollResult.missingConfig) {
+      console.log(
+        `账号 [${accountName}] 未配置完整 OTP_IMAP_*，暂无法从邮箱读取验证码。`
+      );
+    } else if (pollResult.checkedCount === 0) {
+      console.log(`账号 [${accountName}] 轮询邮箱中：近时间窗口未发现新邮件。`);
+    } else if (pollResult.matchedSubjectCount === 0) {
+      // 主题未命中属于常态噪音，这里不输出日志。
+    } else {
+      console.log(
+        `账号 [${accountName}] 轮询邮箱中：已匹配主题邮件，但正文未解析出 4-8 位验证码。`
+      );
+    }
+    otpLastStatusLogAtByAccount.set(accountName, now);
+  }
+  if (!otpCode) {
+    return true;
+  }
+  if (otpLastAppliedByAccount.get(accountName) === otpCode) {
+    return true;
+  }
+
+  const submitted = await fillReceiveOtpCodeAndSubmit(page, otpCode);
+  if (submitted) {
+    otpLastAppliedByAccount.set(accountName, otpCode);
+    console.log(`账号 [${accountName}] 已自动填入邮件回复验证码并提交。`);
   }
   return true;
 }
@@ -1248,6 +1828,7 @@ async function waitForManualLoginFlow(
 ) {
   console.log(`账号 [${accountName}] 等待手动完成登录（扫码 + 验证）。`);
   const smsVerifyMode = LOGIN_VERIFY_METHOD === "sms";
+  const receiveSmsCodeMode = LOGIN_VERIFY_METHOD === "receive_sms_code";
   let lastStep = "";
   const start = Date.now();
   let lastGeneralNotifyAt = Date.now();
@@ -1259,6 +1840,7 @@ async function waitForManualLoginFlow(
       const stageMap = {
         logged_in: "当前处于已登录阶段",
         sms_panel: "当前处于短信验证阶段",
+        receive_sms_code_panel: "当前处于接收短信验证码阶段",
         identity_verify: "当前处于身份验证选择阶段",
         face_verify: "当前处于手机刷脸验证阶段",
         qr_login: "当前处于扫码登录阶段",
@@ -1279,6 +1861,12 @@ async function waitForManualLoginFlow(
         await handleSmsVerificationIfPresent(page, paths, accountName, {
           alwaysTrySmsEntry: true,
           autoClickSentButton: true
+        });
+      }
+    } else if (receiveSmsCodeMode) {
+      if (step === "identity_verify" || step === "receive_sms_code_panel") {
+        await handleReceiveSmsCodeIfPresent(page, paths, accountName, {
+          alwaysTryReceiveEntry: true
         });
       }
     } else {
@@ -1311,11 +1899,14 @@ async function waitForManualLoginFlow(
 
     const now = Date.now();
     const inSmsNotifyStage = step === "sms_panel";
+    const inReceiveOtpStage = step === "receive_sms_code_panel";
     const smsNotifyIntervalMs = SMS_REMIND_INTERVAL_MS;
     const reachedSmsNotifyTime =
       inSmsNotifyStage && now - lastSmsNotifyAt >= smsNotifyIntervalMs;
     const reachedGeneralNotifyTime =
-      !inSmsNotifyStage && now - lastGeneralNotifyAt >= resendEveryMs;
+      !inSmsNotifyStage &&
+      !inReceiveOtpStage &&
+      now - lastGeneralNotifyAt >= resendEveryMs;
     if (reachedSmsNotifyTime || reachedGeneralNotifyTime) {
       console.log(`账号 [${accountName}] 仍未登录，重新截图并发送提醒邮件。`);
       await resendLoginReminderByStage(page, paths, accountName, reason);
@@ -1625,7 +2216,13 @@ async function main() {
   console.log(`导出通道A(已有登录态): ${withAuth.length} 个账号`);
   console.log(`导出通道B(需登录验证): ${withoutAuth.length} 个账号`);
   console.log(
-    `登录验证方式: ${LOGIN_VERIFY_METHOD === "sms" ? "发送短信验证" : "二维码/默认流程"}`
+    `登录验证方式: ${
+      LOGIN_VERIFY_METHOD === "sms"
+        ? "发送短信验证"
+        : LOGIN_VERIFY_METHOD === "receive_sms_code"
+          ? "接收短信验证码(邮件回填)"
+          : "二维码/默认流程"
+    }`
   );
 
   const [authResults, loginResults] = await Promise.all([
