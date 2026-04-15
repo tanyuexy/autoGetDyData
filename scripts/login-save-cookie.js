@@ -21,6 +21,7 @@ function numberFromEnv(name, defaultValue) {
 
 const LOGIN_WAIT_TIMEOUT_MS = numberFromEnv("LOGIN_WAIT_TIMEOUT_MS", 15 * 60 * 1000);
 const LOGIN_REMIND_INTERVAL_MS = numberFromEnv("LOGIN_REMIND_INTERVAL_MS", 60 * 1000);
+const qrDataUrlStateByPage = new WeakMap();
 
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
@@ -33,6 +34,195 @@ async function fileExists(filePath) {
   } catch {
     return false;
   }
+}
+
+function extractQrDataUrls(text) {
+  if (!text || typeof text !== "string") return [];
+  const matches = text.match(/data:image\/png;base64,[A-Za-z0-9+/=]+/g) || [];
+  return matches.filter((item) => item.length > 4000);
+}
+
+function readPngSize(buffer) {
+  if (!buffer || buffer.length < 24) return null;
+  const pngSignatureHex = "89504e470d0a1a0a";
+  if (buffer.subarray(0, 8).toString("hex") !== pngSignatureHex) return null;
+  const chunkType = buffer.subarray(12, 16).toString("ascii");
+  if (chunkType !== "IHDR") return null;
+  const width = buffer.readUInt32BE(16);
+  const height = buffer.readUInt32BE(20);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return { width, height };
+}
+
+async function saveDataUrlPng(dataUrl, savePath, options = {}) {
+  if (!dataUrl || typeof dataUrl !== "string") return false;
+  if (!dataUrl.startsWith("data:image/png;base64,")) return false;
+  const minBytes = options.minBytes || 500;
+  const minSide = options.minSide || 1;
+  const maxAspectDiff = options.maxAspectDiff || 1;
+  const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
+  if (!base64) return false;
+  const buf = Buffer.from(base64, "base64");
+  if (!buf || buf.length < minBytes) return false;
+  const size = readPngSize(buf);
+  if (!size) return false;
+  if (size.width < minSide || size.height < minSide) return false;
+  const aspectDiff = Math.abs(size.width - size.height) / Math.max(size.width, size.height);
+  if (aspectDiff > maxAspectDiff) return false;
+  await fs.writeFile(savePath, buf);
+  return true;
+}
+
+function attachQrDataUrlSniffer(page) {
+  if (qrDataUrlStateByPage.has(page)) return;
+  const state = { dataUrls: [] };
+  qrDataUrlStateByPage.set(page, state);
+
+  page.on("response", async (response) => {
+    try {
+      const url = response.url() || "";
+      if (!url.includes("douyin.com")) return;
+
+      const headers = await response.allHeaders().catch(() => ({}));
+      const contentType = String(headers["content-type"] || "").toLowerCase();
+      const likelyTextPayload =
+        contentType.includes("json") ||
+        contentType.includes("text") ||
+        contentType.includes("javascript") ||
+        contentType.includes("html");
+      if (!likelyTextPayload) return;
+
+      const text = await response.text().catch(() => "");
+      if (!text || text.length < 64) return;
+      const urls = extractQrDataUrls(text);
+      if (urls.length === 0) return;
+
+      for (const item of urls) {
+        state.dataUrls.push(item);
+      }
+      // 只保留最近候选，避免长时间运行内存膨胀。
+      if (state.dataUrls.length > 8) {
+        state.dataUrls = state.dataUrls.slice(-8);
+      }
+    } catch {
+      // 响应抓取失败不影响主流程
+    }
+  });
+}
+
+async function tryCaptureQrFromDataUrl(page, screenshotPath) {
+  // 1) 第一优先：直接使用 img[aria-label='二维码'] 的 src。
+  const ariaQrSrc = await page
+    .evaluate(() => {
+      const el = document.querySelector("img[aria-label='二维码']");
+      if (!el || !el.getAttribute) return "";
+      return el.getAttribute("src") || "";
+    })
+    .catch(() => "");
+  if (
+    await saveDataUrlPng(ariaQrSrc, screenshotPath, {
+      minBytes: 1500,
+      minSide: 180,
+      maxAspectDiff: 0.25,
+    }).catch(() => false)
+  ) {
+    return true;
+  }
+
+  // 2) 优先从 DOM 提取其余二维码 dataURL，避免受视口裁切影响。
+  const domDataUrls = await page
+    .evaluate(() => {
+      const all = [];
+      const pushUnique = (src) => {
+        if (!src || typeof src !== "string") return;
+        if (!src.startsWith("data:image/png;base64,")) return;
+        if (src.length < 4000) return;
+        if (!all.includes(src)) all.push(src);
+      };
+      const selectors = [
+        "[class*='animate_qrcode_container'] [class*='qrcode_img'][src^='data:image/png;base64,']",
+        "[class*='animate_qrcode'] [class*='qrcode_img'][src^='data:image/png;base64,']",
+        "img[aria-label='二维码'][src^='data:image/png;base64,']",
+        "[aria-label='二维码'] img[src^='data:image/png;base64,']",
+        "[class*='qrcode'] img[src^='data:image/png;base64,']",
+      ];
+      for (const selector of selectors) {
+        const nodeList = document.querySelectorAll(selector);
+        for (const el of nodeList) {
+          const src = el && el.getAttribute ? el.getAttribute("src") : "";
+          pushUnique(src);
+        }
+      }
+      return all;
+    })
+    .catch(() => []);
+  for (const item of domDataUrls) {
+    const ok = await saveDataUrlPng(item, screenshotPath, {
+      minBytes: 1500,
+      minSide: 180,
+      maxAspectDiff: 0.25,
+    }).catch(() => false);
+    if (ok) {
+      return true;
+    }
+  }
+
+  // 3) 再尝试从网络响应缓存中提取 dataURL。
+  const state = qrDataUrlStateByPage.get(page);
+  const candidates = (state?.dataUrls || []).slice().sort((a, b) => b.length - a.length);
+  for (const item of candidates) {
+    const ok = await saveDataUrlPng(item, screenshotPath, {
+      minBytes: 1500,
+      minSide: 180,
+      maxAspectDiff: 0.25,
+    }).catch(() => false);
+    if (ok) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function tryCaptureFaceQrFromDom(page, screenshotPath) {
+  const domDataUrls = await page
+    .evaluate(() => {
+      const urls = [];
+      const seen = new Set();
+      const imgs = Array.from(document.querySelectorAll("img[aria-label='二维码'][src^='data:image/png;base64,']"));
+      for (const img of imgs) {
+        let parent = img.parentElement;
+        let matched = false;
+        let depth = 0;
+        while (parent && depth < 10) {
+          if ((parent.textContent || "").includes("如何扫码")) {
+            matched = true;
+            break;
+          }
+          parent = parent.parentElement;
+          depth += 1;
+        }
+        if (!matched) continue;
+        const src = img.getAttribute("src") || "";
+        if (!src || src.length < 4000) continue;
+        if (seen.has(src)) continue;
+        seen.add(src);
+        urls.push(src);
+      }
+      return urls;
+    })
+    .catch(() => []);
+
+  for (const item of domDataUrls) {
+    const ok = await saveDataUrlPng(item, screenshotPath, {
+      minBytes: 1500,
+      minSide: 180,
+      maxAspectDiff: 0.25,
+    }).catch(() => false);
+    if (ok) return true;
+  }
+  return false;
 }
 
 function normalizeAccountName(name) {
@@ -223,27 +413,107 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
   const screenshotPath = path.join(paths.alertDir, `${timestamp}-login-qr.png`);
   await page.waitForTimeout(1500);
 
+  if (await tryCaptureQrFromDataUrl(page, screenshotPath)) {
+    console.log(`账号 [${accountName}] 已通过 dataURL 保存二维码: ${screenshotPath}`);
+    return screenshotPath;
+  }
+
+  const isBoxLikelyClipped = (box, viewport) => {
+    if (!box || !viewport) return true;
+    const margin = 3;
+    return (
+      box.x <= margin ||
+      box.y <= margin ||
+      box.x + box.width >= viewport.width - margin ||
+      box.y + box.height >= viewport.height - margin
+    );
+  };
+
+  const clipAroundBox = (box, viewport, pad = 60) => {
+    const x = Math.max(0, Math.floor(box.x - pad));
+    const y = Math.max(0, Math.floor(box.y - pad));
+    const width = Math.max(1, Math.min(Math.floor(box.width + pad * 2), viewport.width - x));
+    const height = Math.max(1, Math.min(Math.floor(box.height + pad * 2), viewport.height - y));
+    return { x, y, width, height };
+  };
+
+  const setPageZoom = async (zoom) => {
+    await page
+      .evaluate((z) => {
+        const zoomVal = String(z);
+        document.documentElement.style.zoom = zoomVal;
+        if (document.body) {
+          document.body.style.zoom = zoomVal;
+        }
+      }, zoom)
+      .catch(() => {});
+  };
+
+  const ensureWideViewport = async (minWidth = 1500, minHeight = 900) => {
+    const viewport = page.viewportSize() || BROWSER_VIEWPORT;
+    const nextViewport = {
+      width: Math.max(viewport.width, minWidth),
+      height: Math.max(viewport.height, minHeight),
+    };
+    if (nextViewport.width === viewport.width && nextViewport.height === viewport.height) {
+      return viewport;
+    }
+    await page.setViewportSize(nextViewport).catch(() => {});
+    await page.waitForTimeout(180);
+    return page.viewportSize() || nextViewport;
+  };
+
   const tryCaptureLocator = async (locator) => {
     const visible = await locator.isVisible({ timeout: 1200 }).catch(() => false);
     if (!visible) return false;
 
-    const box = await locator.boundingBox().catch(() => null);
+    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(120);
+
+    let viewport = page.viewportSize() || BROWSER_VIEWPORT;
+    let box = await locator.boundingBox().catch(() => null);
     if (!box) return false;
     if (box.width < 120 || box.height < 120) return false;
     const ratioDiff = Math.abs(box.width - box.height) / Math.max(box.width, box.height);
     if (ratioDiff > 0.4) return false;
 
-    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    // 某些窗口尺寸下二维码会贴着右边界，先缩放页面再重算位置，避免截图被裁掉。
+    if (isBoxLikelyClipped(box, viewport)) {
+      await setPageZoom(0.9);
+      await page.waitForTimeout(180);
+      box = await locator.boundingBox().catch(() => box);
+    }
+
+    if (!box || isBoxLikelyClipped(box, viewport)) {
+      viewport = await ensureWideViewport();
+      box = await locator.boundingBox().catch(() => box);
+    }
+
+    if (!box || isBoxLikelyClipped(box, viewport)) {
+      const fullPagePath = screenshotPath.replace(/-login-qr\.png$/, "-login-fullpage.png");
+      await page.screenshot({ path: fullPagePath, fullPage: true }).catch(() => {});
+      return false;
+    }
+
+    const clip = clipAroundBox(box, viewport, 70);
+    await page.screenshot({ path: screenshotPath, clip }).catch(() => {});
+    if (await fileExists(screenshotPath)) {
+      return true;
+    }
     await locator.screenshot({ path: screenshotPath }).catch(() => {});
     return fileExists(screenshotPath);
   };
 
   const qrSelectors = [
+    "[aria-label='二维码']",
+    "div:has-text('扫码登录') img[src*='qrcode']",
+    "div:has-text('扫码登录') canvas",
+    "[role='dialog'] img[src*='qrcode']",
+    "[role='dialog'] canvas",
     "img[src*='qrcode']",
     "img[alt*='二维码']",
     "[class*='qrcode'] img",
     "[class*='qrcode'] canvas",
-    "canvas",
   ];
 
   for (const selector of qrSelectors) {
@@ -257,17 +527,14 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
     }
   }
 
-  const viewport = page.viewportSize() || BROWSER_VIEWPORT;
-  const rightClip = {
-    x: Math.max(0, Math.floor(viewport.width * 0.52)),
-    y: 0,
-    width: Math.floor(viewport.width * 0.48),
-    height: viewport.height,
-  };
-  await page.screenshot({ path: screenshotPath, clip: rightClip }).catch(() => {});
-  if (await fileExists(screenshotPath)) {
-    console.log(`账号 [${accountName}] 已保存右侧登录区截图: ${screenshotPath}`);
-    return screenshotPath;
+  const loginTitle = page.getByText("扫码登录").first();
+  const loginTitleVisible = await loginTitle.isVisible({ timeout: 600 }).catch(() => false);
+  if (loginTitleVisible) {
+    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    if (await fileExists(screenshotPath)) {
+      console.log(`账号 [${accountName}] 已保存扫码登录全屏截图: ${screenshotPath}`);
+      return screenshotPath;
+    }
   }
 
   await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -299,7 +566,13 @@ async function captureFaceQrScreenshot(page, paths, accountName) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const screenshotPath = path.join(paths.alertDir, `${timestamp}-face-verify.png`);
 
+  if (await tryCaptureFaceQrFromDom(page, screenshotPath)) {
+    console.log(`账号 [${accountName}] 已通过 DOM 保存刷脸二维码: ${screenshotPath}`);
+    return screenshotPath;
+  }
+
   const qrCandidates = [
+    page.locator("img[aria-label='二维码']").first(),
     page.locator("div:has-text('手机刷脸验证') canvas").first(),
     page.locator("div:has-text('手机刷脸验证') img[src*='qrcode']").first(),
     page.locator("img[src*='qrcode']").first(),
@@ -316,18 +589,9 @@ async function captureFaceQrScreenshot(page, paths, accountName) {
     if (!box) continue;
     if (box.width < 120 || box.height < 120) continue;
 
-    const viewport = page.viewportSize() || BROWSER_VIEWPORT;
-    const pad = 120;
-    const clip = {
-      x: Math.max(0, Math.floor(box.x - pad)),
-      y: Math.max(0, Math.floor(box.y - pad)),
-      width: Math.min(Math.floor(box.width + pad * 2), viewport.width - Math.max(0, Math.floor(box.x - pad))),
-      height: Math.min(Math.floor(box.height + pad * 2), viewport.height - Math.max(0, Math.floor(box.y - pad))),
-    };
-
-    await page.screenshot({ path: screenshotPath, clip }).catch(() => {});
+    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
     if (await fileExists(screenshotPath)) {
-      console.log(`账号 [${accountName}] 已保存刷脸二维码截图: ${screenshotPath}`);
+      console.log(`账号 [${accountName}] 已保存刷脸验证全屏截图: ${screenshotPath}`);
       return screenshotPath;
     }
   }
@@ -658,6 +922,7 @@ async function runOneAccount(browser, accountName, command, options = {}) {
 
   try {
     const page = await context.newPage();
+    attachQrDataUrlSniffer(page);
     console.log(`\n========== 开始处理账号: ${accountName} (${command}) ==========`);
     await openTargetAndEnsureLogin(page, paths, accountName, {
       hasStoredAuth,
