@@ -6,7 +6,8 @@ require("dotenv").config();
 const { chromium } = require("playwright");
 const nodemailer = require("nodemailer");
 
-const TARGET_URL = "https://creator.douyin.com/creator-micro/data-center/content";
+const TARGET_URL =
+  "https://creator.douyin.com/creator-micro/data-center/content";
 const ACCOUNTS_DIR = path.resolve(process.cwd(), "accounts");
 const DEFAULT_ALERT_TO = "2895845213@qq.com";
 const BROWSER_VIEWPORT = { width: 1600, height: 1000 };
@@ -19,8 +20,14 @@ function numberFromEnv(name, defaultValue) {
   return val;
 }
 
-const LOGIN_WAIT_TIMEOUT_MS = numberFromEnv("LOGIN_WAIT_TIMEOUT_MS", 15 * 60 * 1000);
-const LOGIN_REMIND_INTERVAL_MS = numberFromEnv("LOGIN_REMIND_INTERVAL_MS", 60 * 1000);
+const LOGIN_WAIT_TIMEOUT_MS = numberFromEnv(
+  "LOGIN_WAIT_TIMEOUT_MS",
+  15 * 60 * 1000
+);
+const LOGIN_REMIND_INTERVAL_MS = numberFromEnv(
+  "LOGIN_REMIND_INTERVAL_MS",
+  60 * 1000
+);
 const qrDataUrlStateByPage = new WeakMap();
 
 async function ensureDir(dir) {
@@ -50,7 +57,12 @@ function readPngSize(buffer) {
   if (chunkType !== "IHDR") return null;
   const width = buffer.readUInt32BE(16);
   const height = buffer.readUInt32BE(20);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
     return null;
   }
   return { width, height };
@@ -69,7 +81,8 @@ async function saveDataUrlPng(dataUrl, savePath, options = {}) {
   const size = readPngSize(buf);
   if (!size) return false;
   if (size.width < minSide || size.height < minSide) return false;
-  const aspectDiff = Math.abs(size.width - size.height) / Math.max(size.width, size.height);
+  const aspectDiff =
+    Math.abs(size.width - size.height) / Math.max(size.width, size.height);
   if (aspectDiff > maxAspectDiff) return false;
   await fs.writeFile(savePath, buf);
   return true;
@@ -125,7 +138,7 @@ async function tryCaptureQrFromDataUrl(page, screenshotPath) {
     await saveDataUrlPng(ariaQrSrc, screenshotPath, {
       minBytes: 1500,
       minSide: 180,
-      maxAspectDiff: 0.25,
+      maxAspectDiff: 0.25
     }).catch(() => false)
   ) {
     return true;
@@ -146,7 +159,7 @@ async function tryCaptureQrFromDataUrl(page, screenshotPath) {
         "[class*='animate_qrcode'] [class*='qrcode_img'][src^='data:image/png;base64,']",
         "img[aria-label='二维码'][src^='data:image/png;base64,']",
         "[aria-label='二维码'] img[src^='data:image/png;base64,']",
-        "[class*='qrcode'] img[src^='data:image/png;base64,']",
+        "[class*='qrcode'] img[src^='data:image/png;base64,']"
       ];
       for (const selector of selectors) {
         const nodeList = document.querySelectorAll(selector);
@@ -162,7 +175,7 @@ async function tryCaptureQrFromDataUrl(page, screenshotPath) {
     const ok = await saveDataUrlPng(item, screenshotPath, {
       minBytes: 1500,
       minSide: 180,
-      maxAspectDiff: 0.25,
+      maxAspectDiff: 0.25
     }).catch(() => false);
     if (ok) {
       return true;
@@ -171,12 +184,14 @@ async function tryCaptureQrFromDataUrl(page, screenshotPath) {
 
   // 3) 再尝试从网络响应缓存中提取 dataURL。
   const state = qrDataUrlStateByPage.get(page);
-  const candidates = (state?.dataUrls || []).slice().sort((a, b) => b.length - a.length);
+  const candidates = (state?.dataUrls || [])
+    .slice()
+    .sort((a, b) => b.length - a.length);
   for (const item of candidates) {
     const ok = await saveDataUrlPng(item, screenshotPath, {
       minBytes: 1500,
       minSide: 180,
-      maxAspectDiff: 0.25,
+      maxAspectDiff: 0.25
     }).catch(() => false);
     if (ok) {
       return true;
@@ -190,7 +205,11 @@ async function tryCaptureFaceQrFromDom(page, screenshotPath) {
     .evaluate(() => {
       const urls = [];
       const seen = new Set();
-      const imgs = Array.from(document.querySelectorAll("img[aria-label='二维码'][src^='data:image/png;base64,']"));
+      const imgs = Array.from(
+        document.querySelectorAll(
+          "img[aria-label='二维码'][src^='data:image/png;base64,']"
+        )
+      );
       for (const img of imgs) {
         const parent = img.parentElement;
         const container = parent?.parentElement;
@@ -221,7 +240,7 @@ async function tryCaptureFaceQrFromDom(page, screenshotPath) {
     const ok = await saveDataUrlPng(item, screenshotPath, {
       minBytes: 1500,
       minSide: 180,
-      maxAspectDiff: 0.25,
+      maxAspectDiff: 0.25
     }).catch(() => false);
     if (ok) return true;
   }
@@ -239,7 +258,7 @@ function getAccountPaths(accountName) {
     storageStatePath: path.join(accountDir, "storageState.json"),
     cookiesPath: path.join(accountDir, "cookies.json"),
     dataDir: path.join(accountDir, "data"),
-    alertDir: path.join(accountDir, "alerts"),
+    alertDir: path.join(accountDir, "alerts")
   };
 }
 
@@ -251,20 +270,54 @@ async function promptInput(question) {
 }
 
 async function isLoggedInAtTarget(page) {
-  const inTargetPage = page.url().includes("/creator-micro/data-center/content");
-  const hasPostListTab = await page.locator("text=投稿列表").first().isVisible({ timeout: 1500 }).catch(() => false);
+  const inTargetPage = page
+    .url()
+    .includes("/creator-micro/data-center/content");
+  const hasPostListTab = await page
+    .locator("text=投稿列表")
+    .first()
+    .isVisible({ timeout: 1500 })
+    .catch(() => false);
   return inTargetPage && hasPostListTab;
+}
+
+async function isVerificationUiVisible(page) {
+  const checks = [
+    page.locator("text=扫码登录").first(),
+    page.locator("text=身份验证").first(),
+    page.locator("text=手机刷脸验证").first(),
+    page.locator("text=发送短信验证").first()
+  ];
+  for (const locator of checks) {
+    if (await locator.isVisible({ timeout: 400 }).catch(() => false)) {
+      return true;
+    }
+  }
+  if (await hasVisibleQr(page).catch(() => false)) {
+    return true;
+  }
+  return false;
+}
+
+async function shouldRetryTargetAfterLogin(page) {
+  const url = page.url() || "";
+  if (!url.includes("creator.douyin.com")) return false;
+  if (url.includes("/creator-micro/data-center/content")) return false;
+  if (await isVerificationUiVisible(page)) return false;
+  return true;
 }
 
 function getMailConfig() {
   const host = process.env.SMTP_HOST || "smtp.qq.com";
   const port = Number(process.env.SMTP_PORT || 465);
-  const secure = String(process.env.SMTP_SECURE || "true").toLowerCase() !== "false";
+  const secure =
+    String(process.env.SMTP_SECURE || "true").toLowerCase() !== "false";
   const user = process.env.ALERT_EMAIL_USER || process.env.SMTP_USER || "";
   const pass = process.env.ALERT_EMAIL_PASS || process.env.SMTP_PASS || "";
   const from = process.env.ALERT_EMAIL_FROM || user;
   const to = process.env.ALERT_EMAIL_TO || DEFAULT_ALERT_TO;
-  const enabled = String(process.env.ALERT_EMAIL_ENABLED || "true").toLowerCase() !== "false";
+  const enabled =
+    String(process.env.ALERT_EMAIL_ENABLED || "true").toLowerCase() !== "false";
   return { enabled, host, port, secure, user, pass, from, to };
 }
 
@@ -276,7 +329,9 @@ async function sendAlertEmail({ accountName, screenshotPath, reason }) {
   }
 
   if (!cfg.user || !cfg.pass || !cfg.from || !cfg.to) {
-    console.log("邮件配置不完整，跳过发送。请设置 ALERT_EMAIL_USER / ALERT_EMAIL_PASS / ALERT_EMAIL_FROM / ALERT_EMAIL_TO。");
+    console.log(
+      "邮件配置不完整，跳过发送。请设置 ALERT_EMAIL_USER / ALERT_EMAIL_PASS / ALERT_EMAIL_FROM / ALERT_EMAIL_TO。"
+    );
     return;
   }
 
@@ -286,8 +341,8 @@ async function sendAlertEmail({ accountName, screenshotPath, reason }) {
     secure: cfg.secure,
     auth: {
       user: cfg.user,
-      pass: cfg.pass,
-    },
+      pass: cfg.pass
+    }
   });
 
   const subject = `[抖音导出告警] 账号${accountName}需要重新扫码登录`;
@@ -308,14 +363,20 @@ async function sendAlertEmail({ accountName, screenshotPath, reason }) {
     attachments: [
       {
         filename: path.basename(screenshotPath),
-        path: screenshotPath,
-      },
-    ],
+        path: screenshotPath
+      }
+    ]
   });
   console.log(`账号 [${accountName}] 已发送扫码提醒邮件到: ${cfg.to}`);
 }
 
-async function sendSmsVerifyEmail({ accountName, screenshotPath, maskedPhone, smsContent, smsTarget }) {
+async function sendSmsVerifyEmail({
+  accountName,
+  screenshotPath,
+  maskedPhone,
+  smsContent,
+  smsTarget
+}) {
   const cfg = getMailConfig();
   if (!cfg.enabled) {
     console.log("邮件告警已关闭，跳过发送。");
@@ -332,8 +393,8 @@ async function sendSmsVerifyEmail({ accountName, screenshotPath, maskedPhone, sm
     secure: cfg.secure,
     auth: {
       user: cfg.user,
-      pass: cfg.pass,
-    },
+      pass: cfg.pass
+    }
   });
 
   const subject = `[抖音短信验证] 账号${accountName}需要发送验证短信`;
@@ -356,9 +417,9 @@ async function sendSmsVerifyEmail({ accountName, screenshotPath, maskedPhone, sm
     attachments: [
       {
         filename: path.basename(screenshotPath),
-        path: screenshotPath,
-      },
-    ],
+        path: screenshotPath
+      }
+    ]
   });
   console.log(`账号 [${accountName}] 已发送短信验证提醒邮件到: ${cfg.to}`);
 }
@@ -380,8 +441,8 @@ async function sendFaceVerifyEmail({ accountName, screenshotPath, reason }) {
     secure: cfg.secure,
     auth: {
       user: cfg.user,
-      pass: cfg.pass,
-    },
+      pass: cfg.pass
+    }
   });
 
   const subject = `[抖音刷脸验证] 账号${accountName}需要手机刷脸扫码`;
@@ -403,9 +464,9 @@ async function sendFaceVerifyEmail({ accountName, screenshotPath, reason }) {
     attachments: [
       {
         filename: path.basename(screenshotPath),
-        path: screenshotPath,
-      },
-    ],
+        path: screenshotPath
+      }
+    ]
   });
   console.log(`账号 [${accountName}] 已发送刷脸验证提醒邮件到: ${cfg.to}`);
 }
@@ -417,7 +478,9 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
   await page.waitForTimeout(1500);
 
   if (await tryCaptureQrFromDataUrl(page, screenshotPath)) {
-    console.log(`账号 [${accountName}] 已通过 dataURL 保存二维码: ${screenshotPath}`);
+    console.log(
+      `账号 [${accountName}] 已通过 dataURL 保存二维码: ${screenshotPath}`
+    );
     return screenshotPath;
   }
 
@@ -435,8 +498,14 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
   const clipAroundBox = (box, viewport, pad = 60) => {
     const x = Math.max(0, Math.floor(box.x - pad));
     const y = Math.max(0, Math.floor(box.y - pad));
-    const width = Math.max(1, Math.min(Math.floor(box.width + pad * 2), viewport.width - x));
-    const height = Math.max(1, Math.min(Math.floor(box.height + pad * 2), viewport.height - y));
+    const width = Math.max(
+      1,
+      Math.min(Math.floor(box.width + pad * 2), viewport.width - x)
+    );
+    const height = Math.max(
+      1,
+      Math.min(Math.floor(box.height + pad * 2), viewport.height - y)
+    );
     return { x, y, width, height };
   };
 
@@ -456,9 +525,12 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
     const viewport = page.viewportSize() || BROWSER_VIEWPORT;
     const nextViewport = {
       width: Math.max(viewport.width, minWidth),
-      height: Math.max(viewport.height, minHeight),
+      height: Math.max(viewport.height, minHeight)
     };
-    if (nextViewport.width === viewport.width && nextViewport.height === viewport.height) {
+    if (
+      nextViewport.width === viewport.width &&
+      nextViewport.height === viewport.height
+    ) {
       return viewport;
     }
     await page.setViewportSize(nextViewport).catch(() => {});
@@ -467,7 +539,9 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
   };
 
   const tryCaptureLocator = async (locator) => {
-    const visible = await locator.isVisible({ timeout: 1200 }).catch(() => false);
+    const visible = await locator
+      .isVisible({ timeout: 1200 })
+      .catch(() => false);
     if (!visible) return false;
 
     await locator.scrollIntoViewIfNeeded().catch(() => {});
@@ -477,7 +551,8 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
     let box = await locator.boundingBox().catch(() => null);
     if (!box) return false;
     if (box.width < 120 || box.height < 120) return false;
-    const ratioDiff = Math.abs(box.width - box.height) / Math.max(box.width, box.height);
+    const ratioDiff =
+      Math.abs(box.width - box.height) / Math.max(box.width, box.height);
     if (ratioDiff > 0.4) return false;
 
     // 某些窗口尺寸下二维码会贴着右边界，先缩放页面再重算位置，避免截图被裁掉。
@@ -493,8 +568,13 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
     }
 
     if (!box || isBoxLikelyClipped(box, viewport)) {
-      const fullPagePath = screenshotPath.replace(/-login-qr\.png$/, "-login-fullpage.png");
-      await page.screenshot({ path: fullPagePath, fullPage: true }).catch(() => {});
+      const fullPagePath = screenshotPath.replace(
+        /-login-qr\.png$/,
+        "-login-fullpage.png"
+      );
+      await page
+        .screenshot({ path: fullPagePath, fullPage: true })
+        .catch(() => {});
       return false;
     }
 
@@ -516,7 +596,7 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
     "img[src*='qrcode']",
     "img[alt*='二维码']",
     "[class*='qrcode'] img",
-    "[class*='qrcode'] canvas",
+    "[class*='qrcode'] canvas"
   ];
 
   for (const selector of qrSelectors) {
@@ -524,18 +604,26 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
     const count = Math.min(await locator.count().catch(() => 0), 6);
     for (let i = 0; i < count; i += 1) {
       if (await tryCaptureLocator(locator.nth(i))) {
-        console.log(`账号 [${accountName}] 已保存二维码截图: ${screenshotPath}`);
+        console.log(
+          `账号 [${accountName}] 已保存二维码截图: ${screenshotPath}`
+        );
         return screenshotPath;
       }
     }
   }
 
   const loginTitle = page.getByText("扫码登录").first();
-  const loginTitleVisible = await loginTitle.isVisible({ timeout: 600 }).catch(() => false);
+  const loginTitleVisible = await loginTitle
+    .isVisible({ timeout: 600 })
+    .catch(() => false);
   if (loginTitleVisible) {
-    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    await page
+      .screenshot({ path: screenshotPath, fullPage: true })
+      .catch(() => {});
     if (await fileExists(screenshotPath)) {
-      console.log(`账号 [${accountName}] 已保存扫码登录全屏截图: ${screenshotPath}`);
+      console.log(
+        `账号 [${accountName}] 已保存扫码登录全屏截图: ${screenshotPath}`
+      );
       return screenshotPath;
     }
   }
@@ -552,14 +640,21 @@ const loginStageHintByAccount = new Map();
 
 async function captureVerifyDialogScreenshot(page, paths, accountName, suffix) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const screenshotPath = path.join(paths.alertDir, `${timestamp}-${suffix}.png`);
+  const screenshotPath = path.join(
+    paths.alertDir,
+    `${timestamp}-${suffix}.png`
+  );
   const dialog = page.locator("[role='dialog']").last();
-  const dialogVisible = await dialog.isVisible({ timeout: 800 }).catch(() => false);
+  const dialogVisible = await dialog
+    .isVisible({ timeout: 800 })
+    .catch(() => false);
   if (dialogVisible) {
     await dialog.screenshot({ path: screenshotPath }).catch(() => {});
   }
   if (!(await fileExists(screenshotPath))) {
-    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    await page
+      .screenshot({ path: screenshotPath, fullPage: true })
+      .catch(() => {});
   }
   console.log(`账号 [${accountName}] 已保存验证截图: ${screenshotPath}`);
   return screenshotPath;
@@ -568,23 +663,36 @@ async function captureVerifyDialogScreenshot(page, paths, accountName, suffix) {
 async function captureFaceQrScreenshot(page, paths, accountName) {
   await ensureDir(paths.alertDir);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const screenshotPath = path.join(paths.alertDir, `${timestamp}-face-verify.png`);
+  const screenshotPath = path.join(
+    paths.alertDir,
+    `${timestamp}-face-verify.png`
+  );
 
   if (await tryCaptureFaceQrFromDom(page, screenshotPath)) {
-    console.log(`账号 [${accountName}] 已通过 DOM 保存刷脸二维码: ${screenshotPath}`);
+    console.log(
+      `账号 [${accountName}] 已通过 DOM 保存刷脸二维码: ${screenshotPath}`
+    );
     return screenshotPath;
   }
 
   const clipAroundBox = (box, viewport, pad = 14) => {
     const x = Math.max(0, Math.floor(box.x - pad));
     const y = Math.max(0, Math.floor(box.y - pad));
-    const width = Math.max(1, Math.min(Math.ceil(box.width + pad * 2), viewport.width - x));
-    const height = Math.max(1, Math.min(Math.ceil(box.height + pad * 2), viewport.height - y));
+    const width = Math.max(
+      1,
+      Math.min(Math.ceil(box.width + pad * 2), viewport.width - x)
+    );
+    const height = Math.max(
+      1,
+      Math.min(Math.ceil(box.height + pad * 2), viewport.height - y)
+    );
     return { x, y, width, height };
   };
 
   const tryCaptureLocator = async (locator) => {
-    const visible = await locator.isVisible({ timeout: 800 }).catch(() => false);
+    const visible = await locator
+      .isVisible({ timeout: 800 })
+      .catch(() => false);
     if (!visible) return false;
 
     await locator.scrollIntoViewIfNeeded().catch(() => {});
@@ -594,7 +702,8 @@ async function captureFaceQrScreenshot(page, paths, accountName) {
     if (!box) return false;
     if (box.width < 100 || box.height < 100) return false;
 
-    const ratioDiff = Math.abs(box.width - box.height) / Math.max(box.width, box.height);
+    const ratioDiff =
+      Math.abs(box.width - box.height) / Math.max(box.width, box.height);
     if (ratioDiff > 0.3) return false;
 
     const viewport = page.viewportSize() || BROWSER_VIEWPORT;
@@ -617,7 +726,7 @@ async function captureFaceQrScreenshot(page, paths, accountName) {
     "img[src*='qrcode']",
     "[class*='qrcode'] img",
     "[class*='qrcode'] canvas",
-    "canvas",
+    "canvas"
   ];
 
   for (const selector of qrSelectors) {
@@ -625,18 +734,27 @@ async function captureFaceQrScreenshot(page, paths, accountName) {
     const count = Math.min(await locator.count().catch(() => 0), 4);
     for (let i = 0; i < count; i += 1) {
       if (await tryCaptureLocator(locator.nth(i))) {
-        console.log(`账号 [${accountName}] 已保存刷脸二维码截图: ${screenshotPath}`);
+        console.log(
+          `账号 [${accountName}] 已保存刷脸二维码截图: ${screenshotPath}`
+        );
         return screenshotPath;
       }
     }
   }
 
-  const faceDialog = page.locator("[role='dialog']").filter({ hasText: "手机刷脸验证" }).last();
-  const dialogVisible = await faceDialog.isVisible({ timeout: 600 }).catch(() => false);
+  const faceDialog = page
+    .locator("[role='dialog']")
+    .filter({ hasText: "手机刷脸验证" })
+    .last();
+  const dialogVisible = await faceDialog
+    .isVisible({ timeout: 600 })
+    .catch(() => false);
   if (dialogVisible) {
     await faceDialog.screenshot({ path: screenshotPath }).catch(() => {});
     if (await fileExists(screenshotPath)) {
-      console.log(`账号 [${accountName}] 已保存刷脸验证弹窗截图: ${screenshotPath}`);
+      console.log(
+        `账号 [${accountName}] 已保存刷脸验证弹窗截图: ${screenshotPath}`
+      );
       return screenshotPath;
     }
   }
@@ -650,10 +768,14 @@ async function hasVisibleQr(page) {
     "img[alt*='二维码']",
     "[class*='qrcode'] img",
     "[class*='qrcode'] canvas",
-    "canvas",
+    "canvas"
   ];
   for (const selector of qrSelectors) {
-    const visible = await page.locator(selector).first().isVisible({ timeout: 500 }).catch(() => false);
+    const visible = await page
+      .locator(selector)
+      .first()
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
     if (visible) {
       return true;
     }
@@ -662,17 +784,27 @@ async function hasVisibleQr(page) {
 }
 
 async function handleFaceVerificationIfPresent(page, paths, accountName) {
-  const identityVisible = await page.locator("text=身份验证").first().isVisible({ timeout: 800 }).catch(() => false);
+  const identityVisible = await page
+    .locator("text=身份验证")
+    .first()
+    .isVisible({ timeout: 800 })
+    .catch(() => false);
   if (identityVisible) {
     const faceEntry = page.getByText("手机刷脸验证").first();
-    const faceEntryVisible = await faceEntry.isVisible({ timeout: 600 }).catch(() => false);
+    const faceEntryVisible = await faceEntry
+      .isVisible({ timeout: 600 })
+      .catch(() => false);
     if (faceEntryVisible) {
       await faceEntry.click().catch(() => {});
       await page.waitForTimeout(600);
     }
   }
 
-  const faceTitleVisible = await page.locator("text=手机刷脸验证").first().isVisible({ timeout: 800 }).catch(() => false);
+  const faceTitleVisible = await page
+    .locator("text=手机刷脸验证")
+    .first()
+    .isVisible({ timeout: 800 })
+    .catch(() => false);
   if (!faceTitleVisible) {
     return false;
   }
@@ -687,29 +819,48 @@ async function handleFaceVerificationIfPresent(page, paths, accountName) {
     return true;
   }
 
-  const screenshotPath = await captureFaceQrScreenshot(page, paths, accountName);
+  const screenshotPath = await captureFaceQrScreenshot(
+    page,
+    paths,
+    accountName
+  );
   await sendFaceVerifyEmail({
     accountName,
     screenshotPath,
-    reason: "检测到手机刷脸验证弹窗",
+    reason: "检测到手机刷脸验证弹窗"
   }).catch((error) => {
-    console.error(`账号 [${accountName}] 发送刷脸验证邮件失败:`, error.message || error);
+    console.error(
+      `账号 [${accountName}] 发送刷脸验证邮件失败:`,
+      error.message || error
+    );
   });
   faceNotifySentByAccount.add(accountName);
   return true;
 }
 
-async function resendLoginReminderByStage(page, paths, accountName, baseReason) {
+async function resendLoginReminderByStage(
+  page,
+  paths,
+  accountName,
+  baseReason
+) {
   const stageHint = loginStageHintByAccount.get(accountName) || "";
 
   if (stageHint.includes("手机刷脸验证")) {
-    const screenshotPath = await captureFaceQrScreenshot(page, paths, accountName);
+    const screenshotPath = await captureFaceQrScreenshot(
+      page,
+      paths,
+      accountName
+    );
     await sendFaceVerifyEmail({
       accountName,
       screenshotPath,
-      reason: `${baseReason}（刷脸二维码可能过期，定时重发）`,
+      reason: `${baseReason}（刷脸二维码可能过期，定时重发）`
     }).catch((error) => {
-      console.error(`账号 [${accountName}] 刷脸重发邮件失败:`, error.message || error);
+      console.error(
+        `账号 [${accountName}] 刷脸重发邮件失败:`,
+        error.message || error
+      );
     });
     return;
   }
@@ -721,35 +872,61 @@ async function resendLoginReminderByStage(page, paths, accountName, baseReason) 
 }
 
 async function handleSmsVerificationIfPresent(page, paths, accountName) {
-  const smsTitleVisible = await page.locator("text=发送短信验证").first().isVisible({ timeout: 800 }).catch(() => false);
-  const identityVisible = await page.locator("text=身份验证").first().isVisible({ timeout: 800 }).catch(() => false);
+  const smsTitleVisible = await page
+    .locator("text=发送短信验证")
+    .first()
+    .isVisible({ timeout: 800 })
+    .catch(() => false);
+  const identityVisible = await page
+    .locator("text=身份验证")
+    .first()
+    .isVisible({ timeout: 800 })
+    .catch(() => false);
   if (!smsTitleVisible && !identityVisible) {
     return false;
   }
 
   if (identityVisible && !smsTitleVisible) {
-    const hasFaceEntry = await page.getByText("手机刷脸验证").first().isVisible({ timeout: 400 }).catch(() => false);
+    const hasFaceEntry = await page
+      .getByText("手机刷脸验证")
+      .first()
+      .isVisible({ timeout: 400 })
+      .catch(() => false);
     if (hasFaceEntry) {
       return false;
     }
 
     const smsEntry = page.getByText("发送短信验证").first();
-    const entryVisible = await smsEntry.isVisible({ timeout: 500 }).catch(() => false);
+    const entryVisible = await smsEntry
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
     if (entryVisible) {
       await smsEntry.click().catch(() => {});
       await page.waitForTimeout(600);
     }
   }
 
-  const panelVisible = await page.locator("text=发送短信验证").first().isVisible({ timeout: 1000 }).catch(() => false);
+  const panelVisible = await page
+    .locator("text=发送短信验证")
+    .first()
+    .isVisible({ timeout: 1000 })
+    .catch(() => false);
   if (!panelVisible) {
     return false;
   }
 
   loginStageHintByAccount.set(accountName, "当前处于短信验证阶段");
-  const screenshotPath = await captureVerifyDialogScreenshot(page, paths, accountName, "sms-verify");
+  const screenshotPath = await captureVerifyDialogScreenshot(
+    page,
+    paths,
+    accountName,
+    "sms-verify"
+  );
 
-  const bodyText = await page.locator("body").innerText().catch(() => "");
+  const bodyText = await page
+    .locator("body")
+    .innerText()
+    .catch(() => "");
   const phoneMatch = bodyText.match(/请使用手机号\s*([0-9*]+)\s*发送短信验证/);
   const smsContentMatch = bodyText.match(/编辑短信内容[:：]\s*([A-Za-z0-9]+)/);
   const smsTargetMatch = bodyText.match(/发送至[:：]\s*([0-9]+)/);
@@ -768,9 +945,12 @@ async function handleSmsVerificationIfPresent(page, paths, accountName) {
     screenshotPath,
     maskedPhone,
     smsContent,
-    smsTarget,
+    smsTarget
   }).catch((error) => {
-    console.error(`账号 [${accountName}] 发送短信验证邮件失败:`, error.message || error);
+    console.error(
+      `账号 [${accountName}] 发送短信验证邮件失败:`,
+      error.message || error
+    );
   });
 
   smsNotifySentByAccount.add(notifyKey);
@@ -778,7 +958,12 @@ async function handleSmsVerificationIfPresent(page, paths, accountName) {
 }
 
 async function clickIfVisible(locator, timeout = 3500) {
-  if (await locator.first().isVisible({ timeout }).catch(() => false)) {
+  if (
+    await locator
+      .first()
+      .isVisible({ timeout })
+      .catch(() => false)
+  ) {
     await locator.first().click();
     return true;
   }
@@ -786,10 +971,19 @@ async function clickIfVisible(locator, timeout = 3500) {
 }
 
 async function notifyLoginRequired(page, paths, accountName, reason) {
-  const screenshotPath = await captureLoginQrScreenshot(page, paths, accountName);
-  await sendAlertEmail({ accountName, screenshotPath, reason }).catch((error) => {
-    console.error(`账号 [${accountName}] 邮件发送失败:`, error.message || error);
-  });
+  const screenshotPath = await captureLoginQrScreenshot(
+    page,
+    paths,
+    accountName
+  );
+  await sendAlertEmail({ accountName, screenshotPath, reason }).catch(
+    (error) => {
+      console.error(
+        `账号 [${accountName}] 邮件发送失败:`,
+        error.message || error
+      );
+    }
+  );
 }
 
 async function waitForManualLoginFlow(
@@ -803,6 +997,7 @@ async function waitForManualLoginFlow(
   console.log(`账号 [${accountName}] 等待手动完成登录（扫码 + 验证）。`);
   const start = Date.now();
   let lastNotifyAt = Date.now();
+  let lastRetryToTargetAt = 0;
   while (Date.now() - start < timeoutMs) {
     if (await isLoggedInAtTarget(page)) {
       return;
@@ -811,6 +1006,24 @@ async function waitForManualLoginFlow(
     await handleFaceVerificationIfPresent(page, paths, accountName);
     await handleSmsVerificationIfPresent(page, paths, accountName);
 
+    if (await shouldRetryTargetAfterLogin(page)) {
+      const now = Date.now();
+      if (now - lastRetryToTargetAt >= 2500) {
+        lastRetryToTargetAt = now;
+        console.log(
+          `账号 [${accountName}] 检测到验证流程已结束，尝试重新进入目标导出页。`
+        );
+        await page
+          .goto(TARGET_URL, { waitUntil: "domcontentloaded" })
+          .catch(() => {});
+        await page.waitForLoadState("networkidle").catch(() => {});
+        await page.waitForTimeout(800);
+        if (await isLoggedInAtTarget(page)) {
+          return;
+        }
+      }
+    }
+
     if (Date.now() - lastNotifyAt >= resendEveryMs) {
       console.log(`账号 [${accountName}] 仍未登录，重新截图并发送提醒邮件。`);
       await resendLoginReminderByStage(page, paths, accountName, reason);
@@ -818,7 +1031,9 @@ async function waitForManualLoginFlow(
     }
     await page.waitForTimeout(1200);
   }
-  throw new Error(`账号 [${accountName}] 等待登录超时（${Math.floor(timeoutMs / 60000)} 分钟）。`);
+  throw new Error(
+    `账号 [${accountName}] 等待登录超时（${Math.floor(timeoutMs / 60000)} 分钟）。`
+  );
 }
 
 async function openTargetAndEnsureLogin(page, paths, accountName, options) {
@@ -828,7 +1043,9 @@ async function openTargetAndEnsureLogin(page, paths, accountName, options) {
   await page.waitForTimeout(1200);
 
   if (forceManualLogin) {
-    console.log(`账号 [${accountName}] 当前无有效登录态，需手动扫码并完成验证。`);
+    console.log(
+      `账号 [${accountName}] 当前无有效登录态，需手动扫码并完成验证。`
+    );
     const reason = manualLoginReason || "需要手动登录目标账号";
     await notifyLoginRequired(page, paths, accountName, reason);
     await waitForManualLoginFlow(page, paths, accountName, reason);
@@ -843,7 +1060,9 @@ async function openTargetAndEnsureLogin(page, paths, accountName, options) {
     return;
   }
 
-  const reason = hasStoredAuth ? "cookies/storageState 失效或已过期" : "本地 cookies/storageState 不存在";
+  const reason = hasStoredAuth
+    ? "cookies/storageState 失效或已过期"
+    : "本地 cookies/storageState 不存在";
   await notifyLoginRequired(page, paths, accountName, reason);
   await waitForManualLoginFlow(page, paths, accountName, reason);
   await page.goto(TARGET_URL, { waitUntil: "domcontentloaded" });
@@ -854,7 +1073,11 @@ async function openTargetAndEnsureLogin(page, paths, accountName, options) {
 async function saveAuth(context, paths, accountName) {
   const cookies = await context.cookies();
   await context.storageState({ path: paths.storageStatePath });
-  await fs.writeFile(paths.cookiesPath, JSON.stringify(cookies, null, 2), "utf-8");
+  await fs.writeFile(
+    paths.cookiesPath,
+    JSON.stringify(cookies, null, 2),
+    "utf-8"
+  );
   console.log(`账号 [${accountName}] 登录态已保存:`);
   console.log(`- storageState: ${paths.storageStatePath}`);
   console.log(`- cookies: ${paths.cookiesPath}`);
@@ -873,7 +1096,9 @@ async function exportPostListData(page, paths, accountName) {
   await page.waitForTimeout(800);
 
   let exportBtn = page.getByRole("button", { name: /导出/ }).first();
-  const roleBtnVisible = await exportBtn.isVisible({ timeout: 2500 }).catch(() => false);
+  const roleBtnVisible = await exportBtn
+    .isVisible({ timeout: 2500 })
+    .catch(() => false);
   if (!roleBtnVisible) {
     exportBtn = page.locator("button:has-text('导出数据')").first();
   }
@@ -886,7 +1111,8 @@ async function exportPostListData(page, paths, accountName) {
   await exportBtn.click();
   const download = await downloadPromise;
 
-  const rawName = download.suggestedFilename() || `douyin-content-${Date.now()}.xlsx`;
+  const rawName =
+    download.suggestedFilename() || `douyin-content-${Date.now()}.xlsx`;
   const safeName = rawName.replace(/[\\/:*?"<>|]/g, "_");
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const savePath = path.join(paths.dataDir, `${timestamp}-${safeName}`);
@@ -899,14 +1125,19 @@ async function exportPostListData(page, paths, accountName) {
 async function listAccountDirs() {
   await ensureDir(ACCOUNTS_DIR);
   const entries = await fs.readdir(ACCOUNTS_DIR, { withFileTypes: true });
-  return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
 }
 
 function parseCliCommand() {
   const args = process.argv.slice(2);
   const command = (args[0] || "export").toLowerCase();
   if (!["add", "export", "list"].includes(command)) {
-    throw new Error("只支持三种命令: add / export / list。示例: npm run add -- 账号A / npm run export / npm run list");
+    throw new Error(
+      "只支持三种命令: add / export / list。示例: npm run add -- 账号A / npm run export / npm run list"
+    );
   }
   const accountName = normalizeAccountName(args.slice(1).join(" ").trim());
   return { command, accountName };
@@ -920,7 +1151,9 @@ async function resolveAccountsToRun(command, accountNameFromArg) {
   if (command === "add") {
     let accountName = accountNameFromArg;
     if (!accountName) {
-      accountName = normalizeAccountName(await promptInput("请输入新增账号标识: "));
+      accountName = normalizeAccountName(
+        await promptInput("请输入新增账号标识: ")
+      );
     }
     if (!accountName) {
       throw new Error("add 模式必须提供账号标识。示例: npm run add -- 账号A");
@@ -929,7 +1162,9 @@ async function resolveAccountsToRun(command, accountNameFromArg) {
   }
 
   if (existingAccounts.length === 0) {
-    throw new Error("export 模式未发现账号目录。请先执行 add 命令完成扫码登录。");
+    throw new Error(
+      "export 模式未发现账号目录。请先执行 add 命令完成扫码登录。"
+    );
   }
   return existingAccounts;
 }
@@ -955,24 +1190,32 @@ async function runOneAccount(browser, accountName, command, options = {}) {
   await ensureDir(paths.dataDir);
   await ensureDir(paths.alertDir);
   const hasStoredAuth = await fileExists(paths.storageStatePath);
-  const useStoredAuth = typeof options.useStoredAuth === "boolean" ? options.useStoredAuth : command === "export" && hasStoredAuth;
-  const forceManualLogin = typeof options.forceManualLogin === "boolean" ? options.forceManualLogin : command === "add";
+  const useStoredAuth =
+    typeof options.useStoredAuth === "boolean"
+      ? options.useStoredAuth
+      : command === "export" && hasStoredAuth;
+  const forceManualLogin =
+    typeof options.forceManualLogin === "boolean"
+      ? options.forceManualLogin
+      : command === "add";
   const manualLoginReason = options.manualLoginReason;
 
   const context = await browser.newContext({
     viewport: BROWSER_VIEWPORT,
     acceptDownloads: true,
-    storageState: useStoredAuth ? paths.storageStatePath : undefined,
+    storageState: useStoredAuth ? paths.storageStatePath : undefined
   });
 
   try {
     const page = await context.newPage();
     attachQrDataUrlSniffer(page);
-    console.log(`\n========== 开始处理账号: ${accountName} (${command}) ==========`);
+    console.log(
+      `\n========== 开始处理账号: ${accountName} (${command}) ==========`
+    );
     await openTargetAndEnsureLogin(page, paths, accountName, {
       hasStoredAuth,
       forceManualLogin,
-      manualLoginReason,
+      manualLoginReason
     });
     await saveAuth(context, paths, accountName);
     await exportPostListData(page, paths, accountName);
@@ -1011,7 +1254,9 @@ async function main() {
       const paths = getAccountPaths(name);
       const hasStorage = await fileExists(paths.storageStatePath);
       const hasCookies = await fileExists(paths.cookiesPath);
-      console.log(`- ${name} | storageState: ${hasStorage ? "yes" : "no"} | cookies: ${hasCookies ? "yes" : "no"}`);
+      console.log(
+        `- ${name} | storageState: ${hasStorage ? "yes" : "no"} | cookies: ${hasCookies ? "yes" : "no"}`
+      );
     }
     return;
   }
@@ -1021,29 +1266,33 @@ async function main() {
 
   const browser = await chromium.launch({
     headless: false,
-    args: ["--start-maximized"],
+    args: ["--start-maximized"]
   });
 
   let results = [];
   if (command === "export") {
-    const { withAuth, withoutAuth } = await splitAccountsByStorageState(accounts);
+    const { withAuth, withoutAuth } =
+      await splitAccountsByStorageState(accounts);
     console.log(`导出通道A(已有登录态): ${withAuth.length} 个账号`);
     console.log(`导出通道B(需登录验证): ${withoutAuth.length} 个账号`);
 
     const [authResults, loginResults] = await Promise.all([
-      runAccountQueue(browser, withAuth, command, { useStoredAuth: true, forceManualLogin: false }),
+      runAccountQueue(browser, withAuth, command, {
+        useStoredAuth: true,
+        forceManualLogin: false
+      }),
       runAccountQueue(browser, withoutAuth, command, {
         useStoredAuth: false,
         forceManualLogin: true,
-        manualLoginReason: "export 通道B需先完成登录验证",
-      }),
+        manualLoginReason: "需先完成登录验证"
+      })
     ]);
     results = [...authResults, ...loginResults];
   } else {
     results = await runAccountQueue(browser, accounts, command, {
       forceManualLogin: true,
       useStoredAuth: false,
-      manualLoginReason: "add 模式需登录目标账号",
+      manualLoginReason: "add 模式需登录目标账号"
     });
   }
 
