@@ -1,7 +1,5 @@
 const fs = require("fs/promises");
 const path = require("path");
-const readline = require("readline/promises");
-const { stdin: input, stdout: output } = require("process");
 require("dotenv").config();
 const { chromium } = require("playwright");
 const nodemailer = require("nodemailer");
@@ -9,6 +7,11 @@ const nodemailer = require("nodemailer");
 const TARGET_URL =
   "https://creator.douyin.com/creator-micro/data-center/content";
 const ACCOUNTS_DIR = path.resolve(process.cwd(), "accounts");
+/** add 无参数时从此文件读取账号名并批量建目录；可用环境变量 ADD_ACCOUNTS_JSON 覆盖路径 */
+const DEFAULT_ADD_ACCOUNTS_JSON = path.resolve(
+  process.cwd(),
+  process.env.ADD_ACCOUNTS_JSON || "default-add-accounts.json"
+);
 const DEFAULT_ALERT_TO = "2895845213@qq.com";
 const BROWSER_VIEWPORT = { width: 1600, height: 1000 };
 
@@ -20,13 +23,30 @@ function numberFromEnv(name, defaultValue) {
   return val;
 }
 
-const LOGIN_WAIT_TIMEOUT_MS = numberFromEnv(
+/** 优先读 *_SEC（秒），否则读 *_MS（毫秒，兼容旧配置），最后 defaultSeconds（秒）→ 毫秒 */
+function millisecondsFromEnvSecOrMs(secName, msName, defaultSeconds) {
+  const msRaw = process.env[msName];
+  if (msRaw) {
+    const ms = Number(msRaw);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  const secRaw = process.env[secName];
+  if (secRaw) {
+    const sec = Number(secRaw);
+    if (Number.isFinite(sec) && sec > 0) return Math.round(sec * 1000);
+  }
+  return Math.round(defaultSeconds * 1000);
+}
+
+const LOGIN_WAIT_TIMEOUT_MS = millisecondsFromEnvSecOrMs(
+  "LOGIN_WAIT_TIMEOUT_SEC",
   "LOGIN_WAIT_TIMEOUT_MS",
-  15 * 60 * 1000
+  15 * 60
 );
-const LOGIN_REMIND_INTERVAL_MS = numberFromEnv(
+const LOGIN_REMIND_INTERVAL_MS = millisecondsFromEnvSecOrMs(
+  "LOGIN_REMIND_INTERVAL_SEC",
   "LOGIN_REMIND_INTERVAL_MS",
-  60 * 1000
+  60
 );
 const qrDataUrlStateByPage = new WeakMap();
 
@@ -45,7 +65,8 @@ async function fileExists(filePath) {
 
 function extractQrDataUrls(text) {
   if (!text || typeof text !== "string") return [];
-  const matches = text.match(/data:image\/png;base64,[A-Za-z0-9+/=]+/g) || [];
+  const matches =
+    text.match(/data:image\/(?:png|jpe?g);base64,[A-Za-z0-9+/=]+/gi) || [];
   return matches.filter((item) => item.length > 4000);
 }
 
@@ -70,20 +91,15 @@ function readPngSize(buffer) {
 
 async function saveDataUrlPng(dataUrl, savePath, options = {}) {
   if (!dataUrl || typeof dataUrl !== "string") return false;
-  if (!dataUrl.startsWith("data:image/png;base64,")) return false;
+  const matched = dataUrl.match(
+    /^data:image\/(png|jpe?g);base64,([A-Za-z0-9+/=]+)$/i
+  );
+  if (!matched) return false;
   const minBytes = options.minBytes || 500;
-  const minSide = options.minSide || 1;
-  const maxAspectDiff = options.maxAspectDiff || 1;
-  const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
+  const base64 = matched[2] || "";
   if (!base64) return false;
   const buf = Buffer.from(base64, "base64");
   if (!buf || buf.length < minBytes) return false;
-  const size = readPngSize(buf);
-  if (!size) return false;
-  if (size.width < minSide || size.height < minSide) return false;
-  const aspectDiff =
-    Math.abs(size.width - size.height) / Math.max(size.width, size.height);
-  if (aspectDiff > maxAspectDiff) return false;
   await fs.writeFile(savePath, buf);
   return true;
 }
@@ -150,16 +166,16 @@ async function tryCaptureQrFromDataUrl(page, screenshotPath) {
       const all = [];
       const pushUnique = (src) => {
         if (!src || typeof src !== "string") return;
-        if (!src.startsWith("data:image/png;base64,")) return;
+        if (!/^data:image\/(?:png|jpe?g);base64,/i.test(src)) return;
         if (src.length < 4000) return;
         if (!all.includes(src)) all.push(src);
       };
       const selectors = [
-        "[class*='animate_qrcode_container'] [class*='qrcode_img'][src^='data:image/png;base64,']",
-        "[class*='animate_qrcode'] [class*='qrcode_img'][src^='data:image/png;base64,']",
-        "img[aria-label='二维码'][src^='data:image/png;base64,']",
-        "[aria-label='二维码'] img[src^='data:image/png;base64,']",
-        "[class*='qrcode'] img[src^='data:image/png;base64,']"
+        "[class*='animate_qrcode_container'] [class*='qrcode_img'][src^='data:image/']",
+        "[class*='animate_qrcode'] [class*='qrcode_img'][src^='data:image/']",
+        "img[aria-label='二维码'][src^='data:image/']",
+        "[aria-label='二维码'] img[src^='data:image/']",
+        "[class*='qrcode'] img[src^='data:image/']"
       ];
       for (const selector of selectors) {
         const nodeList = document.querySelectorAll(selector);
@@ -207,17 +223,17 @@ async function tryCaptureFaceQrFromDom(page, screenshotPath) {
       const seen = new Set();
       const imgs = Array.from(
         document.querySelectorAll(
-          "img[aria-label='二维码'][src^='data:image/png;base64,']"
+          "img[aria-label='二维码'][src^='data:image/']"
         )
       );
       for (const img of imgs) {
         const parent = img.parentElement;
-        const container = parent?.parentElement;
+        const container = parent?.parentElement || parent;
         if (!parent || !container) continue;
 
         let hasHowToScanSibling = false;
         for (const node of Array.from(container.children)) {
-          if (node === parent) continue;
+          if (node === parent || node === img) continue;
           const text = (node.textContent || "").replace(/\s+/g, "");
           if (text.includes("如何扫码")) {
             hasHowToScanSibling = true;
@@ -227,6 +243,7 @@ async function tryCaptureFaceQrFromDom(page, screenshotPath) {
         if (!hasHowToScanSibling) continue;
 
         const src = img.getAttribute("src") || "";
+        if (!/^data:image\/(?:png|jpe?g);base64,/i.test(src)) continue;
         if (!src || src.length < 4000) continue;
         if (seen.has(src)) continue;
         seen.add(src);
@@ -251,6 +268,46 @@ function normalizeAccountName(name) {
   return name.trim().replace(/[\\/:*?"<>|]/g, "_");
 }
 
+async function loadDefaultAddAccountNames() {
+  let raw;
+  try {
+    raw = await fs.readFile(DEFAULT_ADD_ACCOUNTS_JSON, "utf-8");
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      throw new Error(
+        `未找到 ${DEFAULT_ADD_ACCOUNTS_JSON}。请创建该文件，或使用: npm run add -- 账号名`
+      );
+    }
+    throw err;
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error(`${DEFAULT_ADD_ACCOUNTS_JSON} 不是合法 JSON`);
+  }
+  let list = [];
+  if (Array.isArray(data)) {
+    list = data;
+  } else if (data && Array.isArray(data.accounts)) {
+    list = data.accounts;
+  } else {
+    throw new Error(
+      `${DEFAULT_ADD_ACCOUNTS_JSON} 格式应为 ["名称"] 或 {"accounts":["名称"]}`
+    );
+  }
+  const names = [];
+  const seen = new Set();
+  for (const item of list) {
+    if (typeof item !== "string") continue;
+    const n = normalizeAccountName(item);
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    names.push(n);
+  }
+  return names;
+}
+
 function getAccountPaths(accountName) {
   const accountDir = path.join(ACCOUNTS_DIR, accountName);
   return {
@@ -260,13 +317,6 @@ function getAccountPaths(accountName) {
     dataDir: path.join(accountDir, "data"),
     alertDir: path.join(accountDir, "alerts")
   };
-}
-
-async function promptInput(question) {
-  const rl = readline.createInterface({ input, output });
-  const answer = await rl.question(question);
-  rl.close();
-  return answer;
 }
 
 async function isLoggedInAtTarget(page) {
@@ -350,7 +400,6 @@ async function sendAlertEmail({ accountName, screenshotPath, reason }) {
     <div>
       <p>账号 <b>${accountName}</b> 需要重新扫码登录。</p>
       <p>触发原因: ${reason}</p>
-      <p>目标页面: ${TARGET_URL}</p>
       <p>截图时间: ${new Date().toLocaleString("zh-CN", { hour12: false })}</p>
     </div>
   `;
@@ -404,7 +453,6 @@ async function sendSmsVerifyEmail({
       <p>手机号(掩码): <b>${maskedPhone || "未识别"}</b></p>
       <p>短信内容: <b>${smsContent || "未识别"}</b></p>
       <p>发送至: <b>${smsTarget || "未识别"}</b></p>
-      <p>目标页面: ${TARGET_URL}</p>
       <p>时间: ${new Date().toLocaleString("zh-CN", { hour12: false })}</p>
     </div>
   `;
@@ -451,7 +499,6 @@ async function sendFaceVerifyEmail({ accountName, screenshotPath, reason }) {
       <p>账号 <b>${accountName}</b> 已进入 <b>手机刷脸验证</b> 阶段。</p>
       <p>请使用抖音 App 扫描刷脸二维码并完成人脸验证。</p>
       <p>说明: ${reason || "需要刷脸验证"}</p>
-      <p>目标页面: ${TARGET_URL}</p>
       <p>时间: ${new Date().toLocaleString("zh-CN", { hour12: false })}</p>
     </div>
   `;
@@ -718,7 +765,10 @@ async function captureFaceQrScreenshot(page, paths, accountName) {
   };
 
   const qrSelectors = [
+    "#uc_verification_animate_qrcode_container img[aria-label='二维码']",
+    "[id*='uc_verification_animate_qrcode_container'] img[aria-label='二维码']",
     "div:has-text('手机刷脸验证') img[aria-label='二维码']",
+    "div:has-text('如何扫码') ~ div img[aria-label='二维码']",
     "div:has-text('手机刷脸验证') [class*='animate_qrcode_container'] img",
     "div:has-text('手机刷脸验证') [class*='qrcode'] img",
     "div:has-text('手机刷脸验证') [class*='qrcode'] canvas",
@@ -1136,29 +1186,40 @@ function parseCliCommand() {
   const command = (args[0] || "export").toLowerCase();
   if (!["add", "export", "list"].includes(command)) {
     throw new Error(
-      "只支持三种命令: add / export / list。示例: npm run add -- 账号A / npm run export / npm run list"
+      "只支持三种命令: add / export / list。示例: npm run add -- 账号A / npm run add / npm run export / npm run export -- 账号A [账号B] / npm run list"
     );
   }
-  const accountName = normalizeAccountName(args.slice(1).join(" ").trim());
+  const tail = args.slice(1);
+  if (command === "export") {
+    const exportAccountFilters = tail
+      .map((s) => normalizeAccountName(s))
+      .filter(Boolean);
+    return { command, exportAccountFilters };
+  }
+  const accountName = normalizeAccountName(tail.join(" ").trim());
   return { command, accountName };
 }
 
-async function resolveAccountsToRun(command, accountNameFromArg) {
+async function resolveAccountsToRun(
+  command,
+  accountNameFromArg,
+  exportAccountFilters
+) {
   const existingAccounts = await listAccountDirs();
   if (command === "list") {
     return existingAccounts;
   }
   if (command === "add") {
-    let accountName = accountNameFromArg;
-    if (!accountName) {
-      accountName = normalizeAccountName(
-        await promptInput("请输入新增账号标识: ")
+    if (accountNameFromArg) {
+      return [accountNameFromArg];
+    }
+    const names = await loadDefaultAddAccountNames();
+    if (names.length === 0) {
+      throw new Error(
+        `${DEFAULT_ADD_ACCOUNTS_JSON} 中没有有效账号名（需为非空字符串）`
       );
     }
-    if (!accountName) {
-      throw new Error("add 模式必须提供账号标识。示例: npm run add -- 账号A");
-    }
-    return [accountName];
+    return names;
   }
 
   if (existingAccounts.length === 0) {
@@ -1166,7 +1227,31 @@ async function resolveAccountsToRun(command, accountNameFromArg) {
       "export 模式未发现账号目录。请先执行 add 命令完成扫码登录。"
     );
   }
-  return existingAccounts;
+  if (!exportAccountFilters || exportAccountFilters.length === 0) {
+    return existingAccounts;
+  }
+
+  const existingSet = new Set(existingAccounts);
+  const missing = [];
+  const selected = [];
+  const seen = new Set();
+  for (const name of exportAccountFilters) {
+    if (!existingSet.has(name)) {
+      missing.push(name);
+      continue;
+    }
+    if (seen.has(name)) continue;
+    seen.add(name);
+    selected.push(name);
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `export 指定的账号在 accounts 下无对应目录: ${missing.join(
+        ", "
+      )}。当前已有: ${existingAccounts.join(", ")}`
+    );
+  }
+  return selected;
 }
 
 async function splitAccountsByStorageState(accounts) {
@@ -1239,13 +1324,20 @@ async function runAccountQueue(browser, accounts, command, options = {}) {
 }
 
 async function main() {
-  const { command, accountName } = parseCliCommand();
-  const accounts = await resolveAccountsToRun(command, accountName);
+  const parsed = parseCliCommand();
+  const { command, accountName, exportAccountFilters } = parsed;
+  const accounts = await resolveAccountsToRun(
+    command,
+    accountName,
+    exportAccountFilters
+  );
 
   if (command === "list") {
     console.log(`当前账号数量: ${accounts.length}`);
     if (accounts.length === 0) {
-      console.log("未找到账号目录。可先执行: npm run add -- 账号A");
+      console.log(
+        "未找到账号目录。可先执行: npm run add -- 账号A 或 npm run add（按 default-add-accounts.json 批量建目录）"
+      );
       return;
     }
 
@@ -1261,6 +1353,18 @@ async function main() {
     return;
   }
 
+  if (command === "add") {
+    console.log(`当前命令: ${command}`);
+    console.log(`本次将创建 ${accounts.length} 个账号目录: ${accounts.join(", ")}`);
+    for (const name of accounts) {
+      const paths = getAccountPaths(name);
+      await ensureDir(paths.accountDir);
+      console.log(`- 已创建: ${paths.accountDir}`);
+    }
+    console.log("\n登录与导出请使用: npm run export");
+    return;
+  }
+
   console.log(`当前命令: ${command}`);
   console.log(`本次将处理 ${accounts.length} 个账号: ${accounts.join(", ")}`);
 
@@ -1270,31 +1374,23 @@ async function main() {
   });
 
   let results = [];
-  if (command === "export") {
-    const { withAuth, withoutAuth } =
-      await splitAccountsByStorageState(accounts);
-    console.log(`导出通道A(已有登录态): ${withAuth.length} 个账号`);
-    console.log(`导出通道B(需登录验证): ${withoutAuth.length} 个账号`);
+  const { withAuth, withoutAuth } =
+    await splitAccountsByStorageState(accounts);
+  console.log(`导出通道A(已有登录态): ${withAuth.length} 个账号`);
+  console.log(`导出通道B(需登录验证): ${withoutAuth.length} 个账号`);
 
-    const [authResults, loginResults] = await Promise.all([
-      runAccountQueue(browser, withAuth, command, {
-        useStoredAuth: true,
-        forceManualLogin: false
-      }),
-      runAccountQueue(browser, withoutAuth, command, {
-        useStoredAuth: false,
-        forceManualLogin: true,
-        manualLoginReason: "需先完成登录验证"
-      })
-    ]);
-    results = [...authResults, ...loginResults];
-  } else {
-    results = await runAccountQueue(browser, accounts, command, {
-      forceManualLogin: true,
+  const [authResults, loginResults] = await Promise.all([
+    runAccountQueue(browser, withAuth, "export", {
+      useStoredAuth: true,
+      forceManualLogin: false
+    }),
+    runAccountQueue(browser, withoutAuth, "export", {
       useStoredAuth: false,
-      manualLoginReason: "add 模式需登录目标账号"
-    });
-  }
+      forceManualLogin: true,
+      manualLoginReason: "需先完成登录验证"
+    })
+  ]);
+  results = [...authResults, ...loginResults];
 
   await browser.close();
 
