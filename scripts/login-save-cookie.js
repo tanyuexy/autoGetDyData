@@ -192,18 +192,21 @@ async function tryCaptureFaceQrFromDom(page, screenshotPath) {
       const seen = new Set();
       const imgs = Array.from(document.querySelectorAll("img[aria-label='二维码'][src^='data:image/png;base64,']"));
       for (const img of imgs) {
-        let parent = img.parentElement;
-        let matched = false;
-        let depth = 0;
-        while (parent && depth < 10) {
-          if ((parent.textContent || "").includes("如何扫码")) {
-            matched = true;
+        const parent = img.parentElement;
+        const container = parent?.parentElement;
+        if (!parent || !container) continue;
+
+        let hasHowToScanSibling = false;
+        for (const node of Array.from(container.children)) {
+          if (node === parent) continue;
+          const text = (node.textContent || "").replace(/\s+/g, "");
+          if (text.includes("如何扫码")) {
+            hasHowToScanSibling = true;
             break;
           }
-          parent = parent.parentElement;
-          depth += 1;
         }
-        if (!matched) continue;
+        if (!hasHowToScanSibling) continue;
+
         const src = img.getAttribute("src") || "";
         if (!src || src.length < 4000) continue;
         if (seen.has(src)) continue;
@@ -563,6 +566,7 @@ async function captureVerifyDialogScreenshot(page, paths, accountName, suffix) {
 }
 
 async function captureFaceQrScreenshot(page, paths, accountName) {
+  await ensureDir(paths.alertDir);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const screenshotPath = path.join(paths.alertDir, `${timestamp}-face-verify.png`);
 
@@ -571,27 +575,68 @@ async function captureFaceQrScreenshot(page, paths, accountName) {
     return screenshotPath;
   }
 
-  const qrCandidates = [
-    page.locator("img[aria-label='二维码']").first(),
-    page.locator("div:has-text('手机刷脸验证') canvas").first(),
-    page.locator("div:has-text('手机刷脸验证') img[src*='qrcode']").first(),
-    page.locator("img[src*='qrcode']").first(),
-    page.locator("[class*='qrcode'] canvas").first(),
-    page.locator("[class*='qrcode'] img").first(),
-    page.locator("canvas").first(),
-  ];
+  const clipAroundBox = (box, viewport, pad = 14) => {
+    const x = Math.max(0, Math.floor(box.x - pad));
+    const y = Math.max(0, Math.floor(box.y - pad));
+    const width = Math.max(1, Math.min(Math.ceil(box.width + pad * 2), viewport.width - x));
+    const height = Math.max(1, Math.min(Math.ceil(box.height + pad * 2), viewport.height - y));
+    return { x, y, width, height };
+  };
 
-  for (const locator of qrCandidates) {
-    const visible = await locator.isVisible({ timeout: 700 }).catch(() => false);
-    if (!visible) continue;
+  const tryCaptureLocator = async (locator) => {
+    const visible = await locator.isVisible({ timeout: 800 }).catch(() => false);
+    if (!visible) return false;
+
+    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(120);
 
     const box = await locator.boundingBox().catch(() => null);
-    if (!box) continue;
-    if (box.width < 120 || box.height < 120) continue;
+    if (!box) return false;
+    if (box.width < 100 || box.height < 100) return false;
 
-    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    const ratioDiff = Math.abs(box.width - box.height) / Math.max(box.width, box.height);
+    if (ratioDiff > 0.3) return false;
+
+    const viewport = page.viewportSize() || BROWSER_VIEWPORT;
+    const clip = clipAroundBox(box, viewport, 14);
+    await page.screenshot({ path: screenshotPath, clip }).catch(() => {});
     if (await fileExists(screenshotPath)) {
-      console.log(`账号 [${accountName}] 已保存刷脸验证全屏截图: ${screenshotPath}`);
+      return true;
+    }
+
+    await locator.screenshot({ path: screenshotPath }).catch(() => {});
+    return fileExists(screenshotPath);
+  };
+
+  const qrSelectors = [
+    "div:has-text('手机刷脸验证') img[aria-label='二维码']",
+    "div:has-text('手机刷脸验证') [class*='animate_qrcode_container'] img",
+    "div:has-text('手机刷脸验证') [class*='qrcode'] img",
+    "div:has-text('手机刷脸验证') [class*='qrcode'] canvas",
+    "img[aria-label='二维码']",
+    "img[src*='qrcode']",
+    "[class*='qrcode'] img",
+    "[class*='qrcode'] canvas",
+    "canvas",
+  ];
+
+  for (const selector of qrSelectors) {
+    const locator = page.locator(selector);
+    const count = Math.min(await locator.count().catch(() => 0), 4);
+    for (let i = 0; i < count; i += 1) {
+      if (await tryCaptureLocator(locator.nth(i))) {
+        console.log(`账号 [${accountName}] 已保存刷脸二维码截图: ${screenshotPath}`);
+        return screenshotPath;
+      }
+    }
+  }
+
+  const faceDialog = page.locator("[role='dialog']").filter({ hasText: "手机刷脸验证" }).last();
+  const dialogVisible = await faceDialog.isVisible({ timeout: 600 }).catch(() => false);
+  if (dialogVisible) {
+    await faceDialog.screenshot({ path: screenshotPath }).catch(() => {});
+    if (await fileExists(screenshotPath)) {
+      console.log(`账号 [${accountName}] 已保存刷脸验证弹窗截图: ${screenshotPath}`);
       return screenshotPath;
     }
   }
