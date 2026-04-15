@@ -1,0 +1,60 @@
+# 依赖
+node_modules/
+
+# 环境变量与密钥（勿提交真实配置）
+.env
+.env.local
+.env.*.local
+
+# 日志与调试
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Playwright 测试产物（若后续加自动化测试）
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# 构建与打包
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# 覆盖率
+coverage/
+.nyc_output/
+
+# 操作系统
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 编辑器与 IDE
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# 临时文件
+*.tmp
+*.temp
+.cache/
+
+# 账号数据
+accounts/
+
+data/
