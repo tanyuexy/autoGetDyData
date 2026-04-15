@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "add": "node scripts/login-save-cookie.js add",
-    "export": "node scripts/login-save-cookie.js export",
-    "list": "node scripts/login-save-cookie.js list",
+    "add": "node scripts/cli.js add",
+    "export": "node scripts/cli.js export",
+    "list": "node scripts/cli.js list",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
