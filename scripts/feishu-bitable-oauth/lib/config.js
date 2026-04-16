@@ -2,7 +2,7 @@ const path = require("path");
 
 const DEFAULT_API_BASE = "https://open.feishu.cn";
 const DEFAULT_AUTH_BASE = "https://accounts.feishu.cn";
-const DEFAULT_SCOPE = "bitable:app";
+const DEFAULT_SCOPE = "bitable:app offline_access";
 const DEFAULT_TOKEN_CACHE_PATH = path.resolve(
   process.cwd(),
   "scripts/feishu-bitable-oauth/token-cache.json"

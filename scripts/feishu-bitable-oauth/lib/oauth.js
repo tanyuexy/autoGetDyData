@@ -1,11 +1,22 @@
 const fs = require("fs/promises");
 const path = require("path");
 
+function normalizeScope(scopeText) {
+  const scopes = String(scopeText || "")
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!scopes.includes("offline_access")) {
+    scopes.push("offline_access");
+  }
+  return Array.from(new Set(scopes)).join(" ");
+}
+
 function buildAuthorizeUrl(config, state = "") {
   const params = new URLSearchParams({
-    app_id: config.appId,
+    client_id: config.appId,
     redirect_uri: config.redirectUri,
-    scope: config.scope
+    scope: normalizeScope(config.scope)
   });
   if (state) {
     params.set("state", state);
@@ -43,7 +54,9 @@ async function postFeishuJson(url, payload) {
 function toTokenRecord(data) {
   const now = Date.now();
   const expiresInSec = Number(data.expires_in || 0);
-  const refreshExpiresInSec = Number(data.refresh_expires_in || 0);
+  const refreshExpiresInSec = Number(
+    data.refresh_token_expires_in || data.refresh_expires_in || 0
+  );
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
