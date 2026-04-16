@@ -254,113 +254,160 @@ async function fetchOtpCodeFromEmail({ accountName, sinceMs }) {
     };
   }
 
-  const client = new ImapFlow({
-    host: cfg.host,
-    port: cfg.port,
-    secure: cfg.secure,
-    logger: false,
-    emitLogs: false,
-    logRaw: false,
-    auth: {
-      user: cfg.user,
-      pass: cfg.pass
-    }
-  });
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const getErrorCode = (err) =>
+    (err && (err.code || err.errno || err.syscall)) || "";
+  const shouldRetryImap = (err) => {
+    const code = String(getErrorCode(err) || "").toUpperCase();
+    return [
+      "EADDRNOTAVAIL",
+      "ENOTFOUND",
+      "EAI_AGAIN",
+      "ETIMEDOUT",
+      "ECONNRESET",
+      "ECONNREFUSED",
+      "ENETUNREACH",
+      "EHOSTUNREACH"
+    ].includes(code);
+  };
 
-  try {
-    await client.connect();
-    const lock = await client.getMailboxLock(cfg.mailbox);
-    try {
-      const hasSinceMs = Number.isFinite(sinceMs) && sinceMs > 0;
-      const effectiveSinceMs = hasSinceMs
-        ? sinceMs
-        : Date.now() - OTP_EMAIL_MAX_AGE_MS;
-      const searchSince = new Date(
-        Math.max(effectiveSinceMs - OTP_EMAIL_MAX_AGE_MS, 0)
-      );
-      const uids = await client.search({ since: searchSince });
-      const reversed = uids.slice().reverse();
-      let checkedCount = 0;
-      let matchedSubjectCount = 0;
-      for (const uid of reversed) {
-        checkedCount += 1;
-        const msg = await client.fetchOne(uid, {
-          envelope: true,
-          internalDate: true
-        });
-        if (!msg) continue;
-        const internalTimeMs = msg.internalDate ? msg.internalDate.getTime() : 0;
-        const envelopeTimeMs = msg.envelope?.date
-          ? new Date(msg.envelope.date).getTime()
-          : 0;
-        const messageTimeMs =
-          internalTimeMs || (Number.isFinite(envelopeTimeMs) ? envelopeTimeMs : 0);
-        // 仅处理“发送提醒邮件之后”的回复，避免误读历史验证码邮件。
-        if (hasSinceMs && messageTimeMs && messageTimeMs < sinceMs) {
-          continue;
-        }
-        if (
-          msg.internalDate &&
-          msg.internalDate.getTime() + OTP_EMAIL_MAX_AGE_MS < Date.now()
-        ) {
-          continue;
-        }
+  const maxAttempts = Math.max(
+    1,
+    Number.parseInt(process.env.OTP_IMAP_MAX_ATTEMPTS || "3", 10) || 3
+  );
 
-        const subject = msg.envelope?.subject || "";
-        if (!subject.includes(cfg.subjectPrefix)) continue;
-        if (accountName && !subject.includes(accountName)) continue;
-        matchedSubjectCount += 1;
-        const fromText = (msg.envelope?.from || [])
-          .map((item) => `${item.name || ""} <${item.address || ""}>`)
-          .join(" ");
-        if (cfg.fromIncludes && !fromText.includes(cfg.fromIncludes)) continue;
-
-        const sourceMsg = await client.fetchOne(uid, { source: true });
-        if (!sourceMsg || !sourceMsg.source) continue;
-        const parsed = await simpleParser(sourceMsg.source);
-        const fullText = String(parsed?.text || "").replace(/\r/g, "\n");
-        console.log(
-          `账号 [${accountName}] 监听到验证码回复邮件: subject="${subject}" from="${fromText || "unknown"}"\n----- 邮件正文开始 -----\n${fullText || "(empty)"}\n----- 邮件正文结束 -----`
-        );
-        const otpCode = extractOtpCodeFromParsedEmail(
-          parsed,
-          subject,
-          sourceMsg.source.toString("utf-8")
-        );
-        if (otpCode) {
-          console.log(
-            `账号 [${accountName}] 已提取验证码: ${otpCode}（来自回复邮件）\n----- 提取命中邮件正文开始 -----\n${fullText || "(empty)"}\n----- 提取命中邮件正文结束 -----`
-          );
-          return {
-            otpCode,
-            checkedCount,
-            matchedSubjectCount,
-            missingConfig: false
-          };
-        }
-        console.log(
-          `账号 [${accountName}] 未提取到验证码，以下为该邮件完整正文(原文):\n----- 邮件开始 -----\n${parsed?.text || "(empty)"}\n----- 邮件结束 -----`
-        );
-        console.log(
-          `账号 [${accountName}] 已匹配回复邮件但未提取到验证码（仅识别 4-8 位数字）。`
-        );
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const client = new ImapFlow({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      logger: false,
+      emitLogs: false,
+      logRaw: false,
+      auth: {
+        user: cfg.user,
+        pass: cfg.pass
       }
-      return {
-        otpCode: "",
-        checkedCount,
-        matchedSubjectCount,
-        missingConfig: false
-      };
+    });
+
+    let connected = false;
+    client.on("error", (err) => {
+      // 不要让 ImapFlow 的异步 error 事件把整个进程打崩。
+      console.error(
+        `账号 [${accountName}] IMAP 连接异常:`,
+        err?.message || err
+      );
+    });
+
+    try {
+      await client.connect();
+      connected = true;
+      const lock = await client.getMailboxLock(cfg.mailbox);
+      try {
+        const hasSinceMs = Number.isFinite(sinceMs) && sinceMs > 0;
+        const effectiveSinceMs = hasSinceMs
+          ? sinceMs
+          : Date.now() - OTP_EMAIL_MAX_AGE_MS;
+        const searchSince = new Date(
+          Math.max(effectiveSinceMs - OTP_EMAIL_MAX_AGE_MS, 0)
+        );
+        const uids = await client.search({ since: searchSince });
+        const reversed = uids.slice().reverse();
+        let checkedCount = 0;
+        let matchedSubjectCount = 0;
+        for (const uid of reversed) {
+          checkedCount += 1;
+          const msg = await client.fetchOne(uid, {
+            envelope: true,
+            internalDate: true
+          });
+          if (!msg) continue;
+          const internalTimeMs = msg.internalDate ? msg.internalDate.getTime() : 0;
+          const envelopeTimeMs = msg.envelope?.date
+            ? new Date(msg.envelope.date).getTime()
+            : 0;
+          const messageTimeMs =
+            internalTimeMs ||
+            (Number.isFinite(envelopeTimeMs) ? envelopeTimeMs : 0);
+          // 仅处理“发送提醒邮件之后”的回复，避免误读历史验证码邮件。
+          if (hasSinceMs && messageTimeMs && messageTimeMs < sinceMs) {
+            continue;
+          }
+          if (
+            msg.internalDate &&
+            msg.internalDate.getTime() + OTP_EMAIL_MAX_AGE_MS < Date.now()
+          ) {
+            continue;
+          }
+
+          const subject = msg.envelope?.subject || "";
+          if (!subject.includes(cfg.subjectPrefix)) continue;
+          if (accountName && !subject.includes(accountName)) continue;
+          matchedSubjectCount += 1;
+          const fromText = (msg.envelope?.from || [])
+            .map((item) => `${item.name || ""} <${item.address || ""}>`)
+            .join(" ");
+          if (cfg.fromIncludes && !fromText.includes(cfg.fromIncludes)) continue;
+
+          const sourceMsg = await client.fetchOne(uid, { source: true });
+          if (!sourceMsg || !sourceMsg.source) continue;
+          const parsed = await simpleParser(sourceMsg.source);
+          const fullText = String(parsed?.text || "").replace(/\r/g, "\n");
+          console.log(
+            `账号 [${accountName}] 监听到验证码回复邮件: subject="${subject}" from="${fromText || "unknown"}"\n----- 邮件正文开始 -----\n${fullText || "(empty)"}\n----- 邮件正文结束 -----`
+          );
+          const otpCode = extractOtpCodeFromParsedEmail(
+            parsed,
+            subject,
+            sourceMsg.source.toString("utf-8")
+          );
+          if (otpCode) {
+            console.log(
+              `账号 [${accountName}] 已提取验证码: ${otpCode}（来自回复邮件）\n----- 提取命中邮件正文开始 -----\n${fullText || "(empty)"}\n----- 提取命中邮件正文结束 -----`
+            );
+            return {
+              otpCode,
+              checkedCount,
+              matchedSubjectCount,
+              missingConfig: false
+            };
+          }
+          console.log(
+            `账号 [${accountName}] 未提取到验证码，以下为该邮件完整正文(原文):\n----- 邮件开始 -----\n${parsed?.text || "(empty)"}\n----- 邮件结束 -----`
+          );
+          console.log(
+            `账号 [${accountName}] 已匹配回复邮件但未提取到验证码（仅识别 4-8 位数字）。`
+          );
+        }
+        return {
+          otpCode: "",
+          checkedCount,
+          matchedSubjectCount,
+          missingConfig: false
+        };
+      } finally {
+        lock.release();
+      }
+    } catch (error) {
+      const code = String(getErrorCode(error) || "");
+      console.error(
+        `账号 [${accountName}] 拉取回复验证码邮件失败(第${attempt}/${maxAttempts}次, code=${code}):`,
+        error?.message || error
+      );
+      const canRetry = attempt < maxAttempts && shouldRetryImap(error);
+      if (!canRetry) {
+        break;
+      }
+      const backoffMs = Math.min(10_000, 500 * Math.pow(2, attempt - 1));
+      await sleep(backoffMs);
     } finally {
-      lock.release();
+      if (connected) {
+        await client.logout().catch(() => {});
+      } else {
+        // 未成功 connect 时，logout 可能会抛错；静默处理即可。
+        await client.logout().catch(() => {});
+      }
     }
-  } catch (error) {
-    console.error(
-      `账号 [${accountName}] 拉取回复验证码邮件失败:`,
-      error.message || error
-    );
-  } finally {
-    await client.logout().catch(() => {});
   }
 
   return {

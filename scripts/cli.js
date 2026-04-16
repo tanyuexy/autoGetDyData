@@ -131,17 +131,19 @@ async function main() {
     }`
   );
 
-  const [authResults, loginResults] = await Promise.all([
-    runAccountQueue(browser, withAuth, "export", {
-      useStoredAuth: true,
-      forceManualLogin: false
-    }),
-    runAccountQueue(browser, withoutAuth, "export", {
-      useStoredAuth: false,
-      forceManualLogin: true,
-      manualLoginReason: "需先完成登录验证"
-    })
-  ]);
+  // 串行执行两路队列，避免并行 console 交错导致「开始处理账号 A」与「账号 B 无登录态」粘在一起
+  const authResults = await runAccountQueue(browser, withAuth, "export", {
+    useStoredAuth: true,
+    forceManualLogin: false
+  });
+  if (withoutAuth.length > 0) {
+    console.log("\n---------- 开始处理：需登录验证的账号 ----------\n");
+  }
+  const loginResults = await runAccountQueue(browser, withoutAuth, "export", {
+    useStoredAuth: false,
+    forceManualLogin: true,
+    manualLoginReason: "需先完成登录验证"
+  });
 
   const results = [...authResults, ...loginResults];
   await browser.close();
