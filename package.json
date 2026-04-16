@@ -3,9 +3,14 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "add": "node scripts/cli.js add",
-    "export": "node scripts/cli.js export",
-    "list": "node scripts/cli.js list",
+    "add": "node scripts/douyin-creator/index.js add",
+    "export": "node scripts/douyin-creator/index.js export",
+    "list": "node scripts/douyin-creator/index.js list",
+    "feishu:auth-url": "node scripts/feishu-bitable-oauth/index.js auth-url",
+    "feishu:callback-server": "node scripts/feishu-bitable-oauth/callback-server.js",
+    "feishu:exchange": "node scripts/feishu-bitable-oauth/index.js exchange",
+    "feishu:refresh": "node scripts/feishu-bitable-oauth/index.js refresh",
+    "feishu:insert": "node scripts/feishu-bitable-oauth/index.js insert",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

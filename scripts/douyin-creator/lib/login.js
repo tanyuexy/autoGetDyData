@@ -1,4 +1,10 @@
-const { TARGET_URL, LOGIN_VERIFY_METHOD, LOGIN_WAIT_TIMEOUT_MS, LOGIN_REMIND_INTERVAL_MS, SMS_REMIND_INTERVAL_MS } = require("./env");
+const {
+  TARGET_URL,
+  LOGIN_VERIFY_METHOD,
+  LOGIN_WAIT_TIMEOUT_MS,
+  LOGIN_REMIND_INTERVAL_MS,
+  SMS_REMIND_INTERVAL_MS
+} = require("./env");
 const { sendAlertEmail } = require("./mail");
 const { captureLoginQrScreenshot, hasVisibleQr } = require("./qr");
 const {
@@ -93,7 +99,11 @@ async function clickIfVisible(locator, timeout = 3500) {
 }
 
 async function notifyLoginRequired(page, paths, accountName, reason) {
-  const screenshotPath = await captureLoginQrScreenshot(page, paths, accountName);
+  const screenshotPath = await captureLoginQrScreenshot(
+    page,
+    paths,
+    accountName
+  );
   await sendAlertEmail({ accountName, screenshotPath, reason }).catch((error) => {
     console.error(`账号 [${accountName}] 邮件发送失败:`, error.message || error);
   });
@@ -217,7 +227,9 @@ async function waitForManualLoginFlow(
         console.log(
           `账号 [${accountName}] 检测到验证流程已结束，尝试重新进入目标导出页。`
         );
-        await page.goto(TARGET_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+        await page
+          .goto(TARGET_URL, { waitUntil: "domcontentloaded" })
+          .catch(() => {});
         await page.waitForLoadState("networkidle").catch(() => {});
         await page.waitForTimeout(800);
         if (await isLoggedInAtTarget(page)) {

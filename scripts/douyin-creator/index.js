@@ -92,7 +92,9 @@ async function main() {
       const hasStorage = await fileExists(paths.storageStatePath);
       const hasCookies = await fileExists(paths.cookiesPath);
       console.log(
-        `- ${name} | storageState: ${hasStorage ? "yes" : "no"} | cookies: ${hasCookies ? "yes" : "no"}`
+        `- ${name} | storageState: ${
+          hasStorage ? "yes" : "no"
+        } | cookies: ${hasCookies ? "yes" : "no"}`
       );
     }
     return;
@@ -100,7 +102,9 @@ async function main() {
 
   if (command === "add") {
     console.log(`当前命令: ${command}`);
-    console.log(`本次将创建 ${accounts.length} 个账号目录: ${accounts.join(", ")}`);
+    console.log(
+      `本次将创建 ${accounts.length} 个账号目录: ${accounts.join(", ")}`
+    );
     for (const name of accounts) {
       const paths = getAccountPaths(name);
       await ensureDir(paths.accountDir);

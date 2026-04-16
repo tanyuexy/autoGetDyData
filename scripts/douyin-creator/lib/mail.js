@@ -109,11 +109,7 @@ function extractOtpCode(text) {
   return preferSix || candidates[0] || "";
 }
 
-function extractOtpCodeFromParsedEmail(
-  parsed,
-  envelopeSubject = "",
-  rawSource = ""
-) {
+function extractOtpCodeFromParsedEmail(parsed, envelopeSubject = "", rawSource = "") {
   const htmlText = parsed?.html
     ? String(parsed.html).replace(/<[^>]+>/g, " ")
     : "";
@@ -172,12 +168,7 @@ async function sendAlertEmail({ accountName, screenshotPath, reason }) {
   console.log(`账号 [${accountName}] 已发送扫码提醒邮件到: ${cfg.to}`);
 }
 
-async function sendSmsVerifyEmail({
-  accountName,
-  maskedPhone,
-  smsContent,
-  smsTarget
-}) {
+async function sendSmsVerifyEmail({ accountName, maskedPhone, smsContent, smsTarget }) {
   const cfg = getMailConfig();
   if (!cfg.enabled) {
     console.log("邮件告警已关闭，跳过发送。");

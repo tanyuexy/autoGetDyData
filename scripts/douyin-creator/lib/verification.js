@@ -319,7 +319,9 @@ async function hasReceiveOtpResendButton(page) {
     page.locator("[role='dialog']:has-text('接收短信验证码')").first()
   ];
   for (const panel of panelCandidates) {
-    const panelVisible = await panel.isVisible({ timeout: 200 }).catch(() => false);
+    const panelVisible = await panel
+      .isVisible({ timeout: 200 })
+      .catch(() => false);
     if (!panelVisible) continue;
     const resendInPanel = panel
       .locator("span[class*='button_text'], div[class*='button_text'], span, div")
