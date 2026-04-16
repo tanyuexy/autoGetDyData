@@ -6,11 +6,9 @@
     "add": "node scripts/douyin-creator/index.js add",
     "export": "node scripts/douyin-creator/index.js export",
     "list": "node scripts/douyin-creator/index.js list",
-    "feishu:auth-url": "node scripts/feishu-bitable-oauth/index.js auth-url",
-    "feishu:callback-server": "node scripts/feishu-bitable-oauth/callback-server.js",
-    "feishu:exchange": "node scripts/feishu-bitable-oauth/index.js exchange",
-    "feishu:refresh": "node scripts/feishu-bitable-oauth/index.js refresh",
-    "feishu:insert": "node scripts/feishu-bitable-oauth/index.js insert",
+    "feishu:auth": "node scripts/feishu/index.js auth-url",
+    "feishu:callback": "node scripts/feishu/callback-server.js",
+    "feishu:insert-xlsx": "node scripts/feishu/index.js insert-xlsx",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -22,6 +20,7 @@
     "imapflow": "^1.3.1",
     "mailparser": "^3.9.8",
     "nodemailer": "^8.0.5",
-    "playwright": "^1.59.1"
+    "playwright": "^1.59.1",
+    "xlsx": "^0.18.5"
   }
 }

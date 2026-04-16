@@ -117,7 +117,7 @@ function createServer(config) {
       }
       console.log("token 缓存文件:", feishuConfig.tokenCachePath);
       console.log("access_token 到期时间:", new Date(tokenRecord.expiresAt).toISOString());
-      console.log("\n现在可以直接执行: npm run feishu:insert -- --fields '{\"姓名\":\"测试\"}'\n");
+      console.log("\n现在可以回到终端继续后续操作（token 已可用）。\n");
 
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(`<!doctype html>
