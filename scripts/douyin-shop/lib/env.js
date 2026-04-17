@@ -32,6 +32,12 @@ const SLIDER_MAX_RETRY = numberFromEnv("SHOP_SLIDER_MAX_RETRY", 5);
 // 登录总超时（毫秒）
 const LOGIN_TIMEOUT_MS = numberFromEnv("SHOP_LOGIN_TIMEOUT_MS", 120 * 1000);
 
+// 选店/切店后等待页面 load 事件（毫秒），再跳转明细页等后续步骤
+const DOM_LOAD_TIMEOUT_MS = numberFromEnv(
+  "SHOP_DOM_LOAD_TIMEOUT_MS",
+  30 * 1000
+);
+
 /**
  * 默认账号（支持通过 CLI 传入覆盖）
  * 格式：[{ email, password, name? }]
@@ -62,5 +68,6 @@ module.exports = {
   SLIDER_DRAG_DURATION_MS,
   SLIDER_MAX_RETRY,
   LOGIN_TIMEOUT_MS,
+  DOM_LOAD_TIMEOUT_MS,
   getDefaultAccounts
 };

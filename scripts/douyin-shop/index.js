@@ -117,15 +117,37 @@ async function main() {
     const parts = [`账号 ${item.account} 登录 OK`];
     const downloads = Array.isArray(item.downloads) ? item.downloads : [];
     if (downloads.length > 0) {
-      const okList = downloads.filter((d) => d.downloadPath);
-      const failList = downloads.filter((d) => d.error);
-      parts.push(`已处理店铺 ${downloads.length} 个（成功 ${okList.length}）`);
+      const fullOk = downloads.filter((d) => d.videoPath && d.graphicPath)
+        .length;
+      parts.push(
+        `已处理 ${downloads.length} 轮（视频+图文均成功 ${fullOk}）`
+      );
       console.log("- " + parts.join(" | "));
       for (const d of downloads) {
-        if (d.downloadPath) {
-          console.log(`    · [${d.shopName || "未知店铺"}] 明细: ${d.downloadPath}`);
-        } else {
-          console.log(`    · [${d.shopName || "未知店铺"}] 失败: ${d.error}`);
+        const name = d.shopName || "未知店铺";
+        if (d.videoPath) {
+          console.log(`    · [${name}] 视频明细: ${d.videoPath}`);
+        }
+        if (d.graphicPath) {
+          console.log(`    · [${name}] 图文明细: ${d.graphicPath}`);
+        }
+        if (d.videoError) {
+          console.log(`    · [${name}] 视频失败: ${d.videoError}`);
+        }
+        if (d.graphicError) {
+          console.log(`    · [${name}] 图文失败: ${d.graphicError}`);
+        }
+        if (
+          d.downloadPath &&
+          !d.videoPath &&
+          !d.graphicPath &&
+          !d.videoError &&
+          !d.graphicError
+        ) {
+          console.log(`    · [${name}] 明细: ${d.downloadPath}`);
+        }
+        if (d.error && !d.videoError && !d.graphicError) {
+          console.log(`    · [${name}] 失败: ${d.error}`);
         }
       }
       continue;

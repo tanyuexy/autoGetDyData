@@ -1,6 +1,8 @@
 const fs = require("fs/promises");
 const path = require("path");
 
+const { waitForDomLoaded } = require("./dom-ready");
+
 const DEFAULT_ACCOUNTS_FILE = path.resolve(
   process.cwd(),
   "default-add-accounts.json"
@@ -153,20 +155,52 @@ async function selectShopIfPicker(page, options = {}) {
     `[${tag}] 命中店铺 "${hit.item.name}"（匹配优先级项 "${hit.preferred}"），点击进入`
   );
 
-  // 点击店铺项，等待随后的 URL 变化（抖店/罗盘都会触发整页跳转）
+  // 点击店铺项后页面可能出现多段重定向/SPA 切换。
+  // 仅等待一次 navigation 并不可靠：有时不会触发 navigation 事件，
+  // 但页面会先“切中店铺”再异步跳转；如果上游太快开始 goto，会打断这段流程。
+  // 这里用三重条件兜底，确保“选店面板已消失 + URL 进入 compass/fxg”再返回。
+  const beforeUrl = page.url() || "";
   await Promise.all([
-    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 })
+    page
+      .waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 })
       .catch(() => null),
     hit.item.locator.click({ timeout: 5000 })
   ]);
 
-  // 有些情况是 SPA 切换，没有 navigation 事件；再检查选择页是否消失
+  // 1) 等选店面板隐藏（SPA 场景无 navigation 时，这是最直接信号）
+  await page
+    .locator("text=请选择店铺")
+    .first()
+    .waitFor({ state: "hidden", timeout: 12000 })
+    .catch(() => {});
+
+  // 2) 等 URL 真正离开选店页/登录页并进入工作台/罗盘域名（兼容多次重定向）
+  await page
+    .waitForFunction(
+      (prev) => {
+        const url = location.href || "";
+        const leftPicker = !/请选择店铺/.test(document.body?.innerText || "");
+        const onDomain =
+          /fxg\.jinritemai\.com/.test(url) || /compass\.jinritemai\.com/.test(url);
+        const notLogin =
+          !/\/login\//.test(url) &&
+          !/login\/(common|phone|email)/.test(url);
+        const changed = prev ? url !== prev : true;
+        return leftPicker && onDomain && notLogin && changed;
+      },
+      beforeUrl,
+      { timeout: 15000, polling: 200 }
+    )
+    .catch(() => {});
+
+  // 3) 如果仍然停留在选择页，再点一次兜底（少数情况下第一次点击未生效）
   const stillPicker = await isShopPickerVisible(page);
   if (stillPicker) {
-    // 再点一次兜底
     await hit.item.locator.click({ timeout: 3000 }).catch(() => {});
     await page.waitForTimeout(1500);
   }
+
+  await waitForDomLoaded(page, { tag });
 
   return {
     picked: true,

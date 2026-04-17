@@ -2,6 +2,7 @@ const {
   loadPreferredShopNames,
   pickShopByPreference
 } = require("./shop-picker");
+const { waitForDomLoaded } = require("./dom-ready");
 
 /**
  * "切换数据视角"的真实行为（实地校验版）：
@@ -134,16 +135,43 @@ async function ensureOnCompassHome(page, tag) {
   // /shop/video 等子路径下右上角菜单没有"切换数据视角"，必须跳回 /shop 主页
   if (!/https?:\/\/compass\.jinritemai\.com\/shop\/?($|\?|#)/.test(url)) {
     nowLog(tag, `当前 URL 非罗盘首页 (${url})，跳回 ${COMPASS_HOME_URL}`);
-    try {
-      await page.goto(COMPASS_HOME_URL, {
-        waitUntil: "domcontentloaded",
-        timeout: 20000
-      });
-    } catch (error) {
-      warnLog(tag, `跳转罗盘首页失败: ${error.message || error}`);
-      return false;
+    // 抖店/罗盘会有多段重定向或 SPA 切换，偶发导致 goto 被后续导航打断（net::ERR_ABORTED）。
+    // 这里做两段式兜底：
+    // 1) 先尝试 goto
+    // 2) 如失败，短暂等待后检查当前 URL 是否已在 /shop；否则再重试一次
+    let navigated = false;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await page.goto(COMPASS_HOME_URL, {
+          waitUntil: "domcontentloaded",
+          timeout: 20000
+        });
+        navigated = true;
+        break;
+      } catch (error) {
+        const msg = error?.message || String(error);
+        warnLog(tag, `跳转罗盘首页失败${attempt === 0 ? "（将重试）" : ""}: ${msg}`);
+        // 让页面把正在进行的导航走完一帧，再判断是否其实已经到位
+        await page.waitForTimeout(800).catch(() => {});
+        const cur = page.url() || "";
+        if (/https?:\/\/compass\.jinritemai\.com\/shop\/?($|\?|#)/.test(cur)) {
+          navigated = true;
+          break;
+        }
+      }
     }
+    if (!navigated) return false;
   }
+  // 等页面 DOM 更“稳定”一些，再以右上角触发器出现作为就绪信号
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  // readyState=complete 并非总是必要，但可以降低“页面还在替换 DOM”就开始下一步的概率
+  await page
+    .waitForFunction(() => document.readyState === "complete", null, {
+      timeout: 8000,
+      polling: 200
+    })
+    .catch(() => {});
+
   // 等右上角触发器出现，作为"首页已就绪"的信号
   const trigger = page.locator(USER_TRIGGER_SELECTORS.join(", ")).first();
   const ok = await trigger
@@ -518,7 +546,25 @@ async function closeSwitchModalIfOpen(page) {
 }
 
 /**
- * 整体流程：打开罗盘首页 → 展开右上角用户菜单 → 点击"切换数据视角" →
+ * 先在当前页尝试打开「切换数据视角」弹窗；若当前页菜单里没有该入口（例如视频明细页），
+ * 再回罗盘首页重试。避免每次切店都无条件 goto /shop。
+ */
+async function openSwitchShopModal(page, tag) {
+  if (await openUserDropdown(page, tag)) {
+    if (await clickSwitchEntryAndWaitModal(page, tag)) return true;
+  }
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.waitForTimeout(250);
+  if (await ensureOnCompassHome(page, tag)) {
+    if (await openUserDropdown(page, tag)) {
+      if (await clickSwitchEntryAndWaitModal(page, tag)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 整体流程：展开右上角用户菜单 → 点击"切换数据视角"（必要时先回罗盘首页）→
  * 等 modal 列表加载 → 按 preferred 列表挑下一个未处理店铺 → 点击切换。
  *
  * 所有关键节点都打点日志，便于在任何失败节点定位问题。
@@ -543,22 +589,11 @@ async function switchToNextPreferredShop(page, options = {}) {
     return { switched: false, reason: "no-preferred-list" };
   }
 
-  // 步骤 1: 确保在罗盘首页
-  if (!(await ensureOnCompassHome(page, tag))) {
-    return { switched: false, reason: "cannot-reach-compass-home" };
-  }
-
-  // 步骤 2: 打开右上角下拉
-  if (!(await openUserDropdown(page, tag))) {
-    return { switched: false, reason: "user-dropdown-not-opened" };
-  }
-
-  // 步骤 3: 点击"切换数据视角"并等 modal 加载
-  if (!(await clickSwitchEntryAndWaitModal(page, tag))) {
+  if (!(await openSwitchShopModal(page, tag))) {
     return { switched: false, reason: "modal-not-opened" };
   }
 
-  // 步骤 4: 读取 modal 店铺列表
+  // 读取 modal 店铺列表
   const items = await readModalShopItems(page);
   const availableNames = items.map((it) => it.name).filter(Boolean);
   nowLog(
@@ -568,7 +603,7 @@ async function switchToNextPreferredShop(page, options = {}) {
       .join(" | ")}${availableNames.length > 5 ? " ..." : ""}`
   );
 
-  // 步骤 5: 过滤已处理的店铺后按优先级匹配
+  // 过滤已处理的店铺后按优先级匹配
   const remaining = items.filter((it) => {
     if (!it.name) return false;
     for (const done of processedSet) {
@@ -598,7 +633,7 @@ async function switchToNextPreferredShop(page, options = {}) {
     `准备切换到店铺 "${hit.item.name}"（匹配优先级项 "${hit.preferred}"）`
   );
 
-  // 步骤 6: 点击目标店铺，切换后罗盘会整页重载
+  // 点击目标店铺，切换后罗盘会整页重载
   const t0 = Date.now();
   await Promise.all([
     page
@@ -612,6 +647,8 @@ async function switchToNextPreferredShop(page, options = {}) {
   await modal
     .waitFor({ state: "hidden", timeout: 10000 })
     .catch(() => {});
+
+  await waitForDomLoaded(page, { tag });
 
   nowLog(tag, `店铺切换完成 (${Date.now() - t0}ms)`);
 
@@ -629,6 +666,7 @@ module.exports = {
   ensureOnCompassHome,
   openUserDropdown,
   clickSwitchEntryAndWaitModal,
+  openSwitchShopModal,
   readModalShopItems,
   closeSwitchModalIfOpen,
   switchToNextPreferredShop

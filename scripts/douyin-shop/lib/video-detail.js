@@ -360,7 +360,8 @@ function safeShopDirName(name) {
  * 页面可能同时存在多个"下载明细"按钮（数据 tab 与 视频明细 tab 各一个），
  * 这里优先用 nth-last（离视频明细区最近的那个，按 DOM 顺序通常排在后面）。
  */
-async function clickDownloadAndSave(page, tag, saveDir) {
+async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
+  const exportLabel = options.exportLabel || "视频明细";
   const started = Date.now();
   await fs.mkdir(saveDir, { recursive: true });
 
@@ -373,7 +374,7 @@ async function clickDownloadAndSave(page, tag, saveDir) {
   const downloadBtn = allButtons.nth(btnCount - 1);
   await downloadBtn.waitFor({ state: "visible", timeout: 8000 });
 
-  logStep(tag, `发现 ${btnCount} 个"下载明细"按钮，点击最后一个`);
+  logStep(tag, `发现 ${btnCount} 个"下载明细"按钮，点击最后一个（${exportLabel}）`);
   const downloadPromise = page.waitForEvent("download", { timeout: 60000 });
 
   await downloadBtn.click({ timeout: 3000 });
@@ -395,7 +396,7 @@ async function clickDownloadAndSave(page, tag, saveDir) {
     .replace(/[:.]/g, "-")
     .replace("T", "_")
     .slice(0, 19);
-  const savePath = path.join(saveDir, `${ts}-${safeName}`);
+  const savePath = path.join(saveDir, `${ts}-${exportLabel}-${safeName}`);
 
   await download.saveAs(savePath);
   logStep(tag, `明细文件已保存: ${savePath}`, started);
@@ -430,9 +431,11 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName }) {
   await page.waitForTimeout(1200);
 
   const targetDir = shopName
-    ? path.join(saveDir, safeShopDirName(shopName))
+    ? path.join(saveDir, safeShopDirName(shopName), "视频明细")
     : saveDir;
-  const savePath = await clickDownloadAndSave(page, tag, targetDir);
+  const savePath = await clickDownloadAndSave(page, tag, targetDir, {
+    exportLabel: "视频明细"
+  });
 
   logStep(tag, `下载流程完成`, startedAll);
   return { savePath };

@@ -9,13 +9,15 @@ const {
   SLIDER_MAX_RETRY
 } = require("./env");
 const { solveCaptchaIfPresent } = require("./captcha");
-const { selectShopIfPicker, loadPreferredShopNames } = require("./shop-picker");
-const { downloadVideoSelfDetail } = require("./video-detail");
 const {
-  readCurrentShopName,
-  ensureOnCompassHome,
-  switchToNextPreferredShop
-} = require("./shop-switch");
+  selectShopIfPicker,
+  loadPreferredShopNames,
+  isShopPickerVisible
+} = require("./shop-picker");
+const { downloadVideoSelfDetail, gotoVideoSelf } = require("./video-detail");
+const { downloadGraphicDetail } = require("./graphic-detail");
+const { readCurrentShopName, switchToNextPreferredShop } = require("./shop-switch");
+const { waitForDomLoaded } = require("./dom-ready");
 
 function getAccountPaths(email) {
   const safeName = String(email).replace(/[\\/:*?"<>|]+/g, "_");
@@ -191,39 +193,95 @@ async function clickLogin(page) {
 }
 
 /**
+ * 是否出现抖店/罗盘「登录」相关 UI（会话失效时常驻留在工作台 URL 但表单已弹出）。
+ * 命中则视为未登录，避免仅靠 URL 误判。
+ */
+async function hasLoginUi(page) {
+  const url = page.url() || "";
+  if (url.includes("/login/")) return true;
+
+  const pw = page.locator('input[type="password"]').first();
+  const pwOk = await pw.isVisible({ timeout: 280 }).catch(() => false);
+  if (!pwOk) return false;
+
+  const emailLike = page
+    .locator(
+      'input[placeholder="请输入邮箱"], input[placeholder*="邮箱"], input[type="email"]'
+    )
+    .first();
+  if (await emailLike.isVisible({ timeout: 280 }).catch(() => false)) return true;
+
+  const emailTab = page
+    .locator(
+      'div[role="tab"]:has-text("邮箱登录"), span:has-text("邮箱登录"), :text-is("邮箱登录")'
+    )
+    .first();
+  if (await emailTab.isVisible({ timeout: 280 }).catch(() => false)) return true;
+
+  if (await page.locator("text=手机号登录").first().isVisible({ timeout: 280 }).catch(() => false))
+    return true;
+
+  return false;
+}
+
+/**
+ * 工作台已登录后的 DOM 特征（与 shop-switch 中实地结构一致），用于 cookie 复用探测。
+ */
+async function hasAuthenticatedWorkspaceDom(page) {
+  if (await isShopPickerVisible(page)) return true;
+
+  const userDrop = page
+    .locator(
+      'div[class*="userDropDown"].ecom-dropdown-trigger, div[class*="userDropDown"]'
+    )
+    .first();
+  if (await userDrop.isVisible({ timeout: 650 }).catch(() => false)) return true;
+
+  for (const sel of [
+    '[class*="shopName"]',
+    '[class*="shopTitle"]',
+    '[class*="ShopName"]'
+  ]) {
+    const el = page.locator(sel).first();
+    if (await el.isVisible({ timeout: 450 }).catch(() => false)) {
+      const t = ((await el.textContent().catch(() => "")) || "").trim();
+      if (t && !/^(登录|注册|请登录)/.test(t)) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * 判断是否已经登录到抖店后台。
- * 登录成功的几种表现（任一命中即返回 true）：
- * 1) URL 跳到抖店工作台 fxg.jinritemai.com 的非登录页
- * 2) URL 跳到罗盘 compass.jinritemai.com
- * 3) 页面 DOM 出现"请选择店铺"（有时 SPA 切换后 URL 未变但页面已切到选店）
+ * 必须先排除登录页/登录表单，再要求选店页或工作台 DOM，避免「探测 URL 即 /ffa/mshop」时瞬间误判。
  */
 async function isLoggedIn(page) {
+  if (await hasLoginUi(page)) return false;
+
   const url = page.url() || "";
-  if (url.includes("/ffa/mshop") || url.includes("/mshop")) return true;
   if (
-    url.includes("fxg.jinritemai.com") &&
-    !url.includes("/login/common") &&
-    !url.includes("/login/phone") &&
-    !url.includes("/login/email")
+    url.includes("/login/common") ||
+    url.includes("/login/phone") ||
+    url.includes("/login/email") ||
+    (url.includes("jinritemai.com") && url.includes("/login/"))
   ) {
-    return true;
+    return false;
   }
-  if (url.includes("compass.jinritemai.com")) {
-    return true;
+
+  if (await isShopPickerVisible(page)) return true;
+
+  if (url.includes("fxg.jinritemai.com") || url.includes("compass.jinritemai.com")) {
+    return hasAuthenticatedWorkspaceDom(page);
   }
-  // URL 还未变，但页面已经切到"请选择店铺"视图
-  const onPicker = await page
-    .locator("text=请选择店铺")
-    .first()
-    .isVisible({ timeout: 120 })
-    .catch(() => false);
-  if (onPicker) return true;
+
   return false;
 }
 
 async function waitForLoginSettled(page, timeoutMs = 15000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    if (await isShopPickerVisible(page)) return true;
     if (await isLoggedIn(page)) return true;
     await page.waitForTimeout(400);
   }
@@ -265,59 +323,92 @@ async function captureFailureShot(page, debugDir, kind) {
 }
 
 /**
- * 下载一次当前店铺的明细；失败单独捕获不影响外层循环。
+ * 下载当前店铺的短视频明细 + 图文明细；二者独立 try/catch，互不影响。
+ * 店铺名优先从当前页读取；读不到时用上游 hint。
  *
- * 流程：先回罗盘首页读当前店铺名（视频明细页上读到的右上角并不总是稳定），
- *      然后再进入视频明细页执行下载。
- *
- * @returns {Promise<{ok: boolean, shopName: string, downloadPath?: string, error?: string}>}
+ * @returns {Promise<{ok: boolean, shopName: string, videoPath?: string, graphicPath?: string, videoError?: string, graphicError?: string, downloadPath?: string, error?: string}>}
  */
 async function downloadCurrentShop(page, tag, paths, options = {}) {
-  // 先确保在罗盘首页，从这里读右上角的当前店铺名是最可靠的
   let shopName = "";
   try {
-    await ensureOnCompassHome(page, tag);
     shopName = await readCurrentShopName(page);
     if (shopName) {
       console.log(`[${tag}] 当前登录店铺: ${shopName}`);
     } else if (options.shopNameHint) {
-      // 页面读不到时，用上游传入的 hint（通常是上一次切换/选中的店铺名）
       shopName = String(options.shopNameHint).trim();
       console.warn(
         `[${tag}] 页面未能读取到当前店铺名，回退使用上游 hint "${shopName}"`
       );
     } else {
-      console.warn(`[${tag}] 罗盘首页未能读取到当前店铺名，将以 "unknown" 归档`);
+      console.warn(`[${tag}] 未能读取到当前店铺名，将以 "unknown" 归档`);
     }
   } catch (error) {
     console.warn(`[${tag}] 读取当前店铺名异常: ${error.message || error}`);
   }
 
   const shopTag = shopName ? `${tag}|${shopName}` : tag;
+  const sn = shopName || "unknown";
+
+  let videoPath;
+  let graphicPath;
+  let videoError;
+  let graphicError;
 
   try {
     const { savePath } = await downloadVideoSelfDetail(page, {
       tag: shopTag,
       saveDir: paths.dataDir,
-      shopName: shopName || "unknown"
+      shopName: sn
     });
-    return { ok: true, shopName, downloadPath: savePath };
+    videoPath = savePath;
   } catch (error) {
-    const msg = error?.message || String(error);
-    console.error(`[${shopTag}] 下载短视频明细失败: ${msg}`);
-    const shot = await captureFailureShot(page, paths.debugDir, "download-failed");
+    videoError = error?.message || String(error);
+    console.error(`[${shopTag}] 视频明细下载失败: ${videoError}`);
+    const shot = await captureFailureShot(
+      page,
+      paths.debugDir,
+      "download-video-failed"
+    );
     if (shot) console.error(`[${shopTag}] 失败截图: ${shot}`);
-    return { ok: false, shopName, error: msg };
   }
+
+  try {
+    const { savePath } = await downloadGraphicDetail(page, {
+      tag: shopTag,
+      saveDir: paths.dataDir,
+      shopName: sn
+    });
+    graphicPath = savePath;
+  } catch (error) {
+    graphicError = error?.message || String(error);
+    console.error(`[${shopTag}] 图文明细下载失败: ${graphicError}`);
+    const shot = await captureFailureShot(
+      page,
+      paths.debugDir,
+      "download-graphic-failed"
+    );
+    if (shot) console.error(`[${shopTag}] 失败截图: ${shot}`);
+  }
+
+  const ok = Boolean(videoPath && graphicPath);
+  const parts = [videoError, graphicError].filter(Boolean);
+  return {
+    ok,
+    shopName,
+    videoPath,
+    graphicPath,
+    videoError,
+    graphicError,
+    downloadPath: videoPath || graphicPath,
+    error: parts.length ? parts.join("；") : undefined
+  };
 }
 
 /**
  * 登录成功后统一执行的后续动作：
- * 1) 若停留在"请选择店铺"页，按 default-add-accounts.json 顺序选中第一个匹配项
- * 2) 在当前店铺完成一次"视频明细"下载（文件归档到 data/<店铺名>/）
- * 3) 通过右上角头像 → "切换数据视角" → 按 default-add-accounts.json
- *    顺序依次切换到后续每一个匹配的店铺，每次切换后都下载一次明细
- * 4) 直到切店铺弹窗中再也找不到匹配且未处理的店铺为止
+ * 1) 若出现「请选择店铺」页，按 default-add-accounts.json 选中第一个匹配项并等待落地稳定
+ * 2) 若无选店页（cookie 等），必要时通过「切换数据视角」切到名单中的第一家
+ * 3) 每店依次下载短视频明细与图文分析明细，再切到下一个未处理名单店铺重复
  *
  * 每一步都尽量独立捕获异常，避免因后置步骤失败而否定登录动作本身的成果。
  */
@@ -330,8 +421,13 @@ async function runPostLoginFlow(page, tag, paths) {
     downloadError: null
   };
 
+  const preferredList = await loadPreferredShopNames();
+  console.log(
+    `[${tag}] 优先级名单 (${preferredList.length}): ${preferredList.join(", ") || "(空)"}`
+  );
+
   try {
-    const pick = await selectShopIfPicker(page, { tag });
+    const pick = await selectShopIfPicker(page, { tag, preferredList });
     if (pick.picked) {
       result.shopPicked = true;
       result.shopName = pick.name;
@@ -343,24 +439,57 @@ async function runPostLoginFlow(page, tag, paths) {
     result.shopPicked = false;
   }
 
-  const preferredList = await loadPreferredShopNames();
-  console.log(
-    `[${tag}] 优先级名单 (${preferredList.length}): ${preferredList.join(", ") || "(空)"}`
-  );
-
   // 用名称集合去重，保证同一个店铺不会被重复下载
   const processed = new Set();
-  // 兜底防死循环：最多轮 preferredList 长度 + 2 次
-  const maxShops = Math.max(preferredList.length || 0, 1) + 2;
 
-  // 首轮的店铺名 hint：登录阶段选店时已知的名字，是第一轮最可靠的来源
+  function isPreferredShop(shopName) {
+    const name = String(shopName || "").trim();
+    if (!name) return false;
+    return preferredList.some((p) => {
+      const pref = String(p || "").trim();
+      if (!pref) return false;
+      return name === pref || name.includes(pref) || pref.includes(name);
+    });
+  }
+
   let pendingShopHint = result.shopName || null;
+
+  if (!result.shopPicked && preferredList.length > 0) {
+    const sw = await switchToNextPreferredShop(page, {
+      tag,
+      processedNames: processed,
+      preferredList
+    });
+    if (!sw.switched && sw.reason === "no-match") {
+      console.log(
+        `[${tag}] 本账号未命中任何优先级名单店铺（${preferredList.length} 项名单中无可用店铺），跳过下载`
+      );
+      return result;
+    }
+    if (sw.switched) {
+      pendingShopHint = sw.name || null;
+      result.shopName = result.shopName || sw.name || null;
+    }
+  }
+
+  await waitForDomLoaded(page, { tag });
+
+  try {
+    await gotoVideoSelf(page, tag);
+  } catch (error) {
+    console.warn(
+      `[${tag}] 进入短视频明细页失败（仍尝试在下载流程内重试）: ${error.message || error}`
+    );
+  }
+
+  const maxShops =
+    preferredList.length > 0 ? preferredList.length + 2 : 1;
 
   for (let i = 0; i < maxShops; i += 1) {
     console.log(
-      `\n[${tag}] ========== 第 ${i + 1}/${maxShops} 轮 ==========`
+      `\n[${tag}] ========== 第 ${i + 1}/${maxShops} 轮（${maxShops}=名单${preferredList.length}项+2，防死循环，非本账号匹配店数）==========`
     );
-    // 下载当前店铺
+    // 下载当前店铺（仅名单店铺）
     const round = await downloadCurrentShop(page, tag, paths, {
       shopNameHint: pendingShopHint
     });
@@ -369,23 +498,45 @@ async function runPostLoginFlow(page, tag, paths) {
       if (!result.shopName) result.shopName = round.shopName;
     }
 
+    // 如果仍然出现非名单店铺（极少数：读名失败/页面跳转异常导致），直接跳过记录并结束循环
+    if (round.shopName && preferredList.length > 0 && !isPreferredShop(round.shopName)) {
+      console.warn(
+        `[${tag}] 本轮店铺 "${round.shopName}" 不在优先级名单内，已跳过并结束（仅下载名单店铺）`
+      );
+      break;
+    }
+
+    result.downloads.push({
+      shopName: round.shopName,
+      videoPath: round.videoPath,
+      graphicPath: round.graphicPath,
+      videoError: round.videoError,
+      graphicError: round.graphicError
+    });
+    if (round.videoPath && !result.downloadPath) {
+      result.downloadPath = round.videoPath;
+    }
+    if (round.graphicPath) {
+      result.downloadPath = round.graphicPath;
+    }
+    if (round.videoError && !result.downloadError) {
+      result.downloadError = round.videoError;
+    }
+    if (round.graphicError) {
+      result.downloadError = round.graphicError;
+    }
+
     if (round.ok) {
-      result.downloads.push({
-        shopName: round.shopName,
-        downloadPath: round.downloadPath
-      });
-      if (!result.downloadPath) result.downloadPath = round.downloadPath;
       console.log(
-        `[${tag}] ✔ 本轮下载成功，店铺=${round.shopName || "unknown"}`
+        `[${tag}] 本轮视频+图文明细均成功，店铺=${round.shopName || "unknown"}`
       );
     } else {
-      result.downloads.push({
-        shopName: round.shopName,
-        error: round.error
-      });
-      if (!result.downloadError) result.downloadError = round.error;
+      const detail = [
+        round.videoPath ? "视频OK" : `视频失败: ${round.videoError || "-"}`,
+        round.graphicPath ? "图文OK" : `图文失败: ${round.graphicError || "-"}`
+      ].join(" | ");
       console.warn(
-        `[${tag}] ✘ 本轮下载失败，店铺=${round.shopName || "unknown"}，原因=${round.error}`
+        `[${tag}] 本轮未全部成功，店铺=${round.shopName || "unknown"}（${detail}）`
       );
     }
 
@@ -432,11 +583,13 @@ async function runPostLoginFlow(page, tag, paths) {
     console.log(
       `[${tag}] 切换成功（目标店铺=${switchRes.name || "?"}），进入下一轮，当前累计已处理: ${[...processed].join(", ")}`
     );
-    await page.waitForTimeout(800);
   }
 
+  const fullOk = result.downloads.filter(
+    (d) => d.videoPath && d.graphicPath
+  ).length;
   console.log(
-    `\n[${tag}] ========== 多店铺循环结束: 共 ${result.downloads.length} 轮，成功 ${result.downloads.filter((d) => d.downloadPath).length} ==========`
+    `\n[${tag}] ========== 多店铺循环结束: 共 ${result.downloads.length} 轮，视频+图文均成功 ${fullOk} ==========`
   );
   return result;
 }
@@ -458,19 +611,15 @@ async function tryReuseCookieLogin(page, tag) {
     return false;
   }
 
-  // 给 SPA 一点时间决定跳转（cookie 无效时会被踢回登录页）
-  const deadline = Date.now() + 6000;
+  // 给 SPA 一点时间决定跳转与渲染（失效时可能先停在 home URL 再出登录表单）
+  const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
     const url = page.url() || "";
-    if (
-      url.includes("/login/common") ||
-      url.includes("/login/phone") ||
-      url.includes("/login/email")
-    ) {
+    if (url.includes("/login/") || (await hasLoginUi(page))) {
       return false;
     }
     if (await isLoggedIn(page)) return true;
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(320);
   }
   return isLoggedIn(page);
 }
@@ -537,6 +686,7 @@ async function runShopLogin(context, account) {
     const fastLogged = await (async () => {
       const deadline = Date.now() + 1500;
       while (Date.now() < deadline) {
+        if (await isShopPickerVisible(page)) return true;
         if (await isLoggedIn(page)) return true;
         await page.waitForTimeout(150);
       }
@@ -570,28 +720,6 @@ async function runShopLogin(context, account) {
     }
 
     console.log(`[${tag}] 登录成功，当前 URL: ${page.url()}`);
-
-    // 可选：尝试跳到 home 页（有时登录后会停在过渡页）
-    // 注意：若页面已经在罗盘（compass.jinritemai.com）或展示"请选择店铺"，不要再跳，
-    // 否则会打断后续的店铺选择 + 明细下载流程。
-    const currentUrl = page.url() || "";
-    const onCompass = currentUrl.includes("compass.jinritemai.com");
-    const onShopPicker = await page
-      .locator("text=请选择店铺")
-      .first()
-      .isVisible({ timeout: 500 })
-      .catch(() => false);
-    if (
-      SHOP_HOME_URL &&
-      !currentUrl.includes("/ffa/mshop") &&
-      !onCompass &&
-      !onShopPicker
-    ) {
-      await page
-        .goto(SHOP_HOME_URL, { waitUntil: "domcontentloaded" })
-        .catch(() => {});
-      await page.waitForTimeout(500);
-    }
 
     await saveStorageState(context, paths);
     console.log(
