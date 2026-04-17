@@ -3,7 +3,7 @@ const fs = require("fs/promises");
 
 const GRAPHIC_URL =
   process.env.SHOP_GRAPHIC_URL ||
-  "https://compass.jinritemai.com/shop/graphic/";
+  "https://compass.jinritemai.com/shop/graphic/graphic-analysis";
 
 function logStep(tag, msg, started) {
   const dur = started ? ` (+${Date.now() - started}ms)` : "";
