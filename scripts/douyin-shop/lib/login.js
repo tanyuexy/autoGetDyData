@@ -9,6 +9,13 @@ const {
   SLIDER_MAX_RETRY
 } = require("./env");
 const { solveCaptchaIfPresent } = require("./captcha");
+const { selectShopIfPicker, loadPreferredShopNames } = require("./shop-picker");
+const { downloadVideoSelfDetail } = require("./video-detail");
+const {
+  readCurrentShopName,
+  ensureOnCompassHome,
+  switchToNextPreferredShop
+} = require("./shop-switch");
 
 function getAccountPaths(email) {
   const safeName = String(email).replace(/[\\/:*?"<>|]+/g, "_");
@@ -18,13 +25,15 @@ function getAccountPaths(email) {
     accountDir,
     storageStatePath: path.join(accountDir, "storageState.json"),
     cookiesPath: path.join(accountDir, "cookies.json"),
-    debugDir: path.join(accountDir, "debug")
+    debugDir: path.join(accountDir, "debug"),
+    dataDir: path.join(accountDir, "data")
   };
 }
 
 async function ensureAccountPaths(paths) {
   await fs.mkdir(paths.accountDir, { recursive: true });
   await fs.mkdir(paths.debugDir, { recursive: true });
+  await fs.mkdir(paths.dataDir, { recursive: true });
 }
 
 /**
@@ -183,16 +192,32 @@ async function clickLogin(page) {
 
 /**
  * 判断是否已经登录到抖店后台。
+ * 登录成功的几种表现（任一命中即返回 true）：
+ * 1) URL 跳到抖店工作台 fxg.jinritemai.com 的非登录页
+ * 2) URL 跳到罗盘 compass.jinritemai.com
+ * 3) 页面 DOM 出现"请选择店铺"（有时 SPA 切换后 URL 未变但页面已切到选店）
  */
 async function isLoggedIn(page) {
   const url = page.url() || "";
   if (url.includes("/ffa/mshop") || url.includes("/mshop")) return true;
   if (
     url.includes("fxg.jinritemai.com") &&
-    !url.includes("/login")
+    !url.includes("/login/common") &&
+    !url.includes("/login/phone") &&
+    !url.includes("/login/email")
   ) {
     return true;
   }
+  if (url.includes("compass.jinritemai.com")) {
+    return true;
+  }
+  // URL 还未变，但页面已经切到"请选择店铺"视图
+  const onPicker = await page
+    .locator("text=请选择店铺")
+    .first()
+    .isVisible({ timeout: 120 })
+    .catch(() => false);
+  if (onPicker) return true;
   return false;
 }
 
@@ -222,6 +247,221 @@ async function saveStorageState(context, paths) {
 }
 
 /**
+ * 截图并返回路径，专用于失败时记录现场。
+ */
+async function captureFailureShot(page, debugDir, kind) {
+  try {
+    const ts = new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")
+      .replace("T", "_")
+      .slice(0, 19);
+    const shot = path.join(debugDir, `${kind}-${ts}.png`);
+    await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+    return shot;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 下载一次当前店铺的明细；失败单独捕获不影响外层循环。
+ *
+ * 流程：先回罗盘首页读当前店铺名（视频明细页上读到的右上角并不总是稳定），
+ *      然后再进入视频明细页执行下载。
+ *
+ * @returns {Promise<{ok: boolean, shopName: string, downloadPath?: string, error?: string}>}
+ */
+async function downloadCurrentShop(page, tag, paths) {
+  // 先确保在罗盘首页，从这里读右上角的当前店铺名是最可靠的
+  let shopName = "";
+  try {
+    await ensureOnCompassHome(page, tag);
+    shopName = await readCurrentShopName(page);
+    if (shopName) {
+      console.log(`[${tag}] 当前登录店铺: ${shopName}`);
+    } else {
+      console.warn(`[${tag}] 罗盘首页未能读取到当前店铺名，将以 "unknown" 归档`);
+    }
+  } catch (error) {
+    console.warn(`[${tag}] 读取当前店铺名异常: ${error.message || error}`);
+  }
+
+  const shopTag = shopName ? `${tag}|${shopName}` : tag;
+
+  try {
+    const { savePath } = await downloadVideoSelfDetail(page, {
+      tag: shopTag,
+      saveDir: paths.dataDir,
+      shopName: shopName || "unknown"
+    });
+    return { ok: true, shopName, downloadPath: savePath };
+  } catch (error) {
+    const msg = error?.message || String(error);
+    console.error(`[${shopTag}] 下载短视频明细失败: ${msg}`);
+    const shot = await captureFailureShot(page, paths.debugDir, "download-failed");
+    if (shot) console.error(`[${shopTag}] 失败截图: ${shot}`);
+    return { ok: false, shopName, error: msg };
+  }
+}
+
+/**
+ * 登录成功后统一执行的后续动作：
+ * 1) 若停留在"请选择店铺"页，按 default-add-accounts.json 顺序选中第一个匹配项
+ * 2) 在当前店铺完成一次"视频明细"下载（文件归档到 data/<店铺名>/）
+ * 3) 通过右上角头像 → "切换数据视角" → 按 default-add-accounts.json
+ *    顺序依次切换到后续每一个匹配的店铺，每次切换后都下载一次明细
+ * 4) 直到切店铺弹窗中再也找不到匹配且未处理的店铺为止
+ *
+ * 每一步都尽量独立捕获异常，避免因后置步骤失败而否定登录动作本身的成果。
+ */
+async function runPostLoginFlow(page, tag, paths) {
+  const result = {
+    shopPicked: null,
+    shopName: null,
+    downloads: [],
+    downloadPath: null,
+    downloadError: null
+  };
+
+  try {
+    const pick = await selectShopIfPicker(page, { tag });
+    if (pick.picked) {
+      result.shopPicked = true;
+      result.shopName = pick.name;
+    } else {
+      result.shopPicked = false;
+    }
+  } catch (error) {
+    console.warn(`[${tag}] 店铺选择阶段异常: ${error.message || error}`);
+    result.shopPicked = false;
+  }
+
+  const preferredList = await loadPreferredShopNames();
+  console.log(
+    `[${tag}] 优先级名单 (${preferredList.length}): ${preferredList.join(", ") || "(空)"}`
+  );
+
+  // 用名称集合去重，保证同一个店铺不会被重复下载
+  const processed = new Set();
+  // 兜底防死循环：最多轮 preferredList 长度 + 2 次
+  const maxShops = Math.max(preferredList.length || 0, 1) + 2;
+
+  for (let i = 0; i < maxShops; i += 1) {
+    console.log(
+      `\n[${tag}] ========== 第 ${i + 1}/${maxShops} 轮 ==========`
+    );
+    // 下载当前店铺
+    const round = await downloadCurrentShop(page, tag, paths);
+    if (round.shopName) {
+      processed.add(round.shopName);
+      if (!result.shopName) result.shopName = round.shopName;
+    }
+
+    if (round.ok) {
+      result.downloads.push({
+        shopName: round.shopName,
+        downloadPath: round.downloadPath
+      });
+      if (!result.downloadPath) result.downloadPath = round.downloadPath;
+      console.log(
+        `[${tag}] ✔ 本轮下载成功，店铺=${round.shopName || "unknown"}`
+      );
+    } else {
+      result.downloads.push({
+        shopName: round.shopName,
+        error: round.error
+      });
+      if (!result.downloadError) result.downloadError = round.error;
+      console.warn(
+        `[${tag}] ✘ 本轮下载失败，店铺=${round.shopName || "unknown"}，原因=${round.error}`
+      );
+    }
+
+    // 没有优先级名单就不进入多店铺切换循环
+    if (preferredList.length === 0) {
+      console.log(`[${tag}] 未配置优先级名单，结束循环`);
+      break;
+    }
+
+    // 尝试切到下一个匹配且未处理的店铺
+    let switchRes;
+    try {
+      switchRes = await switchToNextPreferredShop(page, {
+        tag,
+        processedNames: processed,
+        preferredList
+      });
+    } catch (error) {
+      console.warn(`[${tag}] 切换店铺阶段异常: ${error.message || error}`);
+      await captureFailureShot(page, paths.debugDir, "switch-shop-failed");
+      break;
+    }
+
+    if (!switchRes.switched) {
+      if (switchRes.reason === "no-match") {
+        console.log(
+          `[${tag}] 切店铺弹窗中已无匹配且未处理的店铺，结束循环（共处理 ${processed.size} 个店铺）`
+        );
+      } else if (switchRes.reason === "modal-not-opened") {
+        console.warn(
+          `[${tag}] 右上角菜单中没有"切换数据视角"入口（该账号可能只绑定 1 个自营账号），结束循环`
+        );
+        await captureFailureShot(page, paths.debugDir, "switch-entry-missing");
+      } else {
+        console.warn(
+          `[${tag}] 未能继续切换店铺（原因: ${switchRes.reason || "unknown"}），结束循环`
+        );
+      }
+      break;
+    }
+
+    // 切换成功后等页面稳定（罗盘整页重载）
+    console.log(`[${tag}] 切换成功，进入下一轮，当前累计已处理: ${[...processed].join(", ")}`);
+    await page.waitForTimeout(800);
+  }
+
+  console.log(
+    `\n[${tag}] ========== 多店铺循环结束: 共 ${result.downloads.length} 轮，成功 ${result.downloads.filter((d) => d.downloadPath).length} ==========`
+  );
+  return result;
+}
+
+/**
+ * 用已缓存的 cookie/storageState 直连工作台，尝试"免密登录"。
+ * 返回 true 表示 cookie 仍然有效，可以直接进入后续流程；false 表示需要走账号密码登录。
+ */
+async function tryReuseCookieLogin(page, tag) {
+  const hasCookies = await page.context().cookies().then((cs) => cs.length > 0).catch(() => false);
+  if (!hasCookies) return false;
+
+  const probeUrl = SHOP_HOME_URL || SHOP_LOGIN_URL;
+  console.log(`[${tag}] 检测到已有 cookie，尝试直连 ${probeUrl}`);
+  try {
+    await page.goto(probeUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+  } catch (error) {
+    console.warn(`[${tag}] 直连工作台失败: ${error.message || error}`);
+    return false;
+  }
+
+  // 给 SPA 一点时间决定跳转（cookie 无效时会被踢回登录页）
+  const deadline = Date.now() + 6000;
+  while (Date.now() < deadline) {
+    const url = page.url() || "";
+    if (
+      url.includes("/login/common") ||
+      url.includes("/login/phone") ||
+      url.includes("/login/email")
+    ) {
+      return false;
+    }
+    if (await isLoggedIn(page)) return true;
+    await page.waitForTimeout(300);
+  }
+  return isLoggedIn(page);
+}
+
+/**
  * 执行一次完整的抖店邮箱登录流程。
  *
  * @param {import('playwright').BrowserContext} context
@@ -237,6 +477,16 @@ async function runShopLogin(context, account) {
 
   try {
     const t0 = Date.now();
+
+    // 优先走 cookie 复用：如果账号目录下已有 storageState，直接探测工作台。
+    // cookie 有效就跳过整个登录流程；无效再回落到账号密码登录。
+    if (await tryReuseCookieLogin(page, tag)) {
+      console.log(`[${tag}] cookie 仍然有效，跳过账号密码登录`);
+      await saveStorageState(context, paths);
+      const extra = await runPostLoginFlow(page, tag, paths);
+      return { ok: true, reused: true, paths, ...extra };
+    }
+
     console.log(`[${tag}] 打开抖店登录页 ${SHOP_LOGIN_URL}`);
     await page.goto(SHOP_LOGIN_URL, { waitUntil: "domcontentloaded" });
     // 抖店页面长连接/埋点会让 networkidle 几乎永远触发不到，
@@ -250,7 +500,8 @@ async function runShopLogin(context, account) {
     if (await isLoggedIn(page)) {
       console.log(`[${tag}] 已经处于登录态，跳过登录流程`);
       await saveStorageState(context, paths);
-      return { ok: true, reused: true, paths };
+      const extra = await runPostLoginFlow(page, tag, paths);
+      return { ok: true, reused: true, paths, ...extra };
     }
 
     console.log(`[${tag}] 切换到邮箱登录 tab`);
@@ -265,13 +516,29 @@ async function runShopLogin(context, account) {
     );
     await clickLogin(page);
 
-    // 登录后可能直接成功，也可能触发滑块验证
+    // 登录后可能直接成功（无滑块），也可能触发滑块验证。
+    // 先给一个短暂的"快速通过"窗口：如果点击登录后页面迅速进入登录成功态
+    //（URL 变到 compass/fxg 非登录页，或 DOM 出现"请选择店铺"），就直接跳过滑块检测。
     console.log(`[${tag}] 检查是否触发滑块验证`);
-    const passed = await solveCaptchaIfPresent(page, {
-      tag,
-      maxRetry: SLIDER_MAX_RETRY,
-      paths
-    });
+    const fastLogged = await (async () => {
+      const deadline = Date.now() + 1500;
+      while (Date.now() < deadline) {
+        if (await isLoggedIn(page)) return true;
+        await page.waitForTimeout(150);
+      }
+      return false;
+    })();
+
+    let passed = true;
+    if (fastLogged) {
+      console.log(`[${tag}] 点击登录后已进入登录态，跳过滑块检测`);
+    } else {
+      passed = await solveCaptchaIfPresent(page, {
+        tag,
+        maxRetry: SLIDER_MAX_RETRY,
+        paths
+      });
+    }
 
     if (!passed) {
       console.warn(
@@ -291,7 +558,21 @@ async function runShopLogin(context, account) {
     console.log(`[${tag}] 登录成功，当前 URL: ${page.url()}`);
 
     // 可选：尝试跳到 home 页（有时登录后会停在过渡页）
-    if (SHOP_HOME_URL && !page.url().includes("/ffa/mshop")) {
+    // 注意：若页面已经在罗盘（compass.jinritemai.com）或展示"请选择店铺"，不要再跳，
+    // 否则会打断后续的店铺选择 + 明细下载流程。
+    const currentUrl = page.url() || "";
+    const onCompass = currentUrl.includes("compass.jinritemai.com");
+    const onShopPicker = await page
+      .locator("text=请选择店铺")
+      .first()
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+    if (
+      SHOP_HOME_URL &&
+      !currentUrl.includes("/ffa/mshop") &&
+      !onCompass &&
+      !onShopPicker
+    ) {
       await page
         .goto(SHOP_HOME_URL, { waitUntil: "domcontentloaded" })
         .catch(() => {});
@@ -302,7 +583,9 @@ async function runShopLogin(context, account) {
     console.log(
       `[${tag}] 登录态已保存到 ${paths.storageStatePath}`
     );
-    return { ok: true, reused: false, paths };
+
+    const extra = await runPostLoginFlow(page, tag, paths);
+    return { ok: true, reused: false, paths, ...extra };
   } catch (error) {
     // 保留一张失败截图便于排查
     try {

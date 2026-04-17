@@ -119,7 +119,22 @@ async function waitForCaptchaAppear(page, timeoutMs = 3000) {
     if (found) return found;
     // 如果页面已经跳走（登录成功），就不必再等滑块
     const url = page.url() || "";
-    if (url.includes("/ffa/") || url.includes("/mshop")) return null;
+    if (
+      url.includes("/ffa/") ||
+      url.includes("/mshop") ||
+      url.includes("compass.jinritemai.com") ||
+      // 抖店/罗盘通用的"请选择店铺"页面（URL 可能是 xxx/login/role 等形式）
+      (url.includes("jinritemai.com") && !url.includes("/login/common"))
+    ) {
+      return null;
+    }
+    // 页面里出现"请选择店铺"也视为登录成功，提前结束等待
+    const onPicker = await page
+      .locator("text=请选择店铺")
+      .first()
+      .isVisible({ timeout: 120 })
+      .catch(() => false);
+    if (onPicker) return null;
     await page.waitForTimeout(200);
   }
   return null;

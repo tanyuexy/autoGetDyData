@@ -111,6 +111,31 @@ async function main() {
 
   const okCount = results.filter((r) => r.ok).length;
   console.log(`\n完成: 成功 ${okCount} / ${results.length}`);
+
+  for (const item of results) {
+    if (!item.ok) continue;
+    const parts = [`账号 ${item.account} 登录 OK`];
+    const downloads = Array.isArray(item.downloads) ? item.downloads : [];
+    if (downloads.length > 0) {
+      const okList = downloads.filter((d) => d.downloadPath);
+      const failList = downloads.filter((d) => d.error);
+      parts.push(`已处理店铺 ${downloads.length} 个（成功 ${okList.length}）`);
+      console.log("- " + parts.join(" | "));
+      for (const d of downloads) {
+        if (d.downloadPath) {
+          console.log(`    · [${d.shopName || "未知店铺"}] 明细: ${d.downloadPath}`);
+        } else {
+          console.log(`    · [${d.shopName || "未知店铺"}] 失败: ${d.error}`);
+        }
+      }
+      continue;
+    }
+    if (item.shopName) parts.push(`选中店铺: ${item.shopName}`);
+    if (item.downloadPath) parts.push(`明细文件: ${item.downloadPath}`);
+    if (item.downloadError) parts.push(`下载异常: ${item.downloadError}`);
+    console.log("- " + parts.join(" | "));
+  }
+
   const failed = results.filter((r) => !r.ok);
   if (failed.length > 0) {
     console.log("失败账号:");
