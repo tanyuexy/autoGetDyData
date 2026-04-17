@@ -28,10 +28,40 @@ const USER_TRIGGER_SELECTORS = [
   'span[class*="userName"]'
 ];
 
-// 下拉里的"切换数据视角"选项
+// 下拉里的"切换数据视角"选项。
+// 实地 DOM（2026-04 罗盘）：
+//   body ... > div.ecom-dropdown.ecom-dropdown-placement-bottomRight
+//     > div.dropDownWrapper-y.UAKu
+//       > div.switchAccount-jAhEuJ "切换数据视角"
+// 注意：ecom-dropdown 渲染出来的菜单项结构是多层嵌套，里面可能还包含图标 span，
+// 严格 `:text-is` 会因为节点规范化后的文本带额外空白/图标 alt 而匹配失败，
+// 这里统一用 `:has-text` 宽松匹配；多个候选按优先级排列，命中即用。
+// 首选精确 class `switchAccount`，兜底再走 ecom-dropdown-item 等通用结构。
 const SWITCH_ENTRY_SELECTORS = [
+  'div[class*="switchAccount"]',
   'div[class*="switchAccount"]:has-text("切换数据视角")',
-  ':text-is("切换数据视角")'
+  'li[class*="ecom-dropdown-item"]:has-text("切换数据视角")',
+  'div[class*="ecom-dropdown-item"]:has-text("切换数据视角")',
+  '[class*="ecom-dropdown-menu"] *:has-text("切换数据视角")',
+  'div[role="menuitem"]:has-text("切换数据视角")',
+  'li[role="menuitem"]:has-text("切换数据视角")',
+  'text=切换数据视角'
+];
+
+// 下拉外层面板容器（Portal 到 body 的 ecom-dropdown 根）。
+// 用来判断"下拉是否真的展开"，比直接判断菜单项更稳：组件在关闭态下会给根加
+// hidden / display:none，我们要求根处于非 hidden 才算展开。
+const DROPDOWN_WRAPPER_SELECTOR =
+  'div.ecom-dropdown:not(.ecom-dropdown-hidden) [class*="dropDownWrapper"]';
+
+// 页面左上角"店铺名"展示区（罗盘首页抬头上的店铺标题），
+// 右上角 userName 不稳定（多店铺/子账号场景不一定渲染），这是更稳的兜底。
+const SHOP_TITLE_SELECTORS = [
+  '[class*="shopName"]',
+  '[class*="shop-name"]',
+  '[class*="shopTitle"]',
+  '[class*="ShopName"]',
+  'header [class*="shop"]'
 ];
 
 const SWITCH_MODAL_ROOT = "#ecom-login-account-modal";
@@ -47,12 +77,29 @@ function warnLog(tag, msg) {
 }
 
 /**
- * 读取当前登录店铺名。优先从右上角用户触发器里取，
- * 取不到再兜底尝试页面中部"全部自营账号/xxx"按钮附近的文案。
+ * 读取当前登录店铺名。按稳定性从高到低依次尝试：
+ *  1) 页面左上角的店铺标题（多店铺/子账号场景也会显示当前店铺名）
+ *  2) 右上角 userName（单店账号会把当前店铺名显示在用户触发器里）
+ *  3) 整个右上角触发器的 textContent（兜底）
+ *  4) document.title 里的店铺名（部分页面会带）
  * 返回空字符串表示无法读取。
  */
 async function readCurrentShopName(page) {
-  // 优先：右上角 userName（不一定带 DOM role，需要多选择器）
+  // 步骤 1：左上角店铺标题（最稳，多店铺/子账号场景都有）
+  for (const sel of SHOP_TITLE_SELECTORS) {
+    const el = page.locator(sel).first();
+    if (await el.isVisible({ timeout: 500 }).catch(() => false)) {
+      const t = ((await el.textContent().catch(() => "")) || "").trim();
+      // 页面左上角还可能挂着店铺等级等数字，截断到第一个常见后缀为止
+      const cleaned = t
+        .replace(/\s+/g, "")
+        .match(/[^\s]*(?:旗舰店|专营店|专卖店|官方旗舰店|小店|直营店)/);
+      if (cleaned && cleaned[0]) return cleaned[0];
+      if (t && t.length <= 40) return t;
+    }
+  }
+
+  // 步骤 2：右上角 userName（单店账号里通常是店铺名本身）
   const nameNode = page
     .locator('span[class*="userName"], div[class*="userName"]')
     .first();
@@ -60,14 +107,21 @@ async function readCurrentShopName(page) {
     const text = ((await nameNode.textContent().catch(() => "")) || "").trim();
     if (text) return text;
   }
-  // 兜底：整个触发器 textContent
+
+  // 步骤 3：整个触发器 textContent
   for (const sel of USER_TRIGGER_SELECTORS) {
     const el = page.locator(sel).first();
     if (await el.isVisible({ timeout: 500 }).catch(() => false)) {
       const t = ((await el.textContent().catch(() => "")) || "").trim();
-      if (t) return t;
+      if (t && t.length <= 40) return t;
     }
   }
+
+  // 步骤 4：document.title（例如 "莲藕医药专营店-罗盘"）
+  const title = (await page.title().catch(() => "")) || "";
+  const m = title.match(/[^\s|\-·]*(?:旗舰店|专营店|专卖店|官方旗舰店|小店|直营店)/);
+  if (m && m[0]) return m[0];
+
   return "";
 }
 
@@ -121,27 +175,66 @@ async function openUserDropdown(page, tag) {
   await page.waitForTimeout(150);
   await trigger.click({ timeout: 2000 }).catch(() => {});
 
-  // 等下拉里"切换数据视角"或"退出登录"任一出现，判定下拉已展开
-  const entry = page
-    .locator(SWITCH_ENTRY_SELECTORS.join(", "))
-    .first();
-  const logout = page.locator(':text-is("退出登录")').first();
+  // 关键：下拉是 Portal 到 body 的 ecom-dropdown，展开有动画，
+  // Playwright 的 state: "visible" 在动画初态（opacity:0 / transform）下
+  // 偶尔会判定为可见，但元素此时还没挂"切换数据视角"子节点；
+  // 反过来，即使 DOM 已经挂好节点，面板本身如果还带 display:none 也会被判不可见。
+  // 这里直接用 waitForFunction 轮询真实 DOM：
+  //   条件 A：body 上存在 `div[class*="switchAccount"]` 元素
+  //   条件 B：该元素有非零 bounding box（意味着父面板的 display/visibility 已经放开）
+  // 比 `waitFor({ state: "visible" })` 稳得多。
+  const domReady = await page
+    .waitForFunction(
+      () => {
+        const nodes = Array.from(
+          document.querySelectorAll('div[class*="switchAccount"]')
+        );
+        for (const n of nodes) {
+          const text = (n.textContent || "").replace(/\s+/g, "");
+          if (!text.includes("切换数据视角")) continue;
+          const rect = n.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) return true;
+        }
+        return false;
+      },
+      null,
+      { timeout: 4000, polling: 100 }
+    )
+    .then(() => true)
+    .catch(() => false);
 
-  const ready = await Promise.race([
-    entry
-      .waitFor({ state: "visible", timeout: 4000 })
-      .then(() => "switch")
-      .catch(() => null),
-    logout
-      .waitFor({ state: "visible", timeout: 4000 })
-      .then(() => "logout")
-      .catch(() => null)
-  ]);
-  if (!ready) {
-    // 再点一次兜底
-    await trigger.click({ timeout: 1500, force: true }).catch(() => {});
-    await page.waitForTimeout(400);
+  if (!domReady) {
+    // 尚未看到"切换数据视角"。先看看"退出登录"是否出现，出现说明下拉已经开了
+    // 但当前账号的菜单里真的没有"切换数据视角"条目；否则多半是下拉没开，再点一次兜底。
+    const logoutSeen = await page
+      .locator(':text-is("退出登录")')
+      .first()
+      .isVisible({ timeout: 800 })
+      .catch(() => false);
+    if (!logoutSeen) {
+      await trigger.click({ timeout: 1500, force: true }).catch(() => {});
+      // 再给一次 DOM 渲染机会
+      await page
+        .waitForFunction(
+          () => {
+            const n = document.querySelector(
+              'div[class*="switchAccount"]'
+            );
+            if (!n) return false;
+            const r = n.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+          },
+          null,
+          { timeout: 2500, polling: 100 }
+        )
+        .catch(() => {});
+    }
   }
+
+  // 即便 switchAccount 已经可见，面板内部的 hover/click 态还有一帧过渡，
+  // 兜底再等 500ms 让菜单项稳定下来再交给下一步点击。
+  await page.waitForTimeout(500);
+
   nowLog(tag, `右上角下拉已展开 (${Date.now() - t0}ms)`);
   return true;
 }
@@ -155,39 +248,147 @@ async function openUserDropdown(page, tag) {
  *  - 等待 [class*="roleItem"] 至少 1 项可见，再认为列表就绪。
  */
 async function clickSwitchEntryAndWaitModal(page, tag) {
-  const entry = page.locator(SWITCH_ENTRY_SELECTORS.join(", ")).first();
-  if (!(await entry.isVisible({ timeout: 3000 }).catch(() => false))) {
+  // 直接按精确 class 拿"切换数据视角"节点，避免复合选择器在 :has-text 下的误判。
+  // 用 page.locator 的 count() > 0 + DOM 可点击判断，比 isVisible 对动画态更宽容。
+  const entry = page
+    .locator('div[class*="switchAccount"]')
+    .filter({ hasText: "切换数据视角" })
+    .first();
+
+  // 等"switchAccount"至少挂进 DOM，且有非零尺寸
+  const entryReady = await page
+    .waitForFunction(
+      () => {
+        const nodes = Array.from(
+          document.querySelectorAll('div[class*="switchAccount"]')
+        );
+        for (const n of nodes) {
+          const text = (n.textContent || "").replace(/\s+/g, "");
+          if (!text.includes("切换数据视角")) continue;
+          const r = n.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) return true;
+        }
+        return false;
+      },
+      null,
+      { timeout: 4000, polling: 100 }
+    )
+    .then(() => true)
+    .catch(() => false);
+
+  if (!entryReady) {
+    // 没命中任何候选选择器时，dump 当前下拉中可见菜单项的文本，便于排查选择器漂移
+    try {
+      const visibleTexts = await page
+        .locator(
+          '[class*="ecom-dropdown-menu"] [class*="ecom-dropdown-item"], [role="menuitem"], [class*="dropDownWrapper"] *'
+        )
+        .allInnerTexts()
+        .catch(() => []);
+      if (visibleTexts && visibleTexts.length > 0) {
+        nowLog(
+          tag,
+          `当前下拉菜单实际项: ${visibleTexts
+            .map((s) => (s || "").replace(/\s+/g, ""))
+            .filter(Boolean)
+            .slice(0, 10)
+            .join(" | ")}`
+        );
+      }
+    } catch {
+      // 忽略
+    }
     warnLog(tag, '下拉中没有"切换数据视角"入口（可能当前页面不支持）');
     return false;
   }
 
   const t0 = Date.now();
+  // 依次尝试三种点击：普通点击 → force 点击 → 直接 DOM click()
+  // 最后一档是为了规避"元素已挂但被父级动画层覆盖"导致的命中失败。
   await entry.click({ timeout: 2000 }).catch(async () => {
-    await entry.click({ force: true, timeout: 1500 }).catch(() => {});
+    await entry.click({ force: true, timeout: 1500 }).catch(async () => {
+      await page
+        .evaluate(() => {
+          const nodes = Array.from(
+            document.querySelectorAll('div[class*="switchAccount"]')
+          );
+          const hit = nodes.find((n) =>
+            (n.textContent || "").includes("切换数据视角")
+          );
+          if (hit) hit.click();
+        })
+        .catch(() => {});
+    });
   });
 
-  const modal = page.locator(SWITCH_MODAL_ROOT).first();
-  const modalShown = await modal
-    .waitFor({ state: "visible", timeout: 8000 })
+  // 等弹窗真的打开。
+  // 注意：`#ecom-login-account-modal` 是个常驻挂载点容器，初始态也可能挂在 body 上，
+  // 且自身尺寸/visibility 可能让 Playwright 的 `state: "visible"` 判定失真。
+  // 这里改为：在 `#ecom-login-account-modal` 下真的能看到 `auxo-modal-wrap` 且其
+  // bounding box 非零，才认为弹窗已展示出来。
+  const modalShown = await page
+    .waitForFunction(
+      () => {
+        const root = document.querySelector("#ecom-login-account-modal");
+        if (!root) return false;
+        const wrap = root.querySelector(
+          '.auxo-modal-wrap, [class*="auxo-modal-wrap"]'
+        );
+        if (!wrap) return false;
+        const r = wrap.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      },
+      null,
+      { timeout: 8000, polling: 100 }
+    )
     .then(() => true)
     .catch(() => false);
   if (!modalShown) {
-    warnLog(tag, "点击\"切换数据视角\"后弹窗未出现");
+    warnLog(tag, '点击"切换数据视角"后弹窗未出现');
     return false;
   }
 
-  // 等店铺列表加载完成（实测有 1-3s 的加载骨架）
-  const firstItem = modal.locator('[class*="roleItem"]').first();
-  const listReady = await firstItem
-    .waitFor({ state: "visible", timeout: 15000 })
+  // 等店铺列表加载完成。弹窗内部会先有 `auxo-spin` loading 骨架，
+  // 店铺条目新版 DOM 里不再一定带 `roleItem` 这个 class 名
+  //（实测也见过 `index_rootContainer__xxx > auxo-spin-container` 直接渲染 `子账号 店铺名 状态` 结构）。
+  // 所以条件放宽：
+  //   条件 A：存在 `[class*="roleItem"]` 可见项，或
+  //   条件 B：`auxo-modal-body` 里已经有"请选择店铺"文案 + 至少 1 个"子账号"标签。
+  const listReady = await page
+    .waitForFunction(
+      () => {
+        const root = document.querySelector("#ecom-login-account-modal");
+        if (!root) return false;
+        // 条件 A：老结构
+        const roleItems = root.querySelectorAll('[class*="roleItem"]');
+        for (const n of roleItems) {
+          const r = n.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) return true;
+        }
+        // 条件 B：新结构 —— auxo-modal-body 里已经渲染出"子账号"标签
+        const body = root.querySelector(
+          '.auxo-modal-body, [class*="auxo-modal-body"]'
+        );
+        if (!body) return false;
+        const bodyText = (body.textContent || "").replace(/\s+/g, "");
+        if (!bodyText.includes("请选择店铺")) return false;
+        // 至少要看到一个"子账号"标签文本，或店铺后缀
+        return (
+          bodyText.includes("子账号") ||
+          /旗舰店|专营店|专卖店|官方旗舰店|小店|直营店/.test(bodyText)
+        );
+      },
+      null,
+      { timeout: 15000, polling: 200 }
+    )
     .then(() => true)
     .catch(() => false);
   if (!listReady) {
-    warnLog(tag, "切店铺弹窗列表加载超时（roleItem 未出现）");
+    warnLog(tag, "切店铺弹窗列表加载超时（未渲染店铺项）");
     return false;
   }
 
-  // 再等一小会儿让其余 roleItem 也渲染进来（列表较长时会分帧 paint）
+  // 再等一小会儿让其余条目也渲染进来（列表较长时会分帧 paint）
   await page.waitForTimeout(500);
   nowLog(
     tag,
@@ -207,26 +408,96 @@ async function clickSwitchEntryAndWaitModal(page, tag) {
  */
 async function readModalShopItems(page) {
   const modal = page.locator(SWITCH_MODAL_ROOT).first();
-  const items = modal.locator('[class*="roleItem"]');
-  const count = await items.count();
+
+  // 老结构：`[class*="roleItem"]` 作为每一项容器，里面有 `introName`
+  const legacyItems = modal.locator('[class*="roleItem"]');
+  const legacyCount = await legacyItems.count().catch(() => 0);
+  if (legacyCount > 0) {
+    const results = [];
+    for (let i = 0; i < legacyCount; i += 1) {
+      const item = legacyItems.nth(i);
+      let name = "";
+      const nameLoc = item.locator('[class*="introName"]').first();
+      if (await nameLoc.count().catch(() => 0)) {
+        name = ((await nameLoc.textContent().catch(() => "")) || "").trim();
+      }
+      if (!name) {
+        const raw = ((await item.textContent().catch(() => "")) || "").trim();
+        name = raw
+          .replace(/子账号/g, "")
+          .replace(/正常营业|停业|已冻结/g, "")
+          .trim();
+      }
+      results.push({ index: i, name, locator: item });
+    }
+    return results;
+  }
+
+  // 新结构：弹窗里不一定有 `roleItem` class，但每一行一定有一个"子账号"标签，
+  // 且包含店铺名（以"旗舰店/专营店/专卖店/..."结尾）。
+  // 策略：在 auxo-modal-body 内用 evaluate 提取每一行的 DOM path 和名称，
+  // 然后通过 page.locator 配合 nth 索引重新定位（确保 click 时仍然是 Playwright 管理的 Locator）。
+  const parsed = await page
+    .evaluate(() => {
+      const root = document.querySelector("#ecom-login-account-modal");
+      if (!root) return [];
+      const body =
+        root.querySelector('.auxo-modal-body') ||
+        root.querySelector('[class*="auxo-modal-body"]');
+      if (!body) return [];
+
+      // 找到所有"子账号"标签节点，向上找"同行容器"
+      // 行容器判定：向上走直到它的 textContent 同时包含店铺名后缀和状态文案
+      const tagNodes = Array.from(body.querySelectorAll("*")).filter((el) => {
+        const t = (el.textContent || "").replace(/\s+/g, "");
+        return (
+          t === "子账号" &&
+          el.children.length === 0 // 叶子节点，避免把一整块都拿出来
+        );
+      });
+
+      const rows = [];
+      const seen = new Set();
+      for (const tag of tagNodes) {
+        let cur = tag;
+        for (let up = 0; up < 6 && cur && cur !== body; up += 1) {
+          cur = cur.parentElement;
+          if (!cur) break;
+          const txt = (cur.textContent || "").replace(/\s+/g, "");
+          const hasSuffix =
+            /旗舰店|专营店|专卖店|官方旗舰店|小店|直营店/.test(txt);
+          const hasStatus = /正常营业|停业|已冻结/.test(txt);
+          if (hasSuffix && hasStatus && !seen.has(cur)) {
+            // 尽量提取店铺名：去掉"子账号"/状态词/孤立的"旗舰店 专营店"类型标签
+            const nameMatch = txt.match(
+              /([^\s子账号]*?(?:旗舰店|专营店|专卖店|官方旗舰店|小店|直营店))/
+            );
+            const name = nameMatch
+              ? nameMatch[1].replace(/^子账号/, "")
+              : txt
+                  .replace(/子账号/g, "")
+                  .replace(/正常营业|停业|已冻结/g, "")
+                  .trim();
+            seen.add(cur);
+            rows.push({ index: rows.length, name });
+            break;
+          }
+        }
+      }
+      // 把行节点标记到 DOM 上，便于 Playwright 重新定位
+      Array.from(seen).forEach((el, idx) => {
+        el.setAttribute("data-shop-row-idx", String(idx));
+      });
+      return rows;
+    })
+    .catch(() => []);
+
   const results = [];
-  for (let i = 0; i < count; i += 1) {
-    const item = items.nth(i);
-    let name = "";
-    const nameLoc = item.locator('[class*="introName"]').first();
-    if (await nameLoc.count().catch(() => 0)) {
-      name = ((await nameLoc.textContent().catch(() => "")) || "").trim();
-    }
-    if (!name) {
-      // 兜底：整项 textContent，去除标签文字
-      const raw = ((await item.textContent().catch(() => "")) || "").trim();
-      name = raw
-        .replace(/子账号/g, "")
-        .replace(/正常营业|停业|已冻结/g, "")
-        .replace(/旗舰店|专营店|专卖店|官方旗舰店/g, (m) => m) // 保留店铺后缀
-        .trim();
-    }
-    results.push({ index: i, name, locator: item });
+  for (const row of parsed) {
+    const locator = modal
+      .locator(`[data-shop-row-idx="${row.index}"]`)
+      .first();
+    results.push({ index: row.index, name: row.name, locator });
   }
   return results;
 }

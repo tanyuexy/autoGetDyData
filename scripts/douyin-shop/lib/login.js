@@ -272,7 +272,7 @@ async function captureFailureShot(page, debugDir, kind) {
  *
  * @returns {Promise<{ok: boolean, shopName: string, downloadPath?: string, error?: string}>}
  */
-async function downloadCurrentShop(page, tag, paths) {
+async function downloadCurrentShop(page, tag, paths, options = {}) {
   // 先确保在罗盘首页，从这里读右上角的当前店铺名是最可靠的
   let shopName = "";
   try {
@@ -280,6 +280,12 @@ async function downloadCurrentShop(page, tag, paths) {
     shopName = await readCurrentShopName(page);
     if (shopName) {
       console.log(`[${tag}] 当前登录店铺: ${shopName}`);
+    } else if (options.shopNameHint) {
+      // 页面读不到时，用上游传入的 hint（通常是上一次切换/选中的店铺名）
+      shopName = String(options.shopNameHint).trim();
+      console.warn(
+        `[${tag}] 页面未能读取到当前店铺名，回退使用上游 hint "${shopName}"`
+      );
     } else {
       console.warn(`[${tag}] 罗盘首页未能读取到当前店铺名，将以 "unknown" 归档`);
     }
@@ -347,12 +353,17 @@ async function runPostLoginFlow(page, tag, paths) {
   // 兜底防死循环：最多轮 preferredList 长度 + 2 次
   const maxShops = Math.max(preferredList.length || 0, 1) + 2;
 
+  // 首轮的店铺名 hint：登录阶段选店时已知的名字，是第一轮最可靠的来源
+  let pendingShopHint = result.shopName || null;
+
   for (let i = 0; i < maxShops; i += 1) {
     console.log(
       `\n[${tag}] ========== 第 ${i + 1}/${maxShops} 轮 ==========`
     );
     // 下载当前店铺
-    const round = await downloadCurrentShop(page, tag, paths);
+    const round = await downloadCurrentShop(page, tag, paths, {
+      shopNameHint: pendingShopHint
+    });
     if (round.shopName) {
       processed.add(round.shopName);
       if (!result.shopName) result.shopName = round.shopName;
@@ -416,8 +427,11 @@ async function runPostLoginFlow(page, tag, paths) {
       break;
     }
 
-    // 切换成功后等页面稳定（罗盘整页重载）
-    console.log(`[${tag}] 切换成功，进入下一轮，当前累计已处理: ${[...processed].join(", ")}`);
+    // 切换成功后等页面稳定（罗盘整页重载），并把刚切到的店铺名作为下一轮 hint
+    pendingShopHint = switchRes.name || null;
+    console.log(
+      `[${tag}] 切换成功（目标店铺=${switchRes.name || "?"}），进入下一轮，当前累计已处理: ${[...processed].join(", ")}`
+    );
     await page.waitForTimeout(800);
   }
 

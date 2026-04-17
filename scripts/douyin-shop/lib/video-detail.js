@@ -259,18 +259,27 @@ async function selectDateRangeYesterday(page, tag) {
  */
 async function ensureVideoDetailTab(page, tag) {
   const started = Date.now();
-  const tab = page
-    .locator('div[role="tab"]:has-text("视频明细"), :text-is("视频明细")')
-    .first();
-  if (!(await tab.isVisible({ timeout: 2000 }).catch(() => false))) {
-    logWarn(tag, '未找到"视频明细" Tab，按当前 tab 继续');
-    return false;
+  const tabSel = 'div[role="tab"]:has-text("视频明细"), :text-is("视频明细")';
+  let tab = page.locator(tabSel).first();
+  const visible1 = await tab.isVisible({ timeout: 2000 }).catch(() => false);
+  if (!visible1) {
+    // 实测：有些账号/分辨率下顶部 tab 条需要滚动页面后才渲染/露出（非首屏）。
+    // 这里向下滚动一小段并重试一次；仍失败就按“非阻塞”策略继续流程。
+    await page.mouse.wheel(0, 900).catch(() => {});
+    await page.waitForTimeout(300);
+    tab = page.locator(tabSel).first();
+    const visible2 = await tab.isVisible({ timeout: 1500 }).catch(() => false);
+    if (!visible2) {
+      logWarn(tag, '未找到"视频明细" Tab，按当前 tab 继续');
+      return false;
+    }
   }
   const selected = await tab.getAttribute("aria-selected").catch(() => null);
   if (selected === "true") {
     logStep(tag, '"视频明细" Tab 已选中', started);
     return true;
   }
+  await tab.scrollIntoViewIfNeeded().catch(() => {});
   await tab.click({ timeout: 2000 }).catch(() => {});
   await page.waitForTimeout(600);
   logStep(tag, '已切换到"视频明细" Tab', started);
@@ -415,7 +424,6 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName }) {
 
   await gotoVideoSelf(page, tag);
   await selectDateRangeYesterday(page, tag);
-  await ensureVideoDetailTab(page, tag);
   await selectNonAdTab(page, tag);
 
   // 给表格一个 loading → 刷新完成的缓冲；实测切换 tab + 改 date 后需要重新拉数据
