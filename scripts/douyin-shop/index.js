@@ -11,12 +11,20 @@ const {
 } = require("./lib/env");
 const { runShopLogin, getAccountPaths } = require("./lib/login");
 const { loadPreferredShopNames } = require("./lib/shop-picker");
+const { mergeAllShopExportsToData } = require("./lib/merge-shop-exports");
 
 function parseArgs(argv) {
   // 支持 "login"（默认）或 "login <email> <password>"
   const args = argv.slice(2);
-  const command = args[0] && !args[0].includes("@") ? args[0] : "login";
+  const command =
+    args[0] && !args[0].includes("@")
+      ? String(args[0]).toLowerCase()
+      : "login";
   const positional = args[0] && !args[0].includes("@") ? args.slice(1) : args;
+
+  if (command === "list" || command === "merge") {
+    return { command, accounts: [] };
+  }
 
   if (positional.length >= 2) {
     return {
@@ -93,6 +101,11 @@ async function main() {
     return;
   }
 
+  if (command === "merge") {
+    await mergeAllShopExportsToData();
+    return;
+  }
+
   const preferredList = await loadPreferredShopNames();
   console.log(
     `抖店登录：候选邮箱 ${accounts.length} 个: ${accounts
@@ -153,6 +166,10 @@ async function main() {
   }
 
   await browser.close();
+
+  await mergeAllShopExportsToData().catch((err) => {
+    console.error("抖店数据汇总失败:", err.message || err);
+  });
 
   const stillRemaining = remainingTargets();
   if (totalTargets > 0) {

@@ -10,8 +10,9 @@
     "feishu:callback": "node scripts/feishu/callback-server.js",
     "feishu:insert-xlsx": "node scripts/feishu/index.js insert-xlsx",
     "feishu:sync-data-xlsx": "node scripts/feishu/index.js sync-data-xlsx",
-    "shop:login": "node scripts/douyin-shop/index.js login",
+    "shop": "node scripts/douyin-shop/index.js login && npm run shop:merge",
     "shop:list": "node scripts/douyin-shop/index.js list",
+    "shop:merge": "node scripts/douyin-shop/index.js merge",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
