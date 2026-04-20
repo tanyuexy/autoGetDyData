@@ -12,6 +12,7 @@ const { BROWSER_VIEWPORT, LOGIN_VERIFY_METHOD } = require("./lib/env");
 const { attachQrDataUrlSniffer } = require("./lib/qr");
 const { openTargetAndEnsureLogin } = require("./lib/login");
 const { saveAuth, exportPostListData } = require("./lib/exporter");
+const { mergeExportFiles } = require("./lib/merge-exports");
 
 async function runOneAccount(browser, accountName, command, options = {}) {
   const paths = getAccountPaths(accountName);
@@ -49,9 +50,9 @@ async function runOneAccount(browser, accountName, command, options = {}) {
     });
 
     await saveAuth(context, paths, accountName);
-    await exportPostListData(page, paths, accountName);
+    const exportFilePath = await exportPostListData(page, paths, accountName);
     console.log(`========== 账号完成: ${accountName} ==========\n`);
-    return { accountName, ok: true };
+    return { accountName, ok: true, exportFilePath };
   } catch (error) {
     console.error(`账号 [${accountName}] 执行失败:`, error.message || error);
     return { accountName, ok: false, error: error.message || String(error) };
@@ -161,6 +162,7 @@ async function main() {
       console.log(`- ${item.accountName}: ${item.error}`);
     }
   }
+  await mergeExportFiles(results);
 }
 
 main().catch((error) => {

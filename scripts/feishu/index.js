@@ -14,7 +14,14 @@ const {
   readTokenCache,
   getValidAccessToken
 } = require("./lib/oauth");
-const { createBitableRecord, listBitableFields } = require("./lib/bitable");
+const {
+  createBitableRecord,
+  listBitableFields,
+  listAllBitableRecords,
+  listAllBitableRecordIds,
+  batchDeleteBitableRecords,
+  batchCreateBitableRecords
+} = require("./lib/bitable");
 
 const DEFAULT_XLSX_FIELD_ALIASES = {
   作品名称: "作品名",
@@ -38,6 +45,7 @@ function printHelp() {
   node scripts/feishu/index.js insert --fields '{"姓名":"张三","金额":100}'
   node scripts/feishu/index.js insert --fields-file ./data/record.json
   node scripts/feishu/index.js insert-xlsx --file ./data/作品列表.xlsx [--sheet Sheet1] [--dry-run]
+  node scripts/feishu/index.js sync-data-xlsx [--dir ./data] [--file ./data/某.xlsx] [--sheet Sheet1] [--dry-run]
 
 说明:
   - auth-url: 生成 OAuth 授权地址（默认自动拉起浏览器，可用 --no-open 关闭）
@@ -45,7 +53,8 @@ function printHelp() {
   - exchange: 用回调 code 换取 access_token/refresh_token 并写入本地缓存
   - refresh: 强制刷新 access_token
   - insert: 自动检查/刷新 token 后插入一条多维表格记录
-  - insert-xlsx: 读取 xlsx 第一行作为字段名，按行写入飞书多维表格
+  - insert-xlsx: 读取 xlsx 第一行作为字段名，按行写入飞书多维表格（追加）
+  - sync-data-xlsx: 读取指定目录下「修改时间最新」的 xlsx（可用 --file 指定），先清空当前飞书表全部记录，再批量写入（覆盖）
 `);
 }
 
@@ -258,6 +267,199 @@ function readXlsxFieldAliases(args) {
   };
 }
 
+function chunkArray(items, chunkSize) {
+  if (chunkSize <= 0) {
+    throw new Error("chunkSize 必须大于 0");
+  }
+  const chunks = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function findLatestXlsxFile(relativeDir) {
+  const dirPath = path.resolve(process.cwd(), String(relativeDir || "./data").trim());
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  let bestFull = "";
+  let bestMtime = 0;
+  for (const ent of entries) {
+    if (!ent.isFile() || !ent.name.toLowerCase().endsWith(".xlsx")) continue;
+    const full = path.join(dirPath, ent.name);
+    const st = await fs.stat(full);
+    if (!bestFull || st.mtimeMs > bestMtime) {
+      bestFull = full;
+      bestMtime = st.mtimeMs;
+    }
+  }
+  if (!bestFull) {
+    throw new Error(`目录下没有 .xlsx: ${dirPath}`);
+  }
+  return bestFull;
+}
+
+function normalizeLookupKey(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function extractComparableText(value) {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value).trim();
+  }
+  if (Array.isArray(value) && value.length > 0) {
+    const first = value[0];
+    if (first && typeof first.text === "string") {
+      return first.text.trim();
+    }
+    if (typeof first === "string" || typeof first === "number") {
+      return String(first).trim();
+    }
+  }
+  return "";
+}
+
+async function buildLinkFieldResolvers(config, tokenRecord, tableFields) {
+  const linkFields = tableFields.filter((field) => field && field.type === 18);
+  const resolvers = new Map();
+
+  for (const linkField of linkFields) {
+    const fieldName = String(linkField.field_name || "").trim();
+    const linkTableId = String((linkField.property && linkField.property.table_id) || "").trim();
+    if (!fieldName || !linkTableId) continue;
+
+    const linkTableFields = await listBitableFields(config, tokenRecord.accessToken, linkTableId);
+    const primaryField =
+      linkTableFields.find((field) => field && field.is_primary) ||
+      linkTableFields.find((field) => field && field.type === 1) ||
+      linkTableFields[0];
+    const lookupFieldName = String((primaryField && primaryField.field_name) || "").trim();
+    if (!lookupFieldName) continue;
+
+    const linkTableRecords = await listAllBitableRecords(
+      config,
+      tokenRecord.accessToken,
+      linkTableId,
+      [lookupFieldName]
+    );
+
+    const nameToRecordIds = new Map();
+    for (const item of linkTableRecords) {
+      const rid = String((item && item.record_id) || "").trim();
+      if (!rid) continue;
+      const text = extractComparableText(item && item.fields && item.fields[lookupFieldName]);
+      const key = normalizeLookupKey(text);
+      if (!key) continue;
+      const ids = nameToRecordIds.get(key) || [];
+      ids.push(rid);
+      nameToRecordIds.set(key, ids);
+    }
+
+    resolvers.set(fieldName, {
+      fieldName,
+      linkTableId,
+      linkTableName: String((linkField.property && linkField.property.table_name) || "").trim(),
+      lookupFieldName,
+      nameToRecordIds
+    });
+  }
+
+  return resolvers;
+}
+
+async function prepareBitableRowsFromXlsx({ filePath, sheet, limit, fieldAliases }, config, tokenRecord) {
+  const sheetNameArg = String(sheet || "").trim();
+  const { sheetName, headers, records } = parseXlsxRows(filePath, sheetNameArg);
+  const limitN = toPositiveInteger(limit, 0);
+  const selectedRecords = limitN > 0 ? records.slice(0, limitN) : records;
+
+  const tableFields = await listBitableFields(config, tokenRecord.accessToken);
+  const writableFields = tableFields.filter((item) => !NON_WRITABLE_FIELD_TYPES.has(item.type));
+  const writableFieldMap = new Map(
+    writableFields.map((item) => [String(item.field_name || "").trim(), item]).filter((item) => item[0])
+  );
+  const linkFieldResolvers = await buildLinkFieldResolvers(config, tokenRecord, writableFields);
+
+  const unknownHeaders = [];
+  const aliasHeaders = [];
+  for (const sourceHeader of headers) {
+    const targetField = fieldAliases[sourceHeader] || sourceHeader;
+    if (targetField !== sourceHeader) {
+      aliasHeaders.push(`${sourceHeader} -> ${targetField}`);
+    }
+    if (!writableFieldMap.has(targetField)) {
+      unknownHeaders.push(sourceHeader);
+    }
+  }
+
+  const droppedValueStats = {};
+  const unresolvedLinkValueStats = {};
+  const ambiguousLinkValueStats = {};
+  const normalizedRecords = selectedRecords
+    .map((record) => {
+      const normalizedFields = {};
+      for (const [sourceField, rawValue] of Object.entries(record.fields)) {
+        const targetField = fieldAliases[sourceField] || sourceField;
+        const fieldMeta = writableFieldMap.get(targetField);
+        if (!fieldMeta) continue;
+        if (fieldMeta.type === 18) {
+          const resolver = linkFieldResolvers.get(targetField);
+          if (!resolver) continue;
+          const lookupText = extractComparableText(rawValue);
+          const lookupKey = normalizeLookupKey(lookupText);
+          if (!lookupKey) continue;
+          const matchedIds = resolver.nameToRecordIds.get(lookupKey) || [];
+          if (!matchedIds.length) {
+            const missKey = `${targetField}:${lookupText}`;
+            unresolvedLinkValueStats[missKey] = (unresolvedLinkValueStats[missKey] || 0) + 1;
+            continue;
+          }
+          if (matchedIds.length > 1) {
+            const ambKey = `${targetField}:${lookupText}`;
+            ambiguousLinkValueStats[ambKey] = (ambiguousLinkValueStats[ambKey] || 0) + 1;
+            continue;
+          }
+          normalizedFields[targetField] = [matchedIds[0]];
+          continue;
+        }
+        const normalizedValue = sanitizeFieldValue(
+          rawValue,
+          fieldMeta,
+          droppedValueStats,
+          targetField
+        );
+        if (normalizedValue === undefined) continue;
+        normalizedFields[targetField] = normalizedValue;
+      }
+      return {
+        rowNumber: record.rowNumber,
+        fields: normalizedFields
+      };
+    })
+    .filter((record) => Object.keys(record.fields).length > 0);
+
+  return {
+    sheetName,
+    headers,
+    totalXlsxRows: records.length,
+    selectedRowCount: selectedRecords.length,
+    normalizedRecords,
+    unknownHeaders,
+    aliasHeaders,
+    droppedValueStats,
+    unresolvedLinkValueStats,
+    ambiguousLinkValueStats
+  };
+}
+
 function sanitizeFieldValue(value, fieldMeta, droppedValueStats, fieldName) {
   if (isEmptyCellValue(value)) return undefined;
   if (typeof value === "string") {
@@ -288,6 +490,36 @@ function sanitizeFieldValue(value, fieldMeta, droppedValueStats, fieldName) {
   }
 
   return value;
+}
+
+function printLinkMappingWarnings(unresolvedLinkValueStats, ambiguousLinkValueStats) {
+  const unresolvedEntries = Object.entries(unresolvedLinkValueStats || {});
+  if (unresolvedEntries.length) {
+    console.warn(
+      "以下关联字段值未在关联表中找到，已跳过:",
+      unresolvedEntries
+        .slice(0, 10)
+        .map(([name, count]) => `${name}(${count})`)
+        .join(", ")
+    );
+    if (unresolvedEntries.length > 10) {
+      console.warn(`- 其余未匹配项省略 ${unresolvedEntries.length - 10} 条`);
+    }
+  }
+
+  const ambiguousEntries = Object.entries(ambiguousLinkValueStats || {});
+  if (ambiguousEntries.length) {
+    console.warn(
+      "以下关联字段值在关联表中匹配到多条记录，已跳过:",
+      ambiguousEntries
+        .slice(0, 10)
+        .map(([name, count]) => `${name}(${count})`)
+        .join(", ")
+    );
+    if (ambiguousEntries.length > 10) {
+      console.warn(`- 其余重复匹配项省略 ${ambiguousEntries.length - 10} 条`);
+    }
+  }
 }
 
 async function run() {
@@ -364,40 +596,36 @@ async function run() {
     const sheet = String(readOption(args, "sheet") || "").trim();
     const dryRun = Boolean(readOption(args, "dry-run", "dryRun"));
     const limit = toPositiveInteger(readOption(args, "limit"), 0);
-
-    const { sheetName, headers, records } = parseXlsxRows(filePath, sheet);
-    const selectedRecords = limit > 0 ? records.slice(0, limit) : records;
     const fieldAliases = readXlsxFieldAliases(args);
+
+    const tokenRecord = await getValidAccessToken(config);
+    const prepared = await prepareBitableRowsFromXlsx(
+      { filePath, sheet, limit, fieldAliases },
+      config,
+      tokenRecord
+    );
+    const {
+      sheetName,
+      totalXlsxRows,
+      selectedRowCount,
+      normalizedRecords,
+      unknownHeaders,
+      aliasHeaders,
+      droppedValueStats,
+      unresolvedLinkValueStats,
+      ambiguousLinkValueStats
+    } = prepared;
 
     console.log(`xlsx 文件: ${filePath}`);
     console.log(`sheet: ${sheetName}`);
-    console.log(`读取到 ${records.length} 行有效数据`);
+    console.log(`读取到 ${totalXlsxRows} 行有效数据`);
     if (limit > 0) {
-      console.log(`按 --limit 限制后，本次将处理 ${selectedRecords.length} 行`);
+      console.log(`按 --limit 限制后，本次将处理 ${selectedRowCount} 行`);
     }
 
-    if (!selectedRecords.length) {
+    if (selectedRowCount <= 0) {
       console.log("没有可写入的数据，已跳过。");
       return;
-    }
-
-    const tokenRecord = await getValidAccessToken(config);
-    const tableFields = await listBitableFields(config, tokenRecord.accessToken);
-    const writableFields = tableFields.filter((item) => !NON_WRITABLE_FIELD_TYPES.has(item.type));
-    const writableFieldMap = new Map(
-      writableFields.map((item) => [String(item.field_name || "").trim(), item]).filter((item) => item[0])
-    );
-
-    const unknownHeaders = [];
-    const aliasHeaders = [];
-    for (const sourceHeader of headers) {
-      const targetField = fieldAliases[sourceHeader] || sourceHeader;
-      if (targetField !== sourceHeader) {
-        aliasHeaders.push(`${sourceHeader} -> ${targetField}`);
-      }
-      if (!writableFieldMap.has(targetField)) {
-        unknownHeaders.push(sourceHeader);
-      }
     }
     if (aliasHeaders.length) {
       console.log("自动字段映射:", aliasHeaders.join(", "));
@@ -407,30 +635,7 @@ async function run() {
         `以下 xlsx 列在飞书表中不存在或不可写，已自动忽略: ${unknownHeaders.join(", ")}`
       );
     }
-
-    const droppedValueStats = {};
-    const normalizedRecords = selectedRecords
-      .map((record) => {
-        const normalizedFields = {};
-        for (const [sourceField, rawValue] of Object.entries(record.fields)) {
-          const targetField = fieldAliases[sourceField] || sourceField;
-          const fieldMeta = writableFieldMap.get(targetField);
-          if (!fieldMeta) continue;
-          const normalizedValue = sanitizeFieldValue(
-            rawValue,
-            fieldMeta,
-            droppedValueStats,
-            targetField
-          );
-          if (normalizedValue === undefined) continue;
-          normalizedFields[targetField] = normalizedValue;
-        }
-        return {
-          rowNumber: record.rowNumber,
-          fields: normalizedFields
-        };
-      })
-      .filter((record) => Object.keys(record.fields).length > 0);
+    printLinkMappingWarnings(unresolvedLinkValueStats, ambiguousLinkValueStats);
 
     if (!normalizedRecords.length) {
       console.log("标准化后没有可写入字段，已跳过。");
@@ -483,6 +688,104 @@ async function run() {
         console.error(`- 其余失败行省略 ${failedRows.length - 5} 条`);
       }
       throw new Error("部分行写入失败，请根据日志修正后重试");
+    }
+    return;
+  }
+
+  if (command === "sync-data-xlsx") {
+    const fileOption = readOption(args, "file");
+    const dirOption = readOption(args, "dir") || "./data";
+    const sheet = String(readOption(args, "sheet") || "").trim();
+    const dryRun = Boolean(readOption(args, "dry-run", "dryRun"));
+    const limit = toPositiveInteger(readOption(args, "limit"), 0);
+    const fieldAliases = readXlsxFieldAliases(args);
+
+    const filePath = fileOption
+      ? path.resolve(process.cwd(), String(fileOption).trim())
+      : await findLatestXlsxFile(dirOption);
+
+    const tokenRecord = await getValidAccessToken(config);
+    const prepared = await prepareBitableRowsFromXlsx(
+      { filePath, sheet, limit, fieldAliases },
+      config,
+      tokenRecord
+    );
+    const {
+      sheetName,
+      totalXlsxRows,
+      normalizedRecords,
+      unknownHeaders,
+      aliasHeaders,
+      droppedValueStats,
+      unresolvedLinkValueStats,
+      ambiguousLinkValueStats
+    } = prepared;
+
+    console.log(`同步来源: ${filePath}`);
+    console.log(`sheet: ${sheetName}`);
+    console.log(`xlsx 有效行: ${totalXlsxRows}，本次准备写入: ${normalizedRecords.length} 行`);
+
+    if (aliasHeaders.length) {
+      console.log("自动字段映射:", aliasHeaders.join(", "));
+    }
+    if (unknownHeaders.length) {
+      console.warn(
+        `以下 xlsx 列在飞书表中不存在或不可写，已自动忽略: ${unknownHeaders.join(", ")}`
+      );
+    }
+    printLinkMappingWarnings(unresolvedLinkValueStats, ambiguousLinkValueStats);
+
+    if (!normalizedRecords.length) {
+      console.log("标准化后没有可写入字段，已跳过（未清空表格）。");
+      return;
+    }
+
+    if (dryRun) {
+      console.log("dry-run：将清空飞书表全部记录后批量写入；预览前 3 行:");
+      normalizedRecords.slice(0, 3).forEach((record) => {
+        console.log(`- 行 ${record.rowNumber}:`, JSON.stringify(record.fields));
+      });
+      const droppedEntries = Object.entries(droppedValueStats);
+      if (droppedEntries.length) {
+        console.log(
+          "已跳过无法转换的单元格:",
+          droppedEntries.map(([name, count]) => `${name}(${count})`).join(", ")
+        );
+      }
+      return;
+    }
+
+    const existingIds = await listAllBitableRecordIds(config, tokenRecord.accessToken);
+    console.log(`飞书表现有记录: ${existingIds.length} 条，开始清空…`);
+    const deleteChunks = chunkArray(existingIds, 500);
+    for (let i = 0; i < deleteChunks.length; i += 1) {
+      await batchDeleteBitableRecords(config, tokenRecord.accessToken, deleteChunks[i]);
+      if (i < deleteChunks.length - 1) {
+        await sleepMs(200);
+      }
+    }
+
+    const BATCH = 500;
+    const createChunks = chunkArray(
+      normalizedRecords.map((record) => ({ fields: record.fields })),
+      BATCH
+    );
+    let created = 0;
+    for (let i = 0; i < createChunks.length; i += 1) {
+      await batchCreateBitableRecords(config, tokenRecord.accessToken, createChunks[i]);
+      created += createChunks[i].length;
+      if (i < createChunks.length - 1) {
+        await sleepMs(200);
+      }
+    }
+
+    console.log(`覆盖写入完成: 已删除 ${existingIds.length} 条，已新增 ${created} 条`);
+    const droppedEntries = Object.entries(droppedValueStats);
+    if (droppedEntries.length) {
+      console.log(
+        "写入前已跳过无法转换的单元格:",
+        droppedEntries.map(([name, count]) => `${name}(${count})`).join(", ")
+      );
     }
     return;
   }

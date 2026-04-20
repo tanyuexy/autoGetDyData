@@ -9,6 +9,7 @@
     "feishu:auth": "node scripts/feishu/index.js auth-url",
     "feishu:callback": "node scripts/feishu/callback-server.js",
     "feishu:insert-xlsx": "node scripts/feishu/index.js insert-xlsx",
+    "feishu:sync-data-xlsx": "node scripts/feishu/index.js sync-data-xlsx",
     "shop:login": "node scripts/douyin-shop/index.js login",
     "shop:list": "node scripts/douyin-shop/index.js list",
     "test": "echo \"Error: no test specified\" && exit 1"

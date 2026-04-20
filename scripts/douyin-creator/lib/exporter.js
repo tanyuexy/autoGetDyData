@@ -35,7 +35,11 @@ function parseMonthDayInYear(spec, year) {
 function getPostListDateRange(accountName) {
   const now = new Date();
   const year = now.getFullYear();
-  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const yesterday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - 1
+  );
 
   const defaultMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const spec = getCreatorExportDateStartSpec(accountName);
@@ -90,14 +94,7 @@ function collectYmdsFromDateDisplayText(text, fallbackStartYmd) {
     const yi = Number(y);
     const mi = Number(mo);
     const di = Number(d);
-    if (
-      yi < 1970 ||
-      yi > 2100 ||
-      mi < 1 ||
-      mi > 12 ||
-      di < 1 ||
-      di > 31
-    ) {
+    if (yi < 1970 || yi > 2100 || mi < 1 || mi > 12 || di < 1 || di > 31) {
       return;
     }
     set.add(`${yi}-${pad2(mi)}-${pad2(di)}`);
@@ -192,13 +189,28 @@ async function fillInsetDateRangeInputs(page, startYmd, endYmd) {
     return false;
   }
 
-  await inputs.nth(0).click({ timeout: 2000 }).catch(() => {});
-  await inputs.nth(0).clear({ timeout: 2000 }).catch(() => {});
+  await inputs
+    .nth(0)
+    .click({ timeout: 2000 })
+    .catch(() => {});
+  await inputs
+    .nth(0)
+    .clear({ timeout: 2000 })
+    .catch(() => {});
   await inputs.nth(0).fill(startYmd, { timeout: 3000 });
-  await inputs.nth(1).click({ timeout: 2000 }).catch(() => {});
-  await inputs.nth(1).clear({ timeout: 2000 }).catch(() => {});
+  await inputs
+    .nth(1)
+    .click({ timeout: 2000 })
+    .catch(() => {});
+  await inputs
+    .nth(1)
+    .clear({ timeout: 2000 })
+    .catch(() => {});
   await inputs.nth(1).fill(endYmd, { timeout: 3000 });
-  await inputs.nth(1).press("Enter").catch(() => {});
+  await inputs
+    .nth(1)
+    .press("Enter")
+    .catch(() => {});
   await page.waitForTimeout(200);
   return true;
 }
@@ -215,10 +227,16 @@ async function readInsetDateRangeValues(page) {
     return null;
   }
   const a = normalizeFlexibleYmd(
-    await inputs.nth(0).inputValue({ timeout: 1500 }).catch(() => "")
+    await inputs
+      .nth(0)
+      .inputValue({ timeout: 1500 })
+      .catch(() => "")
   );
   const b = normalizeFlexibleYmd(
-    await inputs.nth(1).inputValue({ timeout: 1500 }).catch(() => "")
+    await inputs
+      .nth(1)
+      .inputValue({ timeout: 1500 })
+      .catch(() => "")
   );
   if (!a || !b) return null;
   return [a, b];
@@ -239,7 +257,10 @@ async function tryFillRangeInputs(page, startYmd, endYmd) {
     if (count >= 2) {
       await inputs.nth(0).fill(startYmd);
       await inputs.nth(1).fill(endYmd);
-      await inputs.nth(1).press("Enter").catch(() => {});
+      await inputs
+        .nth(1)
+        .press("Enter")
+        .catch(() => {});
       return true;
     }
   }
@@ -269,7 +290,9 @@ async function clickDateCell(page, ymd) {
   const gridRoots = [
     page.locator(".douyin-creator-pc-popover-content [role='grid']").first(),
     page.locator(".douyin-creator-pc-datepicker-month[role='grid']").first(),
-    page.locator("[class*='douyin-creator-pc-datepicker'] [role='grid']").first()
+    page
+      .locator("[class*='douyin-creator-pc-datepicker'] [role='grid']")
+      .first()
   ];
   for (const grid of gridRoots) {
     if (!(await grid.isVisible({ timeout: 500 }).catch(() => false))) continue;
@@ -347,7 +370,9 @@ async function gatherDateRangeDisplayText(page) {
     const loc = page.locator(sel).first();
     const raw = await loc.textContent({ timeout: t }).catch(() => "");
     pushChunk(raw, sel);
-    const aria = await loc.getAttribute("aria-label", { timeout: t }).catch(() => null);
+    const aria = await loc
+      .getAttribute("aria-label", { timeout: t })
+      .catch(() => null);
     if (aria) pushChunk(aria, `${sel}:aria`);
   }
 
@@ -374,11 +399,7 @@ function legacySubstringRangeMatches(normalized, startYmd, endYmd) {
 
 async function isDateRangeApplied(page, startYmd, endYmd) {
   const inset = await readInsetDateRangeValues(page);
-  if (
-    inset &&
-    inset[0] === startYmd &&
-    inset[1] === endYmd
-  ) {
+  if (inset && inset[0] === startYmd && inset[1] === endYmd) {
     return true;
   }
 
@@ -406,11 +427,7 @@ async function setPostListDateRange(page, accountName) {
 
     let ok = false;
     const insetPair = await readInsetDateRangeValues(page);
-    if (
-      insetPair &&
-      insetPair[0] === startYmd &&
-      insetPair[1] === endYmd
-    ) {
+    if (insetPair && insetPair[0] === startYmd && insetPair[1] === endYmd) {
       ok = true;
     }
 
@@ -446,7 +463,11 @@ async function setPostListDateRange(page, accountName) {
 async function saveAuth(context, paths, accountName) {
   const cookies = await context.cookies();
   await context.storageState({ path: paths.storageStatePath });
-  await fs.writeFile(paths.cookiesPath, JSON.stringify(cookies, null, 2), "utf-8");
+  await fs.writeFile(
+    paths.cookiesPath,
+    JSON.stringify(cookies, null, 2),
+    "utf-8"
+  );
   console.log(`账号 [${accountName}] 登录态已保存:`);
   console.log(`- storageState: ${paths.storageStatePath}`);
   console.log(`- cookies: ${paths.cookiesPath}`);
@@ -494,7 +515,7 @@ async function exportPostListData(page, paths, accountName) {
 
   console.log(`账号 [${accountName}] 导出成功:`);
   console.log(`- 文件路径: ${savePath}`);
+  return savePath;
 }
 
 module.exports = { saveAuth, exportPostListData };
-

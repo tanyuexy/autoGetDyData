@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs");
 
 function numberFromEnv(name, defaultValue) {
   const raw = process.env[name];
@@ -23,8 +24,8 @@ const ACCOUNTS_DIR = path.resolve(
 
 const BROWSER_VIEWPORT = { width: 1440, height: 900 };
 
-// 滑块拖动总时长（毫秒）
-const SLIDER_DRAG_DURATION_MS = numberFromEnv("SHOP_SLIDER_DURATION_MS", 900);
+// 滑块拖动总时长（毫秒）；略长更易过风控（仍可用 SHOP_SLIDER_DURATION_MS 调短）
+const SLIDER_DRAG_DURATION_MS = numberFromEnv("SHOP_SLIDER_DURATION_MS", 1100);
 
 // 每次登录最多重试滑块次数
 const SLIDER_MAX_RETRY = numberFromEnv("SHOP_SLIDER_MAX_RETRY", 5);
@@ -38,25 +39,50 @@ const DOM_LOAD_TIMEOUT_MS = numberFromEnv(
   30 * 1000
 );
 
+const DEFAULT_ACCOUNTS_JSON_PATH = path.resolve(
+  process.cwd(),
+  "default-add-accounts.json"
+);
+
 /**
- * 默认账号（支持通过 CLI 传入覆盖）
- * 格式：[{ email, password, name? }]
+ * 从 default-add-accounts.json 的 emails 字段读取登录邮箱池。
+ * 要求：必须是 [{ email, password }, ...]，非空；其它位置不再做兜底。
  */
 function getDefaultAccounts() {
-  const raw = process.env.SHOP_ACCOUNTS_JSON;
-  if (raw) {
-    try {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr) && arr.length > 0) return arr;
-    } catch (error) {
-      console.warn(
-        `SHOP_ACCOUNTS_JSON 解析失败，回退默认账号: ${error.message}`
-      );
-    }
+  let raw;
+  try {
+    raw = fs.readFileSync(DEFAULT_ACCOUNTS_JSON_PATH, "utf-8");
+  } catch (error) {
+    throw new Error(
+      `读取 ${DEFAULT_ACCOUNTS_JSON_PATH} 失败: ${error.message || error}`
+    );
   }
-  const email = process.env.SHOP_EMAIL || "lianou_rpa2@163.com";
-  const password = process.env.SHOP_PASSWORD || "Lianou123";
-  return [{ email, password }];
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `${DEFAULT_ACCOUNTS_JSON_PATH} 不是合法 JSON: ${error.message || error}`
+    );
+  }
+  const list = Array.isArray(json?.emails) ? json.emails : [];
+  const normalized = [];
+  const seen = new Set();
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const email = String(item.email || "").trim();
+    const password = String(item.password || "").trim();
+    if (!email || !password) continue;
+    if (seen.has(email)) continue;
+    seen.add(email);
+    normalized.push({ email, password });
+  }
+  if (normalized.length === 0) {
+    throw new Error(
+      `${DEFAULT_ACCOUNTS_JSON_PATH} 缺少有效的 emails 数组，应为 [{ "email": "x@x", "password": "xxx" }, ...]`
+    );
+  }
+  return normalized;
 }
 
 module.exports = {

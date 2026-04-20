@@ -1,10 +1,20 @@
 [
   {
     "name": "gd_random",
-    "value": "eyJtYXRjaCI6dHJ1ZSwicGVyY2VudCI6MC4wMjg5NzgzOTk4MDM4OTUzODN9.tmoFvB7CPhPLRGBGOLSsyJBMxlbHjjKAhM8oF/IoFZo=",
+    "value": "eyJwZXJjZW50IjowLjAyODk3ODM5OTgwMzg5NTM4MywibWF0Y2giOnRydWV9.RV9Kj+MyojukMqj96V6y5iZrHtaG/hd4CscsH+nXgSQ=",
     "domain": "fxg.jinritemai.com",
     "path": "/ffa-micro-config/feedback_entry",
-    "expires": 1777257731.212016,
+    "expires": 1777275425.908102,
+    "httpOnly": true,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "gd_random",
+    "value": "eyJtYXRjaCI6dHJ1ZSwicGVyY2VudCI6MC4zNzI2NzkxNzUwMjk1ODMwM30=.lDmX2o9rK1xzksMPb3q2oqtfpg92+bm4BPeVdhpi+R8=",
+    "domain": "fxg.jinritemai.com",
+    "path": "/ffa-micro-config/ws-arrival",
+    "expires": 1777275426.47897,
     "httpOnly": true,
     "secure": false,
     "sameSite": "Lax"
@@ -54,7 +64,7 @@
     "value": "1776413703",
     "domain": ".fxg.jinritemai.com",
     "path": "/",
-    "expires": 1808189118,
+    "expires": 1808207241,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
@@ -274,7 +284,7 @@
     "value": "RID2026042009401229F8F029222225B72A99",
     "domain": "api.feelgood.cn",
     "path": "/",
-    "expires": 1808187129.597977,
+    "expires": 1808206627.122407,
     "httpOnly": false,
     "secure": true,
     "sameSite": "None"
@@ -370,23 +380,23 @@
     "sameSite": "None"
   },
   {
-    "name": "ttwid",
-    "value": "1%7CWR5dxgLvyvE2mjzcOHC8Pe9wCVKAEhD1lU3K3zTtFf4%7C1776653118%7C3f611650dd5dcdeb2eecb8722d8aaeb39208ef806b5596c5ecb232b367285cc4",
-    "domain": ".jinritemai.com",
-    "path": "/",
-    "expires": 1808189118.054471,
-    "httpOnly": true,
-    "secure": true,
-    "sameSite": "None"
-  },
-  {
     "name": "Hm_lpvt_b6520b076191ab4b36812da4c90f7a5e",
-    "value": "1776653118",
+    "value": "1776671242",
     "domain": ".fxg.jinritemai.com",
     "path": "/",
     "expires": -1,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
+  },
+  {
+    "name": "ttwid",
+    "value": "1%7CWR5dxgLvyvE2mjzcOHC8Pe9wCVKAEhD1lU3K3zTtFf4%7C1776671241%7C90c21d92c974596fbc2587c967fb8a09659d1f2c0fbedeb97e4a99a4593c7214",
+    "domain": ".jinritemai.com",
+    "path": "/",
+    "expires": 1808207241.750129,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None"
   }
 ]

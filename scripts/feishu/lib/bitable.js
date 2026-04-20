@@ -42,13 +42,19 @@ async function createBitableRecord(config, accessToken, fields) {
   return parsed.data || parsed;
 }
 
-async function listBitableFields(config, accessToken) {
+function resolveTableId(config, tableId) {
+  const resolved = String(tableId || config.bitableTableId || "").trim();
+  if (!resolved) {
+    throw new Error("缺少 FEISHU_BITABLE_TABLE_ID");
+  }
+  return resolved;
+}
+
+async function listBitableFields(config, accessToken, tableId = "") {
   if (!config.bitableAppToken) {
     throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
   }
-  if (!config.bitableTableId) {
-    throw new Error("缺少 FEISHU_BITABLE_TABLE_ID");
-  }
+  const resolvedTableId = resolveTableId(config, tableId);
 
   const allItems = [];
   let pageToken = "";
@@ -63,7 +69,7 @@ async function listBitableFields(config, accessToken) {
 
     const url = `${config.apiBase}/open-apis/bitable/v1/apps/${encodeURIComponent(
       config.bitableAppToken
-    )}/tables/${encodeURIComponent(config.bitableTableId)}/fields?${params.toString()}`;
+    )}/tables/${encodeURIComponent(resolvedTableId)}/fields?${params.toString()}`;
 
     const response = await fetch(url, {
       method: "GET",
@@ -102,7 +108,190 @@ async function listBitableFields(config, accessToken) {
   return allItems;
 }
 
+async function listAllBitableRecords(config, accessToken, tableId = "", fieldNames = []) {
+  if (!config.bitableAppToken) {
+    throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
+  }
+  const resolvedTableId = resolveTableId(config, tableId);
+  const records = [];
+  let pageToken = "";
+
+  while (true) {
+    const params = new URLSearchParams({
+      page_size: "500"
+    });
+    if (Array.isArray(fieldNames) && fieldNames.length) {
+      params.set("field_names", JSON.stringify(fieldNames));
+    }
+    if (pageToken) {
+      params.set("page_token", pageToken);
+    }
+
+    const url = `${config.apiBase}/open-apis/bitable/v1/apps/${encodeURIComponent(
+      config.bitableAppToken
+    )}/tables/${encodeURIComponent(resolvedTableId)}/records?${params.toString()}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    });
+    const text = await response.text();
+    let parsed;
+    try {
+      parsed = text ? JSON.parse(text) : {};
+    } catch (error) {
+      throw new Error(`多维表格列出记录接口返回非 JSON: ${text || "<empty>"}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `多维表格列出记录接口 HTTP ${response.status}: ${parsed.msg || text || "未知错误"}`
+      );
+    }
+    if (typeof parsed.code === "number" && parsed.code !== 0) {
+      throw new Error(
+        `列出记录失败 code=${parsed.code}, msg=${parsed.msg || "未知错误"}`
+      );
+    }
+
+    const data = parsed.data || {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    records.push(...items);
+
+    if (!data.has_more) break;
+    pageToken = String(data.page_token || "");
+    if (!pageToken) break;
+  }
+
+  return records;
+}
+
+async function listAllBitableRecordIds(config, accessToken) {
+  const records = await listAllBitableRecords(config, accessToken);
+  const ids = [];
+  for (const item of records) {
+    const id = item && item.record_id;
+    if (id) {
+      ids.push(String(id));
+    }
+  }
+  return ids;
+}
+
+async function batchDeleteBitableRecords(config, accessToken, recordIds) {
+  if (!config.bitableAppToken) {
+    throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
+  }
+  if (!config.bitableTableId) {
+    throw new Error("缺少 FEISHU_BITABLE_TABLE_ID");
+  }
+  if (!Array.isArray(recordIds) || !recordIds.length) {
+    return { deleted: 0 };
+  }
+  if (recordIds.length > 500) {
+    throw new Error("batchDeleteBitableRecords 单次最多 500 条，请在上层分批");
+  }
+
+  const url = `${config.apiBase}/open-apis/bitable/v1/apps/${encodeURIComponent(
+    config.bitableAppToken
+  )}/tables/${encodeURIComponent(config.bitableTableId)}/records/batch_delete`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify({ records: recordIds })
+  });
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch (error) {
+    throw new Error(`多维表格批量删除接口返回非 JSON: ${text || "<empty>"}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `多维表格批量删除接口 HTTP ${response.status}: ${parsed.msg || text || "未知错误"}`
+    );
+  }
+  if (typeof parsed.code === "number" && parsed.code !== 0) {
+    throw new Error(
+      `批量删除失败 code=${parsed.code}, msg=${parsed.msg || "未知错误"}`
+    );
+  }
+
+  return parsed.data || parsed;
+}
+
+async function batchCreateBitableRecords(config, accessToken, recordsPayload) {
+  if (!config.bitableAppToken) {
+    throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
+  }
+  if (!config.bitableTableId) {
+    throw new Error("缺少 FEISHU_BITABLE_TABLE_ID");
+  }
+  if (!Array.isArray(recordsPayload) || !recordsPayload.length) {
+    return { created: 0 };
+  }
+  if (recordsPayload.length > 1000) {
+    throw new Error("batchCreateBitableRecords 单次最多 1000 条，请在上层分批");
+  }
+
+  const url = `${config.apiBase}/open-apis/bitable/v1/apps/${encodeURIComponent(
+    config.bitableAppToken
+  )}/tables/${encodeURIComponent(config.bitableTableId)}/records/batch_create`;
+
+  const body = {
+    records: recordsPayload.map((item) => {
+      if (item && item.fields && typeof item.fields === "object") {
+        return { fields: item.fields };
+      }
+      return { fields: item };
+    })
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify(body)
+  });
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch (error) {
+    throw new Error(`多维表格批量新增接口返回非 JSON: ${text || "<empty>"}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `多维表格批量新增接口 HTTP ${response.status}: ${parsed.msg || text || "未知错误"}`
+    );
+  }
+  if (typeof parsed.code === "number" && parsed.code !== 0) {
+    throw new Error(
+      `批量新增失败 code=${parsed.code}, msg=${parsed.msg || "未知错误"}`
+    );
+  }
+
+  const data = parsed.data || {};
+  const items = Array.isArray(data.records) ? data.records : [];
+  return { records: items };
+}
+
 module.exports = {
   createBitableRecord,
-  listBitableFields
+  listBitableFields,
+  listAllBitableRecords,
+  listAllBitableRecordIds,
+  batchDeleteBitableRecords,
+  batchCreateBitableRecords
 };

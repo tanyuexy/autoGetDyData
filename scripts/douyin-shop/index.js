@@ -10,6 +10,7 @@ const {
   getDefaultAccounts
 } = require("./lib/env");
 const { runShopLogin, getAccountPaths } = require("./lib/login");
+const { loadPreferredShopNames } = require("./lib/shop-picker");
 
 function parseArgs(argv) {
   // 支持 "login"（默认）或 "login <email> <password>"
@@ -35,7 +36,7 @@ function parseArgs(argv) {
   return { command, accounts: getDefaultAccounts() };
 }
 
-async function runOne(browser, account) {
+async function runOne(browser, account, options = {}) {
   if (!account?.email || !account?.password) {
     throw new Error("账号 email/password 缺失");
   }
@@ -51,7 +52,7 @@ async function runOne(browser, account) {
   });
 
   try {
-    const result = await runShopLogin(context, account);
+    const result = await runShopLogin(context, account, options);
     return { account: account.email, ok: true, ...result };
   } catch (error) {
     console.error(
@@ -60,7 +61,8 @@ async function runOne(browser, account) {
     return {
       account: account.email,
       ok: false,
-      error: error.message || String(error)
+      error: error.message || String(error),
+      processedNames: options.processedNames
     };
   } finally {
     await context.close();
@@ -91,10 +93,14 @@ async function main() {
     return;
   }
 
+  const preferredList = await loadPreferredShopNames();
   console.log(
-    `抖店登录：待处理账号 ${accounts.length} 个: ${accounts
+    `抖店登录：候选邮箱 ${accounts.length} 个: ${accounts
       .map((a) => a.email)
       .join(", ")}`
+  );
+  console.log(
+    `目标店铺优先级名单 (${preferredList.length}): ${preferredList.join(", ") || "(空)"}`
   );
 
   const browser = await chromium.launch({
@@ -103,11 +109,61 @@ async function main() {
   });
 
   const results = [];
-  for (const account of accounts) {
-    results.push(await runOne(browser, account));
+  const processedNames = new Set();
+  const totalTargets = preferredList.length;
+
+  function remainingTargets() {
+    if (totalTargets === 0) return [];
+    return preferredList.filter((name) => {
+      for (const done of processedNames) {
+        if (!done) continue;
+        if (done === name) return false;
+        if (name.includes(done) || done.includes(name)) return false;
+      }
+      return true;
+    });
+  }
+
+  for (let i = 0; i < accounts.length; i += 1) {
+    const account = accounts[i];
+    const remaining = remainingTargets();
+    if (totalTargets > 0 && remaining.length === 0) {
+      console.log(
+        `\n所有目标店铺均已处理 (${processedNames.size}/${totalTargets})，提前结束，后续邮箱不再登录`
+      );
+      break;
+    }
+    console.log(
+      `\n========== 邮箱 ${i + 1}/${accounts.length}: ${account.email} | 剩余待处理店铺 ${remaining.length}${
+        totalTargets > 0 ? `/${totalTargets}` : ""
+      } ==========`
+    );
+
+    const result = await runOne(browser, account, { processedNames });
+    results.push(result);
+
+    if (result.processedNames instanceof Set) {
+      for (const n of result.processedNames) processedNames.add(n);
+    }
+    if (Array.isArray(result.downloads)) {
+      for (const d of result.downloads) {
+        if (d && d.shopName) processedNames.add(d.shopName);
+      }
+    }
   }
 
   await browser.close();
+
+  const stillRemaining = remainingTargets();
+  if (totalTargets > 0) {
+    console.log(
+      `\n店铺处理进度: 已处理 ${processedNames.size}/${totalTargets}${
+        stillRemaining.length
+          ? `，剩余未命中: ${stillRemaining.join(", ")}`
+          : "（全部完成）"
+      }`
+    );
+  }
 
   const okCount = results.filter((r) => r.ok).length;
   console.log(`\n完成: 成功 ${okCount} / ${results.length}`);

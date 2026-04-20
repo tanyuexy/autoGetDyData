@@ -432,19 +432,38 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
  *
  * 每一步都尽量独立捕获异常，避免因后置步骤失败而否定登录动作本身的成果。
  */
-async function runPostLoginFlow(page, tag, paths) {
+async function runPostLoginFlow(page, tag, paths, options = {}) {
+  const processed =
+    options.processedNames instanceof Set
+      ? options.processedNames
+      : new Set(options.processedNames || []);
+
   const result = {
     shopPicked: null,
     shopName: null,
     downloads: [],
     downloadPath: null,
-    downloadError: null
+    downloadError: null,
+    processedNames: processed
   };
 
-  const preferredList = await loadPreferredShopNames();
+  const fullPreferredList = await loadPreferredShopNames();
+  const preferredList = fullPreferredList.filter((name) => {
+    for (const done of processed) {
+      if (!done) continue;
+      if (done === name) return false;
+      if (name.includes(done) || done.includes(name)) return false;
+    }
+    return true;
+  });
   console.log(
-    `[${tag}] 优先级名单 (${preferredList.length}): ${preferredList.join(", ") || "(空)"}`
+    `[${tag}] 优先级名单总计 ${fullPreferredList.length}，已处理 ${processed.size}，本轮待处理 ${preferredList.length}: ${preferredList.join(", ") || "(空)"}`
   );
+
+  if (preferredList.length === 0) {
+    console.log(`[${tag}] 本账号无新店铺可处理，跳过登录后流程`);
+    return result;
+  }
 
   // === Gate: post-login 入口先识别阶段 ===
   const entryStage = await detectStage(page);
@@ -479,9 +498,6 @@ async function runPostLoginFlow(page, tag, paths) {
     );
     result.shopPicked = false;
   }
-
-  // 用名称集合去重，保证同一个店铺不会被重复下载
-  const processed = new Set();
 
   function isPreferredShop(shopName) {
     const name = String(shopName || "").trim();
@@ -676,10 +692,16 @@ async function tryReuseCookieLogin(page, tag) {
  * @param {import('playwright').BrowserContext} context
  * @param {{ email: string, password: string }} account
  */
-async function runShopLogin(context, account) {
+async function runShopLogin(context, account, options = {}) {
   const { email, password } = account;
   const paths = getAccountPaths(email);
   await ensureAccountPaths(paths);
+
+  const processedNames =
+    options.processedNames instanceof Set
+      ? options.processedNames
+      : new Set(options.processedNames || []);
+  const postLoginOptions = { processedNames };
 
   const page = await context.newPage();
   const tag = email;
@@ -692,7 +714,7 @@ async function runShopLogin(context, account) {
     if (await tryReuseCookieLogin(page, tag)) {
       console.log(`[${tag}] cookie 仍然有效，跳过账号密码登录`);
       await saveStorageState(context, paths);
-      const extra = await runPostLoginFlow(page, tag, paths);
+      const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
       return { ok: true, reused: true, paths, ...extra };
     }
 
@@ -723,7 +745,7 @@ async function runShopLogin(context, account) {
         `[${tag}] 当前已处于登录态（阶段=${preFormStage.stage}），跳过账号密码流程`
       );
       await saveStorageState(context, paths);
-      const extra = await runPostLoginFlow(page, tag, paths);
+      const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
       return { ok: true, reused: true, paths, ...extra };
     }
 
@@ -741,7 +763,7 @@ async function runShopLogin(context, account) {
         `[${tag}] 填表前发现已登录 (stage=${beforeFillStage})，跳过填表/点击登录`
       );
       await saveStorageState(context, paths);
-      const extra = await runPostLoginFlow(page, tag, paths);
+      const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
       return { ok: true, reused: true, paths, ...extra };
     }
 
@@ -770,7 +792,7 @@ async function runShopLogin(context, account) {
         `[${tag}] 点登录前发现已登录 (stage=${beforeClickStage})，跳过点击`
       );
       await saveStorageState(context, paths);
-      const extra = await runPostLoginFlow(page, tag, paths);
+      const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
       return { ok: true, reused: true, paths, ...extra };
     }
 
@@ -844,7 +866,7 @@ async function runShopLogin(context, account) {
       `[${tag}] 登录态已保存到 ${paths.storageStatePath}`
     );
 
-    const extra = await runPostLoginFlow(page, tag, paths);
+    const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
     return { ok: true, reused: false, paths, ...extra };
   } catch (error) {
     // 保留一张失败截图便于排查

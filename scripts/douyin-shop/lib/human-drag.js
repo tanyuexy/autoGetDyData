@@ -36,7 +36,8 @@ async function humanDrag(page, options) {
   const overshoot = Math.floor(rand(3, 8));
   const firstStageDistance = distance + overshoot;
 
-  const steps = 28 + Math.floor(rand(0, 10));
+  const extraByDistance = Math.min(22, Math.floor(Math.abs(distance) / 22));
+  const steps = 28 + extraByDistance + Math.floor(rand(0, 10));
   const stepDelay = Math.max(8, Math.floor(durationMs / steps));
   let prevX = startX;
 

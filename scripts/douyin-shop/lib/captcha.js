@@ -5,6 +5,14 @@ const { detectGapX } = require("./image");
 const { humanDrag } = require("./human-drag");
 const { SLIDER_DRAG_DURATION_MS } = require("./env");
 
+function manualCaptchaTrackScale() {
+  const raw = process.env.SHOP_CAPTCHA_TRACK_SCALE;
+  if (raw == null || String(raw).trim() === "") return null;
+  const v = parseFloat(String(raw).trim());
+  if (!Number.isFinite(v) || v < 0.4 || v > 1.8) return null;
+  return v;
+}
+
 /**
  * 抖店/字节跳动滑块验证码处理。
  *
@@ -186,6 +194,37 @@ async function getPiecePixelWidth(scope) {
 }
 
 /**
+ * 滑轨可拖行程往往略短于背景拼图宽度，需按比例缩放拖动距离。
+ * 优先读环境变量 SHOP_CAPTCHA_TRACK_SCALE（例如 0.82）强制覆盖。
+ */
+async function getSliderTrackScaleFactor(btn, bgDisplayWidth) {
+  const manual = manualCaptchaTrackScale();
+  if (manual != null) return manual;
+
+  try {
+    const ratio = await btn.evaluate((handleEl, bgW) => {
+      const minW = Math.max(120, bgW * 0.5);
+      const maxW = Math.min(640, bgW * 1.5);
+      let cur = handleEl;
+      for (let depth = 0; depth < 10 && cur; depth += 1) {
+        const r = cur.getBoundingClientRect();
+        if (r.width >= minW && r.width <= maxW && r.height < bgW * 0.45) {
+          return bgW > 0 ? r.width / bgW : 1;
+        }
+        cur = cur.parentElement;
+      }
+      return 1;
+    }, bgDisplayWidth);
+    if (typeof ratio === "number" && ratio > 0.45 && ratio < 1.55) {
+      return ratio;
+    }
+  } catch {
+    // ignore
+  }
+  return 1;
+}
+
+/**
  * 保存调试图（可选）。
  */
 async function saveDebugImage(buffer, paths, tag) {
@@ -203,6 +242,17 @@ async function saveDebugImage(buffer, paths, tag) {
   } catch {
     return null;
   }
+}
+
+/** 失败后滑块会回弹到左侧；未回弹时继续拖会累加错位 */
+async function waitForSliderHandleReset(page, btn, leftX, maxWaitMs = 4500) {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const b = await btn.boundingBox().catch(() => null);
+    if (b && b.x <= leftX + 20) return true;
+    await page.waitForTimeout(180);
+  }
+  return false;
 }
 
 /**
@@ -231,17 +281,16 @@ async function solveOneSlider(page, ctx, options = {}) {
   // 计算显示尺寸与真实图像尺寸的比例（因为背景图可能是 2x 图）
   const pieceWidth = await getPiecePixelWidth(scope);
 
-  const { gapX, width: imgW } = await detectGapX(bgBuffer, {
-    minStartX: Math.max(60, pieceWidth + 5)
+  const { gapX, width: imgW, candidates } = await detectGapX(bgBuffer, {
+    minStartX: Math.max(60, pieceWidth + 5),
+    pieceWidth: pieceWidth || undefined
   });
 
   const displayedWidth = bgBox.width;
   const scale = displayedWidth / imgW;
-  const gapXDisplayed = gapX * scale;
+  const trackScale = await getSliderTrackScaleFactor(btn, displayedWidth);
 
   // piece 初始 x 通常位于 bg 左侧（piece 元素 x 与 bg.left 的差）
-  // 需要拖动的屏幕距离 ≈ 缺口在屏幕上的 x 位置 - piece 初始 x 位置
-  // 实际测量：对于字节跳动滑块，简化为：需要拖动 = gapXDisplayed - pieceDisplayX
   let pieceDisplayX = 0;
   const piece = await firstVisibleLocator(scope, PIECE_IMAGE_SELECTORS, 400);
   if (piece) {
@@ -249,40 +298,77 @@ async function solveOneSlider(page, ctx, options = {}) {
     if (pBox) pieceDisplayX = pBox.x - bgBox.x;
   }
 
-  // 修正：视觉上缺口 x 通常比 piece 初始 x 大。
-  // 拖动距离 = 缺口左沿 - piece 左沿
-  let distance = Math.round(gapXDisplayed - pieceDisplayX);
+  const gapList =
+    Array.isArray(candidates) && candidates.length > 0
+      ? candidates.slice(0, 4)
+      : [{ x: gapX, score: 0 }];
 
-  // 边界保护
-  if (!Number.isFinite(distance) || distance <= 0) {
-    console.warn(
-      `[${tag}] 计算的拖动距离无效（${distance}），使用 bg 宽度的 60% 作为兜底`
+  const handleLeft0 = btnBox.x;
+
+  for (let gi = 0; gi < gapList.length; gi += 1) {
+    const gx = gapList[gi].x;
+    const gapXDisplayed = gx * scale * trackScale;
+    let baseDistance = Math.round(gapXDisplayed - pieceDisplayX);
+
+    if (!Number.isFinite(baseDistance) || baseDistance <= 0) {
+      baseDistance = Math.round(displayedWidth * 0.55);
+    }
+
+    // 仅对置信度最高的缺口做多档像素微调；其它候选各试一次以免拖太多次触发风控
+    const fineDeltas =
+      gi === 0 ? [0, -6, 6, -12, 12, -4, 4] : [0];
+
+    console.log(
+      `[${tag}] 滑块分析#${gi + 1}/${gapList.length}: bg显示宽=${Math.round(
+        displayedWidth
+      )}px, 图像宽=${imgW}, 候选缺口x(原图)=${gx}(分=${(
+        gapList[gi].score || 0
+      ).toFixed(0)}), 轨道/背景比≈${trackScale.toFixed(3)}, piece初始x=${Math.round(
+        pieceDisplayX
+      )}, 基础拖动≈${baseDistance}px`
     );
-    distance = Math.round(displayedWidth * 0.6);
+
+    for (let fi = 0; fi < fineDeltas.length; fi += 1) {
+      const delta = fineDeltas[fi];
+      const distance = Math.round(baseDistance + delta);
+      if (distance < 8 || distance > displayedWidth * 1.25) continue;
+
+      if (gi > 0 || fi > 0) {
+        const back = await waitForSliderHandleReset(page, btn, handleLeft0);
+        if (!back) {
+          console.warn(
+            `[${tag}] 等待滑块回位超时，跳过剩余尝试（可手动拖一次或刷新验证码）`
+          );
+          return false;
+        }
+      }
+
+      const btnNow = await btn.boundingBox().catch(() => null);
+      if (!btnNow) break;
+      const startX = btnNow.x + btnNow.width / 2;
+      const startY = btnNow.y + btnNow.height / 2;
+
+      await humanDrag(page, {
+        startX,
+        startY,
+        distance,
+        durationMs: SLIDER_DRAG_DURATION_MS
+      });
+
+      await page.waitForTimeout(900);
+      const passed = await waitForCaptchaDisappear(page, 2800);
+      if (passed) {
+        if (delta !== 0 || gi > 0) {
+          console.log(
+            `[${tag}] 滑块通过 ✓（候选#${gi + 1}${delta ? ` 微调${delta}px` : ""}）`
+          );
+        }
+        return true;
+      }
+    }
   }
 
-  console.log(
-    `[${tag}] 滑块分析: bg显示宽=${Math.round(
-      displayedWidth
-    )}px, 图像真实宽=${imgW}, 缺口x(原图)=${gapX}, 缺口x(屏幕)=${Math.round(
-      gapXDisplayed
-    )}, piece初始x=${Math.round(pieceDisplayX)}, 拖动距离≈${distance}px`
-  );
-
-  const startX = btnBox.x + btnBox.width / 2;
-  const startY = btnBox.y + btnBox.height / 2;
-
-  await humanDrag(page, {
-    startX,
-    startY,
-    distance,
-    durationMs: SLIDER_DRAG_DURATION_MS
-  });
-
-  // 等待页面反馈
-  await page.waitForTimeout(1200);
-  const passed = await waitForCaptchaDisappear(page, 2500);
-  return passed;
+  return false;
 }
 
 /**

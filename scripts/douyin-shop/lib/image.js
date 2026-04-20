@@ -1,22 +1,72 @@
 const Jimp = require("jimp");
 
 /**
- * 在背景图中定位滑块"缺口"的 x 坐标。
+ * 一维滑动平均，弱化噪点、避免单列随机尖峰误判为缺口。
+ */
+function smooth1d(arr, windowSize) {
+  const w = Math.max(1, Math.floor(windowSize));
+  const half = Math.floor(w / 2);
+  const out = new Array(arr.length).fill(0);
+  for (let i = 0; i < arr.length; i += 1) {
+    let sum = 0;
+    let count = 0;
+    for (let j = i - half; j <= i + half; j += 1) {
+      if (j >= 0 && j < arr.length) {
+        sum += arr[j];
+        count += 1;
+      }
+    }
+    out[i] = count ? sum / count : 0;
+  }
+  return out;
+}
+
+/**
+ * 在列能量曲线上取局部极大值（带平顶：允许 energy[x]===energy[x+1] 仍算峰顶）。
+ */
+function localMaximaIndices(energy, minX, maxX) {
+  const peaks = [];
+  for (let x = minX + 1; x < maxX - 1; x += 1) {
+    const v = energy[x];
+    if (v < energy[x - 1]) continue;
+    if (v < energy[x + 1]) continue;
+    peaks.push(x);
+  }
+  return peaks;
+}
+
+/**
+ * 按分数从高到低做非极大抑制，避免相邻 10~20px 的重复峰。
+ */
+function pickCandidatesFromPeaks(peaks, energy, minSep) {
+  const items = peaks
+    .map((x) => ({ x, score: energy[x] || 0 }))
+    .sort((a, b) => b.score - a.score);
+  const picked = [];
+  for (const item of items) {
+    if (picked.some((p) => Math.abs(p.x - item.x) < minSep)) continue;
+    picked.push(item);
+    if (picked.length >= 8) break;
+  }
+  return picked;
+}
+
+/**
+ * 在背景图中定位滑块「缺口」左沿的 x 坐标（像素，与截图 buffer 一致）。
  *
- * 策略：
- * 1) 将图片灰度化，计算每个像素与周围的梯度（简化版 Sobel），
- *    得到"边缘图"；
- * 2) 对每一列累加边缘强度，得到列能量；
- * 3) 典型字节跳动/抖店缺口边缘呈"左亮/右暗→左暗/右亮"的双峰；
- *    取列能量在搜索区间中的最高峰作为缺口左沿；
- * 4) 搜索区间起点跳过滑块 piece 本身所在的左侧区域。
+ * 改进点（相对旧版「全局单列能量最大」）：
+ * - 只在图像垂直中部 ROI 统计，削弱上下边框/装饰带来的假峰；
+ * - 列能量强调水平梯度（竖直割痕处 |dx| 更大）；
+ * - 平滑后再取局部极大值 + NMS，得到多个候选，主结果取最高分；
+ * - 仍支持 minStartX 跳过左侧拼图块区域。
  *
- * @param {Buffer} bgBuffer  背景图像二进制（通常是一张 PNG/JPG）
+ * @param {Buffer} bgBuffer
  * @param {object} options
- * @param {number} [options.minStartX]  允许搜索的最小 x（跳过 piece 起点），默认 60
- * @param {number} [options.minEndPad]  搜索的右侧留白，默认 10
- * @param {number} [options.pieceWidth]  已知 piece 宽度（若提供则 minStartX 覆盖为该值）
- * @returns {Promise<{ gapX: number, width: number, height: number, scores: number[] }>}
+ * @param {number} [options.minStartX]
+ * @param {number} [options.minEndPad]
+ * @param {number} [options.pieceWidth]
+ * @param {number} [options.yMarginRatio] 上下各裁掉比例，默认 0.12
+ * @returns {Promise<{ gapX: number, width: number, height: number, candidates: { x: number, score: number }[] }>}
  */
 async function detectGapX(bgBuffer, options = {}) {
   const image = await Jimp.read(bgBuffer);
@@ -27,11 +77,16 @@ async function detectGapX(bgBuffer, options = {}) {
     options.pieceWidth ? options.pieceWidth + 5 : 0
   );
   const minEndPad = options.minEndPad || 10;
+  const yMarginRatio = Math.min(
+    0.35,
+    Math.max(0.05, options.yMarginRatio ?? 0.12)
+  );
+  const y0 = Math.floor(height * yMarginRatio);
+  const y1 = Math.ceil(height * (1 - yMarginRatio));
 
-  // 灰度化
   const gray = new Uint8ClampedArray(width * height);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
       const idx = (y * width + x) * 4;
       const r = image.bitmap.data[idx];
       const g = image.bitmap.data[idx + 1];
@@ -40,38 +95,54 @@ async function detectGapX(bgBuffer, options = {}) {
     }
   }
 
-  // 简化 Sobel：计算水平方向梯度 |I(x+1,y)-I(x-1,y)|
   const columnEnergy = new Array(width).fill(0);
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
+  for (let y = Math.max(1, y0); y < Math.min(height - 1, y1); y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
       const left = gray[y * width + (x - 1)];
       const right = gray[y * width + (x + 1)];
       const up = gray[(y - 1) * width + x];
       const down = gray[(y + 1) * width + x];
-      // 水平 + 垂直梯度平方和
       const dx = right - left;
       const dy = down - up;
-      const mag = Math.abs(dx) + Math.abs(dy);
+      // 缺口竖边以水平梯度为主，加大权重减少背景纹理假峰
+      const mag = 2 * Math.abs(dx) + Math.abs(dy);
       columnEnergy[x] += mag;
     }
   }
 
-  // 在搜索区间中找峰值
-  let gapX = minStartX;
-  let bestScore = -1;
+  const smoothWin = Number.isFinite(options.smoothWindow)
+    ? Math.max(3, Math.floor(options.smoothWindow))
+    : 7;
+  const smoothed = smooth1d(columnEnergy, smoothWin);
+
   const endX = Math.max(minStartX + 1, width - minEndPad);
-  for (let x = minStartX; x < endX; x++) {
-    if (columnEnergy[x] > bestScore) {
-      bestScore = columnEnergy[x];
-      gapX = x;
+  const pieceW = options.pieceWidth || 0;
+  const minSep = Math.max(18, Math.min(48, pieceW > 0 ? pieceW - 4 : 24));
+
+  const peaks = localMaximaIndices(smoothed, minStartX, endX);
+  let candidates = pickCandidatesFromPeaks(peaks, smoothed, minSep);
+
+  // 若没有局部峰（极少），退回区间最大值
+  if (candidates.length === 0) {
+    let bestX = minStartX;
+    let bestScore = -1;
+    for (let x = minStartX; x < endX; x += 1) {
+      if (smoothed[x] > bestScore) {
+        bestScore = smoothed[x];
+        bestX = x;
+      }
     }
+    candidates = [{ x: bestX, score: bestScore }];
   }
+
+  // 主结果：最高分；若与次高分接近且更靠左，有时真实缺口略偏左，可保留主为最高分（通常仍正确）
+  const gapX = candidates[0].x;
 
   return {
     gapX,
     width,
     height,
-    scores: columnEnergy
+    candidates
   };
 }
 
