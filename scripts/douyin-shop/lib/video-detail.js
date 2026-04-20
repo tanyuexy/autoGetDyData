@@ -1,6 +1,10 @@
 const path = require("path");
 const fs = require("fs/promises");
 
+const {
+  pickLatestSelectableCalendarDay
+} = require("./pick-latest-calendar-day");
+
 const VIDEO_SELF_URL =
   process.env.SHOP_VIDEO_SELF_URL ||
   "https://compass.jinritemai.com/shop/video/self";
@@ -89,20 +93,9 @@ async function gotoVideoSelf(page, tag) {
   logStep(tag, `gotoVideoSelf 完成`, started);
 }
 
-function formatYmd(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}/${m}/${d}`;
-}
-
-function getYesterday() {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-}
-
 /**
- * 选择日期为"自然日 - 昨天"。
+ * 视频明细：悬浮「更多」→ 左侧选「自然日」→ 日历里点「当前可选的最后一个自然日」
+ *（罗盘多为 T+1，即最新可导出日，而非固定「昨天」字面匹配）。
  *
  * 页面结构（罗盘 ecom-dorami-date-picker + ecom-picker 日历）：
  *  - 顶部 radio 组：实时/近1天/近7天/近30天/自然月/大促/更多
@@ -118,9 +111,6 @@ function getYesterday() {
  */
 async function selectDateRangeYesterday(page, tag) {
   const started = Date.now();
-  const yesterday = getYesterday();
-  const ymdSlash = formatYmd(yesterday);
-  const dayNum = String(yesterday.getDate());
 
   // 1) 找"更多"按钮；有时页面刚加载完 DOM 还没挂上，这里额外 poll 一段时间
   const moreTrigger = page
@@ -176,11 +166,11 @@ async function selectDateRangeYesterday(page, tag) {
   } else {
     logWarn(
       tag,
-      '悬浮"更多"后仍未找到"自然日"选项，将直接在日历中兜底选昨天'
+      '悬浮"更多"后仍未找到"自然日"选项，将尝试在日历中直接点选最新可选日'
     );
   }
 
-  // 4) 在右侧日历点击"昨天"
+  // 4) 右侧日历：点击「可选格子里 DOM 序最后一个」（最新可选自然日）
   const rightPanel = page
     .locator(
       ".ecom-dorami-date-picker-right-container, .ecom-picker-panel-container"
@@ -192,48 +182,11 @@ async function selectDateRangeYesterday(page, tag) {
     ? rightPanel
     : page;
 
-  const yesterdayCell = scope
-    .locator(
-      `td.ecom-picker-cell.ecom-picker-cell-in-view:not(.ecom-picker-cell-disabled) >> .ecom-picker-cell-inner:text-is("${dayNum}")`
-    )
-    .first();
-
-  let clicked = false;
-  if (await yesterdayCell.isVisible({ timeout: 1500 }).catch(() => false)) {
-    await yesterdayCell.click({ timeout: 2000 }).catch(() => {});
-    clicked = true;
-    logStep(tag, `已选择日期: ${ymdSlash}`);
-  }
-
-  if (!clicked) {
-    const fallback = scope
-      .locator(
-        `.ecom-picker-cell:not(.ecom-picker-cell-disabled) .ecom-picker-cell-inner:text-is("${dayNum}")`
-      )
-      .first();
-    if (await fallback.isVisible({ timeout: 800 }).catch(() => false)) {
-      await fallback.click({ timeout: 2000 }).catch(() => {});
-      clicked = true;
-      logStep(tag, `已选择日期（兜底1）: ${ymdSlash}`);
-    }
-  }
-
-  if (!clicked) {
-    logWarn(
-      tag,
-      `未能精确点中昨天 ${ymdSlash}，尝试兜底点击日历中可点的最后一个可选日`
-    );
-    const enabledCells = scope.locator(
-      ".ecom-picker-cell.ecom-picker-cell-in-view:not(.ecom-picker-cell-disabled) .ecom-picker-cell-inner"
-    );
-    const count = await enabledCells.count().catch(() => 0);
-    if (count > 0) {
-      await enabledCells
-        .nth(count - 1)
-        .click({ timeout: 2000 })
-        .catch(() => {});
-      clicked = true;
-    }
+  let clicked = await pickLatestSelectableCalendarDay(page, scope);
+  if (clicked) {
+    logStep(tag, "已选择日历中最新可选自然日");
+  } else {
+    logWarn(tag, "日历中未找到可点击的日期格");
   }
 
   // 5) 收面板，把鼠标移开
@@ -406,7 +359,7 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
 /**
  * 对外入口：
  *  - 导航到视频明细页
- *  - 选择"自然日 - 昨天"
+ *  - 选择「更多 → 自然日」后日历中的最新可选日
  *  - 确保在"视频明细"子 tab
  *  - 切换"投放属性 = 非投放"
  *  - 点击"下载明细"并保存

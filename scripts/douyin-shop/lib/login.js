@@ -18,6 +18,12 @@ const { downloadVideoSelfDetail, gotoVideoSelf } = require("./video-detail");
 const { downloadGraphicDetail } = require("./graphic-detail");
 const { readCurrentShopName, switchToNextPreferredShop } = require("./shop-switch");
 const { waitForDomLoaded } = require("./dom-ready");
+const {
+  STAGES,
+  detectStage,
+  isAuthenticatedStage,
+  waitForStage
+} = require("./stage");
 
 function getAccountPaths(email) {
   const safeName = String(email).replace(/[\\/:*?"<>|]+/g, "_");
@@ -195,33 +201,47 @@ async function clickLogin(page) {
 /**
  * 是否出现抖店/罗盘「登录」相关 UI（会话失效时常驻留在工作台 URL 但表单已弹出）。
  * 命中则视为未登录，避免仅靠 URL 误判。
+ * 选店页 URL 常为 /login/common，必须与真实登录弹层区分。
  */
 async function hasLoginUi(page) {
-  const url = page.url() || "";
-  if (url.includes("/login/")) return true;
+  if (await isShopPickerVisible(page)) return false;
 
+  const url = page.url() || "";
   const pw = page.locator('input[type="password"]').first();
   const pwOk = await pw.isVisible({ timeout: 280 }).catch(() => false);
-  if (!pwOk) return false;
 
   const emailLike = page
     .locator(
       'input[placeholder="请输入邮箱"], input[placeholder*="邮箱"], input[type="email"]'
     )
     .first();
-  if (await emailLike.isVisible({ timeout: 280 }).catch(() => false)) return true;
+  const emailLikeOk = await emailLike
+    .isVisible({ timeout: 280 })
+    .catch(() => false);
 
   const emailTab = page
     .locator(
       'div[role="tab"]:has-text("邮箱登录"), span:has-text("邮箱登录"), :text-is("邮箱登录")'
     )
     .first();
-  if (await emailTab.isVisible({ timeout: 280 }).catch(() => false)) return true;
+  const emailTabOk = await emailTab
+    .isVisible({ timeout: 280 })
+    .catch(() => false);
 
-  if (await page.locator("text=手机号登录").first().isVisible({ timeout: 280 }).catch(() => false))
-    return true;
+  const phoneTabOk = await page
+    .locator("text=手机号登录")
+    .first()
+    .isVisible({ timeout: 280 })
+    .catch(() => false);
 
-  return false;
+  const hasCredentialUi = emailLikeOk || emailTabOk || phoneTabOk;
+
+  if (url.includes("/login/")) {
+    return Boolean(pwOk && hasCredentialUi);
+  }
+
+  if (!pwOk) return false;
+  return hasCredentialUi;
 }
 
 /**
@@ -257,6 +277,8 @@ async function hasAuthenticatedWorkspaceDom(page) {
  * 必须先排除登录页/登录表单，再要求选店页或工作台 DOM，避免「探测 URL 即 /ffa/mshop」时瞬间误判。
  */
 async function isLoggedIn(page) {
+  if (await isShopPickerVisible(page)) return true;
+
   if (await hasLoginUi(page)) return false;
 
   const url = page.url() || "";
@@ -268,8 +290,6 @@ async function isLoggedIn(page) {
   ) {
     return false;
   }
-
-  if (await isShopPickerVisible(page)) return true;
 
   if (url.includes("fxg.jinritemai.com") || url.includes("compass.jinritemai.com")) {
     return hasAuthenticatedWorkspaceDom(page);
@@ -426,16 +446,37 @@ async function runPostLoginFlow(page, tag, paths) {
     `[${tag}] 优先级名单 (${preferredList.length}): ${preferredList.join(", ") || "(空)"}`
   );
 
-  try {
-    const pick = await selectShopIfPicker(page, { tag, preferredList });
-    if (pick.picked) {
-      result.shopPicked = true;
-      result.shopName = pick.name;
-    } else {
+  // === Gate: post-login 入口先识别阶段 ===
+  const entryStage = await detectStage(page);
+  console.log(
+    `[${tag}] 进入 post-login 流程，当前阶段=${entryStage.stage} url=${entryStage.url}`
+  );
+
+  if (entryStage.stage === STAGES.LOGIN_FORM || entryStage.stage === STAGES.CAPTCHA) {
+    console.warn(
+      `[${tag}] 意外：post-login 入口仍是 ${entryStage.stage}，终止后续下载流程`
+    );
+    return result;
+  }
+
+  if (entryStage.stage === STAGES.SHOP_PICKER) {
+    try {
+      const pick = await selectShopIfPicker(page, { tag, preferredList });
+      if (pick.picked) {
+        result.shopPicked = true;
+        result.shopName = pick.name;
+      } else {
+        result.shopPicked = false;
+      }
+    } catch (error) {
+      console.warn(`[${tag}] 店铺选择阶段异常: ${error.message || error}`);
       result.shopPicked = false;
     }
-  } catch (error) {
-    console.warn(`[${tag}] 店铺选择阶段异常: ${error.message || error}`);
+  } else {
+    // 不在选店页（cookie 复用/已在罗盘）：跳过 selectShopIfPicker，避免多余等待
+    console.log(
+      `[${tag}] 当前阶段=${entryStage.stage}，不在选店页，跳过 selectShopIfPicker`
+    );
     result.shopPicked = false;
   }
 
@@ -612,16 +653,21 @@ async function tryReuseCookieLogin(page, tag) {
   }
 
   // 给 SPA 一点时间决定跳转与渲染（失效时可能先停在 home URL 再出登录表单）
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    const url = page.url() || "";
-    if (url.includes("/login/") || (await hasLoginUi(page))) {
-      return false;
-    }
-    if (await isLoggedIn(page)) return true;
-    await page.waitForTimeout(320);
-  }
-  return isLoggedIn(page);
+  const settled = await waitForStage(
+    page,
+    [
+      STAGES.LOGIN_FORM,
+      STAGES.SHOP_PICKER,
+      STAGES.COMPASS_VIDEO,
+      STAGES.COMPASS_GRAPHIC,
+      STAGES.COMPASS_OTHER,
+      STAGES.FXG_WORKSPACE,
+      STAGES.CAPTCHA
+    ],
+    { timeoutMs: 10000, intervalMs: 320 }
+  );
+  console.log(`[${tag}] cookie 直连后阶段=${settled.stage} url=${settled.url}`);
+  return isAuthenticatedStage(settled.stage);
 }
 
 /**
@@ -653,50 +699,122 @@ async function runShopLogin(context, account) {
     console.log(`[${tag}] 打开抖店登录页 ${SHOP_LOGIN_URL}`);
     await page.goto(SHOP_LOGIN_URL, { waitUntil: "domcontentloaded" });
     // 抖店页面长连接/埋点会让 networkidle 几乎永远触发不到，
-    // 用"邮箱登录 tab 可见"作为就绪信号即可。
-    await page
-      .locator("text=邮箱登录")
-      .first()
-      .waitFor({ state: "visible", timeout: 6000 })
-      .catch(() => {});
+    // 等到「登录表单 / 选店页 / 工作台 / 滑块」任一阶段出现即可。
+    const preFormStage = await waitForStage(
+      page,
+      [
+        STAGES.LOGIN_FORM,
+        STAGES.SHOP_PICKER,
+        STAGES.COMPASS_VIDEO,
+        STAGES.COMPASS_GRAPHIC,
+        STAGES.COMPASS_OTHER,
+        STAGES.FXG_WORKSPACE,
+        STAGES.CAPTCHA
+      ],
+      { timeoutMs: 8000 }
+    );
+    console.log(
+      `[${tag}] 登录页阶段识别: stage=${preFormStage.stage} url=${preFormStage.url}`
+    );
 
-    if (await isLoggedIn(page)) {
-      console.log(`[${tag}] 已经处于登录态，跳过登录流程`);
+    // 快速通道：cookie/登录态直接有效（探测 URL 没跳登录页或已在选店/工作台）
+    if (isAuthenticatedStage(preFormStage.stage)) {
+      console.log(
+        `[${tag}] 当前已处于登录态（阶段=${preFormStage.stage}），跳过账号密码流程`
+      );
       await saveStorageState(context, paths);
       const extra = await runPostLoginFlow(page, tag, paths);
       return { ok: true, reused: true, paths, ...extra };
     }
 
-    console.log(`[${tag}] 切换到邮箱登录 tab`);
-    await switchToEmailTab(page);
+    // 只有在「真的处于登录表单」时才执行 tab 切换/填密码；其它阶段全部按异常走兜底路径
+    if (preFormStage.stage !== STAGES.LOGIN_FORM && preFormStage.stage !== STAGES.CAPTCHA) {
+      console.warn(
+        `[${tag}] 登录页阶段非预期 (${preFormStage.stage})，仍尝试按登录表单流程走一次`
+      );
+    }
 
-    console.log(`[${tag}] 填写邮箱与密码`);
-    await fillCredentials(page, email, password);
-    await ensureAgreementChecked(page);
+    // === Gate: 准备填表前再确认一次阶段 ===
+    const beforeFillStage = (await detectStage(page)).stage;
+    if (isAuthenticatedStage(beforeFillStage)) {
+      console.log(
+        `[${tag}] 填表前发现已登录 (stage=${beforeFillStage})，跳过填表/点击登录`
+      );
+      await saveStorageState(context, paths);
+      const extra = await runPostLoginFlow(page, tag, paths);
+      return { ok: true, reused: true, paths, ...extra };
+    }
 
-    console.log(
-      `[${tag}] 表单就绪，耗时 ${Date.now() - t0}ms，点击登录按钮`
+    if (beforeFillStage === STAGES.LOGIN_FORM) {
+      console.log(`[${tag}] 切换到邮箱登录 tab`);
+      await switchToEmailTab(page);
+
+      console.log(`[${tag}] 填写邮箱与密码`);
+      await fillCredentials(page, email, password);
+      await ensureAgreementChecked(page);
+    } else if (beforeFillStage === STAGES.CAPTCHA) {
+      console.log(`[${tag}] 进入页面即遇滑块，直接跳到滑块处理阶段`);
+    } else {
+      console.warn(
+        `[${tag}] 未能识别为登录表单阶段 (${beforeFillStage})，仍按标准流程执行一次填表`
+      );
+      await switchToEmailTab(page);
+      await fillCredentials(page, email, password);
+      await ensureAgreementChecked(page);
+    }
+
+    // === Gate: 点击登录按钮之前再确认一次 ===
+    const beforeClickStage = (await detectStage(page)).stage;
+    if (isAuthenticatedStage(beforeClickStage)) {
+      console.log(
+        `[${tag}] 点登录前发现已登录 (stage=${beforeClickStage})，跳过点击`
+      );
+      await saveStorageState(context, paths);
+      const extra = await runPostLoginFlow(page, tag, paths);
+      return { ok: true, reused: true, paths, ...extra };
+    }
+
+    if (beforeClickStage === STAGES.LOGIN_FORM) {
+      console.log(
+        `[${tag}] 表单就绪，耗时 ${Date.now() - t0}ms，点击登录按钮`
+      );
+      await clickLogin(page);
+    } else if (beforeClickStage === STAGES.CAPTCHA) {
+      console.log(`[${tag}] 已直接出现滑块，跳过点击登录`);
+    } else {
+      console.warn(
+        `[${tag}] 点登录前阶段异常 (${beforeClickStage})，仍尝试一次点击`
+      );
+      await clickLogin(page);
+    }
+
+    // 点击后：预期进入「滑块 / 选店 / 罗盘 / 工作台」任一阶段
+    console.log(`[${tag}] 检查点击登录后的页面阶段`);
+    const afterClickStage = await waitForStage(
+      page,
+      [
+        STAGES.CAPTCHA,
+        STAGES.SHOP_PICKER,
+        STAGES.COMPASS_VIDEO,
+        STAGES.COMPASS_GRAPHIC,
+        STAGES.COMPASS_OTHER,
+        STAGES.FXG_WORKSPACE
+      ],
+      { timeoutMs: 3500, intervalMs: 180 }
     );
-    await clickLogin(page);
-
-    // 登录后可能直接成功（无滑块），也可能触发滑块验证。
-    // 先给一个短暂的"快速通过"窗口：如果点击登录后页面迅速进入登录成功态
-    //（URL 变到 compass/fxg 非登录页，或 DOM 出现"请选择店铺"），就直接跳过滑块检测。
-    console.log(`[${tag}] 检查是否触发滑块验证`);
-    const fastLogged = await (async () => {
-      const deadline = Date.now() + 1500;
-      while (Date.now() < deadline) {
-        if (await isShopPickerVisible(page)) return true;
-        if (await isLoggedIn(page)) return true;
-        await page.waitForTimeout(150);
-      }
-      return false;
-    })();
+    console.log(`[${tag}] 点击后阶段: ${afterClickStage.stage}`);
 
     let passed = true;
-    if (fastLogged) {
-      console.log(`[${tag}] 点击登录后已进入登录态，跳过滑块检测`);
+    if (isAuthenticatedStage(afterClickStage.stage)) {
+      console.log(`[${tag}] 已直接进入登录态，跳过滑块检测`);
+    } else if (afterClickStage.stage === STAGES.CAPTCHA) {
+      passed = await solveCaptchaIfPresent(page, {
+        tag,
+        maxRetry: SLIDER_MAX_RETRY,
+        paths
+      });
     } else {
+      // 兜底：也许滑块在稍后才出现；让原有 solver 去做 detection + solve
       passed = await solveCaptchaIfPresent(page, {
         tag,
         maxRetry: SLIDER_MAX_RETRY,

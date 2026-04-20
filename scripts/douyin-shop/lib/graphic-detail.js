@@ -1,6 +1,10 @@
 const path = require("path");
 const fs = require("fs/promises");
 
+const {
+  pickLatestSelectableCalendarDay
+} = require("./pick-latest-calendar-day");
+
 const GRAPHIC_URL =
   process.env.SHOP_GRAPHIC_URL ||
   "https://compass.jinritemai.com/shop/graphic/graphic-analysis";
@@ -16,33 +20,11 @@ function logWarn(tag, msg) {
   console.warn(`[${tag}] ${msg}`);
 }
 
-function formatYmd(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}/${m}/${d}`;
-}
-
-function getYesterday() {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-}
-
 /**
- * 与 video-detail 共用的日历点选逻辑：在已展开的 ecom-picker 中点击「昨天」。
+ * 图文分析页：在已展开的自然日面板中点击日历「最新可选日」。
  */
-async function pickYesterdayInCalendar(page, tag) {
+async function pickLatestInGraphicCalendar(page, tag) {
   const started = Date.now();
-  const yesterday = getYesterday();
-  const ymdSlash = formatYmd(yesterday);
-  const dayNum = String(yesterday.getDate());
-
-  await page
-    .locator(".ecom-picker-body")
-    .first()
-    .waitFor({ state: "visible", timeout: 8000 })
-    .catch(() => {});
-
   const rightPanel = page
     .locator(
       ".ecom-dorami-date-picker-right-container, .ecom-picker-panel-container"
@@ -54,34 +36,11 @@ async function pickYesterdayInCalendar(page, tag) {
     ? rightPanel
     : page;
 
-  const yesterdayCell = scope
-    .locator(
-      `td.ecom-picker-cell.ecom-picker-cell-in-view:not(.ecom-picker-cell-disabled) >> .ecom-picker-cell-inner:text-is("${dayNum}")`
-    )
-    .first();
-
-  let clicked = false;
-  if (await yesterdayCell.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await yesterdayCell.click({ timeout: 2000 }).catch(() => {});
-    clicked = true;
-    logStep(tag, `图文页已选择日期: ${ymdSlash}`, started);
-  }
-
-  if (!clicked) {
-    const fallback = scope
-      .locator(
-        `.ecom-picker-cell:not(.ecom-picker-cell-disabled) .ecom-picker-cell-inner:text-is("${dayNum}")`
-      )
-      .first();
-    if (await fallback.isVisible({ timeout: 800 }).catch(() => false)) {
-      await fallback.click({ timeout: 2000 }).catch(() => {});
-      clicked = true;
-      logStep(tag, `图文页已选择日期（兜底）: ${ymdSlash}`, started);
-    }
-  }
-
-  if (!clicked) {
-    logWarn(tag, `图文页未能点中昨天 ${ymdSlash}`);
+  const clicked = await pickLatestSelectableCalendarDay(page, scope);
+  if (clicked) {
+    logStep(tag, "图文页已选择日历中最新可选自然日", started);
+  } else {
+    logWarn(tag, "图文页日历中未找到可点击的日期格");
   }
 
   await page.waitForTimeout(400);
@@ -92,8 +51,9 @@ async function pickYesterdayInCalendar(page, tag) {
 }
 
 /**
- * 图文分析页：顶部日期区为「自然日」radio + dropdown，点击后选自然日 + 日历中的昨天。
- * 与自营视频明细「更多 → 自然日」不同，这里直接点「自然日」触发器。
+ * 图文分析页：直接点顶部「自然日」触发器（无需先悬浮「更多」），
+ * 弹层内确认「自然日」后，在日历中选最新一个可选日期。
+ * 与自营视频明细「更多 → 自然日」路径不同。
  */
 async function selectGraphicNaturalDayYesterday(page, tag) {
   const started = Date.now();
@@ -140,10 +100,10 @@ async function selectGraphicNaturalDayYesterday(page, tag) {
     }
   }
 
-  const picked = await pickYesterdayInCalendar(page, tag);
+  const picked = await pickLatestInGraphicCalendar(page, tag);
   logStep(
     tag,
-    `selectGraphicNaturalDayYesterday ${picked ? "完成" : "可能未点到昨天"}`,
+    `selectGraphicNaturalDayYesterday ${picked ? "完成" : "可能未点到最新可选日"}`,
     started
   );
   return picked;
@@ -229,7 +189,7 @@ async function clickGraphicDownloadAndSave(page, tag, saveDir) {
 }
 
 /**
- *罗盘「图文分析」导出：自然日 + 昨天 + 下载明细。
+ *罗盘「图文分析」导出：自然日 + 日历最新可选日 + 下载明细。
  * 文件落在 saveDir/<店铺名>/图文明细/ 下，文件名含「图文明细」前缀。
  *
  * @param {import('playwright').Page} page
