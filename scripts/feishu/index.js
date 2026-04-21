@@ -31,6 +31,16 @@ const DEFAULT_XLSX_FIELD_ALIASES = {
   主页访问量: "主页访量",
   粉丝增量: "增粉"
 };
+
+/** 抖店「每日支付增量汇总」xlsx 列名 -> 多维表格字段名（需在 shop 表中存在） */
+const SHOP_XLSX_FIELD_ALIASES = {
+  作品标题: "作品名",
+  用户支付金额: "增加销售额",
+  数据日期: "日期"
+};
+
+const SHOP_DEFAULT_XLSX_RELATIVE =
+  "data/抖店-全部店铺-每日支付增量汇总.xlsx";
 const NON_WRITABLE_FIELD_TYPES = new Set([19, 20]);
 
 function printHelp() {
@@ -46,6 +56,7 @@ function printHelp() {
   node scripts/feishu/index.js insert --fields-file ./data/record.json
   node scripts/feishu/index.js insert-xlsx --file ./data/作品列表.xlsx [--sheet Sheet1] [--dry-run]
   node scripts/feishu/index.js sync-data-xlsx [--dir ./data] [--file ./data/某.xlsx] [--sheet Sheet1] [--keep-rows N] [--dry-run]
+  node scripts/feishu/index.js sync-data-xlsx-shop [--file ./data/抖店-全部店铺-每日支付增量汇总.xlsx] [--sheet Sheet1] [--replace] [--dry-run]
 
 说明:
   - 多维表格 appToken/tableId：优先读环境变量 FEISHU_BITABLE_*；未设置时读项目根目录 config.json 的 feishu.<profile>（默认 profile=shop，抖创同步可设 FEISHU_BITABLE_PROFILE=creator 并在 config 中配置 feishu.creator）
@@ -56,6 +67,7 @@ function printHelp() {
   - insert: 自动检查/刷新 token 后插入一条多维表格记录
   - insert-xlsx: 读取 xlsx 第一行作为字段名，按行写入飞书多维表格（追加）
   - sync-data-xlsx: 读取指定目录下「修改时间最新」的 xlsx（可用 --file 指定），默认先清空当前飞书表全部记录再批量写入；可用 --keep-rows N 保留「列出记录」接口顺序下的前 N 条，仅删除之后的记录再写入（不清空整张表）
+  - sync-data-xlsx-shop: 抖店汇总表同步到 feishu.shop 表；默认读取 ${SHOP_DEFAULT_XLSX_RELATIVE}；列映射：作品标题→作品名、用户支付金额→增加销售额、数据日期→日期；默认在表格末尾追加记录（不删除已有行）；加 --replace 则与 sync-data-xlsx 相同先删后写（可用 --keep-rows）
 `);
 }
 
@@ -278,6 +290,25 @@ function readXlsxFieldAliases(args) {
   }
   return {
     ...DEFAULT_XLSX_FIELD_ALIASES,
+    ...parsed
+  };
+}
+
+function readShopXlsxFieldAliases(args) {
+  const option = readOption(args, "field-aliases", "fieldAliases");
+  let parsed = {};
+  if (option) {
+    try {
+      parsed = JSON.parse(String(option));
+    } catch (error) {
+      throw new Error("--field-aliases 必须是 JSON 对象");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("--field-aliases 必须是 JSON 对象");
+    }
+  }
+  return {
+    ...SHOP_XLSX_FIELD_ALIASES,
     ...parsed
   };
 }
@@ -892,6 +923,160 @@ async function run() {
           ? `（另有 ${Math.min(keepLeadingRows, existingIds.length)} 条已保留）`
           : "")
     );
+    const droppedEntries = Object.entries(droppedValueStats);
+    if (droppedEntries.length) {
+      console.log(
+        "写入前已跳过无法转换的单元格:",
+        droppedEntries.map(([name, count]) => `${name}(${count})`).join(", ")
+      );
+    }
+    return;
+  }
+
+  if (command === "sync-data-xlsx-shop") {
+    const fileOption = readOption(args, "file");
+    const sheet = String(readOption(args, "sheet") || "").trim();
+    const dryRun = Boolean(readOption(args, "dry-run", "dryRun"));
+    const limit = toPositiveInteger(readOption(args, "limit"), 0);
+    const replaceMode = Boolean(readOption(args, "replace"));
+    const keepLeadingRows = replaceMode
+      ? toNonNegativeInteger(readOption(args, "keep-rows", "keepRows"), 0)
+      : 0;
+    const fieldAliases = readShopXlsxFieldAliases(args);
+
+    const filePath = fileOption
+      ? path.resolve(process.cwd(), String(fileOption).trim())
+      : path.resolve(process.cwd(), SHOP_DEFAULT_XLSX_RELATIVE);
+
+    const tokenRecord = await getValidAccessToken(config);
+    const prepared = await prepareBitableRowsFromXlsx(
+      { filePath, sheet, limit, fieldAliases },
+      config,
+      tokenRecord
+    );
+    const {
+      sheetName,
+      totalXlsxRows,
+      normalizedRecords,
+      unknownHeaders,
+      aliasHeaders,
+      droppedValueStats,
+      unresolvedLinkValueStats,
+      ambiguousLinkValueStats
+    } = prepared;
+
+    console.log(`同步来源（抖店 shop）: ${filePath}`);
+    console.log(`sheet: ${sheetName}`);
+    console.log(
+      `xlsx 有效行: ${totalXlsxRows}，本次准备写入: ${normalizedRecords.length} 行` +
+        (replaceMode ? "（--replace 覆盖模式）" : "（末尾追加）")
+    );
+
+    if (aliasHeaders.length) {
+      console.log("自动字段映射:", aliasHeaders.join(", "));
+    }
+    if (unknownHeaders.length) {
+      console.warn(
+        `以下 xlsx 列在飞书表中不存在或不可写，已自动忽略: ${unknownHeaders.join(", ")}`
+      );
+    }
+    printLinkMappingWarnings(unresolvedLinkValueStats, ambiguousLinkValueStats);
+
+    if (!normalizedRecords.length) {
+      console.log("标准化后没有可写入字段，已跳过（未写入表格）。");
+      return;
+    }
+
+    if (dryRun) {
+      let dryMsg;
+      if (replaceMode) {
+        dryMsg =
+          keepLeadingRows > 0
+            ? `dry-run（replace）：将保留飞书表前 ${keepLeadingRows} 条，删除其余记录后批量写入；预览前 3 行:`
+            : "dry-run（replace）：将清空飞书表全部记录后批量写入；预览前 3 行:";
+      } else {
+        dryMsg =
+          "dry-run（追加）：将在表格末尾批量新增记录（不删除已有行）；预览前 3 行:";
+      }
+      console.log(dryMsg);
+      normalizedRecords.slice(0, 3).forEach((record) => {
+        console.log(`- 行 ${record.rowNumber}:`, JSON.stringify(record.fields));
+      });
+      const droppedEntries = Object.entries(droppedValueStats);
+      if (droppedEntries.length) {
+        console.log(
+          "已跳过无法转换的单元格:",
+          droppedEntries.map(([name, count]) => `${name}(${count})`).join(", ")
+        );
+      }
+      return;
+    }
+
+    let deletedCount = 0;
+    let replaceExistingTotal = 0;
+    if (replaceMode) {
+      const existingIds = await listAllBitableRecordIds(
+        config,
+        tokenRecord.accessToken
+      );
+      replaceExistingTotal = existingIds.length;
+      const idsToDelete =
+        keepLeadingRows > 0 ? existingIds.slice(keepLeadingRows) : existingIds;
+
+      if (keepLeadingRows > 0) {
+        const kept = Math.min(keepLeadingRows, existingIds.length);
+        console.log(
+          `飞书表现有记录: ${existingIds.length} 条；保留前 ${kept} 条（按接口列出顺序），将删除其余 ${idsToDelete.length} 条…`
+        );
+      } else {
+        console.log(`飞书表现有记录: ${existingIds.length} 条，开始清空…`);
+      }
+
+      const deleteChunks = chunkArray(idsToDelete, 500);
+      for (let i = 0; i < deleteChunks.length; i += 1) {
+        await batchDeleteBitableRecords(
+          config,
+          tokenRecord.accessToken,
+          deleteChunks[i]
+        );
+        if (i < deleteChunks.length - 1) {
+          await sleepMs(200);
+        }
+      }
+      deletedCount = idsToDelete.length;
+    } else {
+      console.log("追加模式：不删除已有记录，仅在末尾批量新增…");
+    }
+
+    const BATCH = 500;
+    const createChunks = chunkArray(
+      normalizedRecords.map((record) => ({ fields: record.fields })),
+      BATCH
+    );
+    let created = 0;
+    for (let i = 0; i < createChunks.length; i += 1) {
+      await batchCreateBitableRecords(
+        config,
+        tokenRecord.accessToken,
+        createChunks[i]
+      );
+      created += createChunks[i].length;
+      if (i < createChunks.length - 1) {
+        await sleepMs(200);
+      }
+    }
+
+    if (replaceMode) {
+      console.log(
+        `覆盖写入完成: 已删除 ${deletedCount} 条，已新增 ${created} 条` +
+          (keepLeadingRows > 0
+            ? `（另有 ${Math.min(keepLeadingRows, replaceExistingTotal)} 条已保留）`
+            : "")
+      );
+    } else {
+      console.log(`追加写入完成: 已新增 ${created} 条`);
+    }
+
     const droppedEntries = Object.entries(droppedValueStats);
     if (droppedEntries.length) {
       console.log(

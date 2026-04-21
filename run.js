@@ -29,6 +29,11 @@ const ROUTES = {
     argv: ["sync-data-xlsx"],
     env: { FEISHU_BITABLE_PROFILE: "creator" }
   },
+  "feishu:sync-data-xlsx-shop": {
+    script: "scripts/feishu/index.js",
+    argv: ["sync-data-xlsx-shop"],
+    env: { FEISHU_BITABLE_PROFILE: "shop" }
+  },
 
   "shop:login": { script: "scripts/douyin-shop/index.js", argv: ["login"] },
   "shop:list": { script: "scripts/douyin-shop/index.js", argv: ["list"] },
