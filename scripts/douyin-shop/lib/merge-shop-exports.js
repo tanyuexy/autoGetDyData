@@ -4,7 +4,7 @@ const XLSX = require("xlsx");
 const { ACCOUNTS_DIR } = require("./env");
 
 const OUTPUT_DIR = path.resolve(process.cwd(), "data");
-const OUTPUT_FILE_NAME = "抖店-全部店铺-作品支付汇总.xlsx";
+const OUTPUT_FILE_NAME = "抖店-全部店铺-每日支付增量汇总.xlsx";
 const OUTPUT_SHEET_NAME = "全部作品";
 
 const SOURCE_FIELD = "数据来源";
@@ -18,12 +18,7 @@ const VIDEO_PAY_COL = "用户支付金额(元)";
 const GRAPHIC_TITLE_COL = "图文标题";
 const GRAPHIC_PAY_COL = "用户支付金额";
 
-const ORDERED_HEADERS = [
-  SOURCE_FIELD,
-  SHOP_FIELD,
-  TITLE_FIELD,
-  PAY_FIELD
-];
+const ORDERED_HEADERS = [SOURCE_FIELD, SHOP_FIELD, TITLE_FIELD, PAY_FIELD];
 
 function parsePaymentYuan(value) {
   if (value === undefined || value === null || value === "") return 0;
@@ -37,7 +32,9 @@ function parsePaymentYuan(value) {
 }
 
 function normalizeTitle(value) {
-  const t = String(value ?? "").replace(/\s+/g, " ").trim();
+  const t = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
   return t;
 }
 

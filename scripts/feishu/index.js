@@ -45,7 +45,7 @@ function printHelp() {
   node scripts/feishu/index.js insert --fields '{"姓名":"张三","金额":100}'
   node scripts/feishu/index.js insert --fields-file ./data/record.json
   node scripts/feishu/index.js insert-xlsx --file ./data/作品列表.xlsx [--sheet Sheet1] [--dry-run]
-  node scripts/feishu/index.js sync-data-xlsx [--dir ./data] [--file ./data/某.xlsx] [--sheet Sheet1] [--dry-run]
+  node scripts/feishu/index.js sync-data-xlsx [--dir ./data] [--file ./data/某.xlsx] [--sheet Sheet1] [--keep-rows N] [--dry-run]
 
 说明:
   - auth-url: 生成 OAuth 授权地址（默认自动拉起浏览器，可用 --no-open 关闭）
@@ -54,7 +54,7 @@ function printHelp() {
   - refresh: 强制刷新 access_token
   - insert: 自动检查/刷新 token 后插入一条多维表格记录
   - insert-xlsx: 读取 xlsx 第一行作为字段名，按行写入飞书多维表格（追加）
-  - sync-data-xlsx: 读取指定目录下「修改时间最新」的 xlsx（可用 --file 指定），先清空当前飞书表全部记录，再批量写入（覆盖）
+  - sync-data-xlsx: 读取指定目录下「修改时间最新」的 xlsx（可用 --file 指定），默认先清空当前飞书表全部记录再批量写入；可用 --keep-rows N 保留「列出记录」接口顺序下的前 N 条，仅删除之后的记录再写入（不清空整张表）
 `);
 }
 
@@ -149,6 +149,14 @@ async function readFieldsFromArgs(args) {
 function toPositiveInteger(value, fallback = 0) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return fallback;
+  return Math.floor(num);
+}
+
+/** 0 合法：表示不保留（与未传参一致） */
+function toNonNegativeInteger(value, fallback = 0) {
+  if (typeof value === "boolean") return fallback;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return fallback;
   return Math.floor(num);
 }
 
@@ -698,6 +706,10 @@ async function run() {
     const sheet = String(readOption(args, "sheet") || "").trim();
     const dryRun = Boolean(readOption(args, "dry-run", "dryRun"));
     const limit = toPositiveInteger(readOption(args, "limit"), 0);
+    const keepLeadingRows = toNonNegativeInteger(
+      readOption(args, "keep-rows", "keepRows"),
+      0
+    );
     const fieldAliases = readXlsxFieldAliases(args);
 
     const filePath = fileOption
@@ -741,7 +753,11 @@ async function run() {
     }
 
     if (dryRun) {
-      console.log("dry-run：将清空飞书表全部记录后批量写入；预览前 3 行:");
+      const dryMsg =
+        keepLeadingRows > 0
+          ? `dry-run：将保留飞书表前 ${keepLeadingRows} 条（按接口列出顺序），删除其余记录后批量写入；预览前 3 行:`
+          : "dry-run：将清空飞书表全部记录后批量写入；预览前 3 行:";
+      console.log(dryMsg);
       normalizedRecords.slice(0, 3).forEach((record) => {
         console.log(`- 行 ${record.rowNumber}:`, JSON.stringify(record.fields));
       });
@@ -756,8 +772,21 @@ async function run() {
     }
 
     const existingIds = await listAllBitableRecordIds(config, tokenRecord.accessToken);
-    console.log(`飞书表现有记录: ${existingIds.length} 条，开始清空…`);
-    const deleteChunks = chunkArray(existingIds, 500);
+    const idsToDelete =
+      keepLeadingRows > 0
+        ? existingIds.slice(keepLeadingRows)
+        : existingIds;
+
+    if (keepLeadingRows > 0) {
+      const kept = Math.min(keepLeadingRows, existingIds.length);
+      console.log(
+        `飞书表现有记录: ${existingIds.length} 条；保留前 ${kept} 条（按接口列出顺序），将删除其余 ${idsToDelete.length} 条…`
+      );
+    } else {
+      console.log(`飞书表现有记录: ${existingIds.length} 条，开始清空…`);
+    }
+
+    const deleteChunks = chunkArray(idsToDelete, 500);
     for (let i = 0; i < deleteChunks.length; i += 1) {
       await batchDeleteBitableRecords(config, tokenRecord.accessToken, deleteChunks[i]);
       if (i < deleteChunks.length - 1) {
@@ -779,7 +808,13 @@ async function run() {
       }
     }
 
-    console.log(`覆盖写入完成: 已删除 ${existingIds.length} 条，已新增 ${created} 条`);
+    const deletedCount = idsToDelete.length;
+    console.log(
+      `覆盖写入完成: 已删除 ${deletedCount} 条，已新增 ${created} 条` +
+        (keepLeadingRows > 0
+          ? `（另有 ${Math.min(keepLeadingRows, existingIds.length)} 条已保留）`
+          : "")
+    );
     const droppedEntries = Object.entries(droppedValueStats);
     if (droppedEntries.length) {
       console.log(
