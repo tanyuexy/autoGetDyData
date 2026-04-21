@@ -12,6 +12,8 @@ const {
 const { runShopLogin, getAccountPaths } = require("./lib/login");
 const { loadPreferredShopNames } = require("./lib/shop-picker");
 const { mergeAllShopExportsToData } = require("./lib/merge-shop-exports");
+const { prependRowsToShopSummary } = require("./lib/prepend-rows-to-shop-summary");
+const { prependRowsFromFeishuShop } = require("./lib/prepend-from-feishu-shop");
 
 function parseArgs(argv) {
   // 支持 "login"（默认）或 "login <email> <password>"
@@ -22,7 +24,7 @@ function parseArgs(argv) {
       : "login";
   const positional = args[0] && !args[0].includes("@") ? args.slice(1) : args;
 
-  if (command === "list" || command === "merge") {
+  if (command === "list" || command === "merge" || command === "prepend") {
     return { command, accounts: [] };
   }
 
@@ -103,6 +105,35 @@ async function main() {
 
   if (command === "merge") {
     await mergeAllShopExportsToData();
+    return;
+  }
+
+  if (command === "prepend") {
+    const tail = process.argv.slice(3);
+    let filePath = null;
+    let sheet = "";
+    let dryRun = false;
+    for (let i = 0; i < tail.length; i += 1) {
+      const a = tail[i];
+      if (a === "--file" && tail[i + 1]) {
+        filePath = tail[i + 1];
+        i += 1;
+      } else if (a === "--sheet" && tail[i + 1]) {
+        sheet = tail[i + 1];
+        i += 1;
+      } else if (a === "--dry-run" || a === "--dryRun") {
+        dryRun = true;
+      }
+    }
+    if (filePath && String(filePath).trim()) {
+      await prependRowsToShopSummary({
+        sourceFile: filePath,
+        sheet,
+        dryRun
+      });
+      return;
+    }
+    await prependRowsFromFeishuShop({ dryRun });
     return;
   }
 

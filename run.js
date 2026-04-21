@@ -37,7 +37,8 @@ const ROUTES = {
 
   "shop:login": { script: "scripts/douyin-shop/index.js", argv: ["login"] },
   "shop:list": { script: "scripts/douyin-shop/index.js", argv: ["list"] },
-  "shop:merge": { script: "scripts/douyin-shop/index.js", argv: ["merge"] }
+  "shop:merge": { script: "scripts/douyin-shop/index.js", argv: ["merge"] },
+  "shop:prepend": { script: "scripts/douyin-shop/index.js", argv: ["prepend"] }
 };
 
 function printHelp() {

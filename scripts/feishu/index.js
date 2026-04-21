@@ -41,6 +41,12 @@ const SHOP_XLSX_FIELD_ALIASES = {
 
 const SHOP_DEFAULT_XLSX_RELATIVE =
   "data/抖店-全部店铺-每日支付增量汇总.xlsx";
+
+/** sync-data-xlsx 未指定 --file 时，按 FEISHU_BITABLE_PROFILE 只在该前缀的 xlsx 中选修改时间最新的 */
+const DEFAULT_XLSX_NAME_PREFIX_BY_PROFILE = {
+  creator: "抖创",
+  shop: "抖店"
+};
 const NON_WRITABLE_FIELD_TYPES = new Set([19, 20]);
 
 function printHelp() {
@@ -66,8 +72,8 @@ function printHelp() {
   - refresh: 强制刷新 access_token
   - insert: 自动检查/刷新 token 后插入一条多维表格记录
   - insert-xlsx: 读取 xlsx 第一行作为字段名，按行写入飞书多维表格（追加）
-  - sync-data-xlsx: 读取指定目录下「修改时间最新」的 xlsx（可用 --file 指定），默认先清空当前飞书表全部记录再批量写入；可用 --keep-rows N 保留「列出记录」接口顺序下的前 N 条，仅删除之后的记录再写入（不清空整张表）
-  - sync-data-xlsx-shop: 抖店汇总表同步到 feishu.shop 表；默认读取 ${SHOP_DEFAULT_XLSX_RELATIVE}；列映射：作品标题→作品名、用户支付金额→增加销售额、数据日期→日期；默认在表格末尾追加记录（不删除已有行）；加 --replace 则与 sync-data-xlsx 相同先删后写（可用 --keep-rows）
+  - sync-data-xlsx: 未指定 --file 时，在指定目录下按 FEISHU_BITABLE_PROFILE 选取文件名前缀（creator=抖创、shop=抖店）匹配且「修改时间最新」的 xlsx；可用 --file 覆盖；默认先清空当前飞书表全部记录再批量写入；可用 --keep-rows N 保留「列出记录」接口顺序下的前 N 条，仅删除之后的记录再写入（不清空整张表）
+  - sync-data-xlsx-shop: 抖店汇总表同步到 feishu.shop 表；默认读取 ${SHOP_DEFAULT_XLSX_RELATIVE}（列为数据来源、所属店铺、作品名、日期、增加销售额；飞书会忽略本地表中无对应字段的列）；缺列时仍可映射：作品标题→作品名、用户支付金额→增加销售额、数据日期→日期；默认在表格末尾追加记录（不删除已有行）；加 --replace 则与 sync-data-xlsx 相同先删后写（可用 --keep-rows）
 `);
 }
 
@@ -330,16 +336,18 @@ function sleepMs(ms) {
   });
 }
 
-async function findLatestXlsxFile(relativeDir) {
+async function findLatestXlsxFile(relativeDir, namePrefix = "") {
   const dirPath = path.resolve(
     process.cwd(),
     String(relativeDir || "./data").trim()
   );
+  const prefix = String(namePrefix || "").trim();
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
   let bestFull = "";
   let bestMtime = 0;
   for (const ent of entries) {
     if (!ent.isFile() || !ent.name.toLowerCase().endsWith(".xlsx")) continue;
+    if (prefix && !ent.name.startsWith(prefix)) continue;
     const full = path.join(dirPath, ent.name);
     const st = await fs.stat(full);
     if (!bestFull || st.mtimeMs > bestMtime) {
@@ -348,9 +356,17 @@ async function findLatestXlsxFile(relativeDir) {
     }
   }
   if (!bestFull) {
-    throw new Error(`目录下没有 .xlsx: ${dirPath}`);
+    const hint = prefix
+      ? `目录下没有以「${prefix}」开头的 .xlsx: ${dirPath}`
+      : `目录下没有 .xlsx: ${dirPath}`;
+    throw new Error(hint);
   }
   return bestFull;
+}
+
+function defaultXlsxNamePrefixForSync() {
+  const profile = optionalEnv("FEISHU_BITABLE_PROFILE", "shop");
+  return DEFAULT_XLSX_NAME_PREFIX_BY_PROFILE[profile] || "";
 }
 
 function normalizeLookupKey(value) {
@@ -809,9 +825,10 @@ async function run() {
     );
     const fieldAliases = readXlsxFieldAliases(args);
 
+    const defaultNamePrefix = defaultXlsxNamePrefixForSync();
     const filePath = fileOption
       ? path.resolve(process.cwd(), String(fileOption).trim())
-      : await findLatestXlsxFile(dirOption);
+      : await findLatestXlsxFile(dirOption, defaultNamePrefix);
 
     const tokenRecord = await getValidAccessToken(config);
     const prepared = await prepareBitableRowsFromXlsx(
@@ -830,6 +847,11 @@ async function run() {
       ambiguousLinkValueStats
     } = prepared;
 
+    if (!fileOption && defaultNamePrefix) {
+      console.log(
+        `未指定 --file：已按 FEISHU_BITABLE_PROFILE 选用文件名以「${defaultNamePrefix}」开头且修改时间最新的 .xlsx`
+      );
+    }
     console.log(`同步来源: ${filePath}`);
     console.log(`sheet: ${sheetName}`);
     console.log(

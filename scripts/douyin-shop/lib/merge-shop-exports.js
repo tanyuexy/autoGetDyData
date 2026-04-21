@@ -7,13 +7,16 @@ const OUTPUT_DIR = path.resolve(process.cwd(), "data");
 const OUTPUT_FILE_NAME = "抖店-全部店铺-每日支付增量汇总.xlsx";
 const OUTPUT_SHEET_NAME = "全部作品";
 
+/** 视频/图文明细里 append-data-date-column 写入的列名（源表读取用） */
+const SOURCE_DATA_DATE_COL = "数据日期";
+
 const SOURCE_FIELD = "数据来源";
 const SOURCE_TAG = "抖店";
 const SHOP_FIELD = "所属店铺";
-/** 与视频/图文明细导出里 append-data-date-column 写入的列名一致 */
-const DATA_DATE_FIELD = "数据日期";
-const TITLE_FIELD = "作品标题";
-const PAY_FIELD = "用户支付金额";
+/** 与飞书抖店表主数据列一致 */
+const OUT_TITLE = "作品名";
+const OUT_DATE = "日期";
+const OUT_PAY = "增加销售额";
 
 const VIDEO_TITLE_COL = "视频标题";
 const VIDEO_PAY_COL = "用户支付金额(元)";
@@ -23,9 +26,9 @@ const GRAPHIC_PAY_COL = "用户支付金额";
 const ORDERED_HEADERS = [
   SOURCE_FIELD,
   SHOP_FIELD,
-  DATA_DATE_FIELD,
-  TITLE_FIELD,
-  PAY_FIELD
+  OUT_TITLE,
+  OUT_DATE,
+  OUT_PAY
 ];
 
 function parsePaymentYuan(value) {
@@ -83,7 +86,7 @@ function readFirstSheetRows(filePath) {
 }
 
 function cellDateText(row) {
-  const raw = row[DATA_DATE_FIELD];
+  const raw = row[SOURCE_DATA_DATE_COL];
   if (raw === undefined || raw === null) return "";
   const s = String(raw).trim();
   return s;
@@ -97,9 +100,9 @@ function pushVideoRows(allRows, rows, shopName) {
     allRows.push({
       [SOURCE_FIELD]: SOURCE_TAG,
       [SHOP_FIELD]: shopName,
-      [DATA_DATE_FIELD]: cellDateText(row),
-      [TITLE_FIELD]: title,
-      [PAY_FIELD]: pay
+      [OUT_TITLE]: title,
+      [OUT_DATE]: cellDateText(row),
+      [OUT_PAY]: pay
     });
   }
 }
@@ -112,9 +115,9 @@ function pushGraphicRows(allRows, rows, shopName) {
     allRows.push({
       [SOURCE_FIELD]: SOURCE_TAG,
       [SHOP_FIELD]: shopName,
-      [DATA_DATE_FIELD]: cellDateText(row),
-      [TITLE_FIELD]: title,
-      [PAY_FIELD]: pay
+      [OUT_TITLE]: title,
+      [OUT_DATE]: cellDateText(row),
+      [OUT_PAY]: pay
     });
   }
 }
@@ -149,7 +152,7 @@ async function listShopNames(dataRoot) {
 
 /**
  * 扫描 accounts-shop 下各账号 data/<店铺>/视频明细|图文明细 中最新 xlsx，
- * 过滤用户支付金额为 0 的行，统一为「作品标题」「用户支付金额」，并写入 data/抖店-….
+ * 过滤支付金额为 0 的行，输出列为「数据来源」「所属店铺」「作品名」「日期」「增加销售额」，并写入 data/抖店-….
  */
 async function mergeAllShopExportsToData() {
   const allRows = [];
@@ -193,9 +196,22 @@ async function mergeAllShopExportsToData() {
   XLSX.writeFile(workbook, outputPath);
 
   console.log(
-    `抖店汇总完成（共 ${allRows.length} 条，用户支付金额>0）: ${outputPath}`
+    `抖店汇总完成（共 ${allRows.length} 条，增加销售额>0）: ${outputPath}`
   );
   return { outputPath, rowCount: allRows.length };
 }
 
-module.exports = { mergeAllShopExportsToData, OUTPUT_FILE_NAME };
+module.exports = {
+  mergeAllShopExportsToData,
+  OUTPUT_FILE_NAME,
+  OUTPUT_SHEET_NAME,
+  OUTPUT_DIR,
+  ORDERED_HEADERS,
+  SOURCE_FIELD,
+  SHOP_FIELD,
+  OUT_TITLE,
+  OUT_DATE,
+  OUT_PAY,
+  SOURCE_TAG,
+  parsePaymentYuan
+};

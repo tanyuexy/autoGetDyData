@@ -14,6 +14,7 @@
     "shop": "node run.js shop:login && npm run shop:merge",
     "shop:list": "node run.js shop:list",
     "shop:merge": "node run.js shop:merge",
+    "shop:prepend": "node run.js shop:prepend",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
