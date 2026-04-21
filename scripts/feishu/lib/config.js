@@ -1,4 +1,6 @@
+const fs = require("fs");
 const path = require("path");
+const { getProjectConfigPath } = require("../../project-config-path");
 
 const DEFAULT_API_BASE = "https://open.feishu.cn";
 const DEFAULT_AUTH_BASE = "https://accounts.feishu.cn";
@@ -23,7 +25,39 @@ function optionalEnv(name, fallback = "") {
   return trimmed || fallback;
 }
 
+function readFeishuSectionFromProjectConfig(profile) {
+  try {
+    const cfgPath = getProjectConfigPath();
+    if (!fs.existsSync(cfgPath)) return null;
+    const raw = fs.readFileSync(cfgPath, "utf8");
+    const data = JSON.parse(raw);
+    const feishu = data && data.feishu;
+    if (!feishu || typeof feishu !== "object") return null;
+    const key =
+      profile && String(profile).trim() ? String(profile).trim() : "shop";
+    const section = feishu[key];
+    if (!section || typeof section !== "object") return null;
+    const appToken = String(section.appToken || "").trim();
+    const tableId = String(section.tableId || "").trim();
+    if (!appToken || !tableId) return null;
+    return { appToken, tableId };
+  } catch {
+    return null;
+  }
+}
+
 function loadFeishuConfig() {
+  let bitableAppToken = optionalEnv("FEISHU_BITABLE_APP_TOKEN", "");
+  let bitableTableId = optionalEnv("FEISHU_BITABLE_TABLE_ID", "");
+  if (!bitableAppToken || !bitableTableId) {
+    const profile = optionalEnv("FEISHU_BITABLE_PROFILE", "shop");
+    const fromFile = readFeishuSectionFromProjectConfig(profile);
+    if (fromFile) {
+      if (!bitableAppToken) bitableAppToken = fromFile.appToken;
+      if (!bitableTableId) bitableTableId = fromFile.tableId;
+    }
+  }
+
   return {
     appId: requireEnv("FEISHU_OAUTH_APP_ID"),
     appSecret: requireEnv("FEISHU_OAUTH_APP_SECRET"),
@@ -31,8 +65,8 @@ function loadFeishuConfig() {
     scope: optionalEnv("FEISHU_OAUTH_SCOPE", DEFAULT_SCOPE),
     apiBase: optionalEnv("FEISHU_API_BASE", DEFAULT_API_BASE),
     authBase: optionalEnv("FEISHU_AUTH_BASE", DEFAULT_AUTH_BASE),
-    bitableAppToken: optionalEnv("FEISHU_BITABLE_APP_TOKEN", ""),
-    bitableTableId: optionalEnv("FEISHU_BITABLE_TABLE_ID", ""),
+    bitableAppToken,
+    bitableTableId,
     tokenCachePath: optionalEnv(
       "FEISHU_OAUTH_TOKEN_CACHE",
       DEFAULT_TOKEN_CACHE_PATH

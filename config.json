@@ -26,5 +26,20 @@
     "美迪生官方旗舰店": "3.1",
     "达仁堂官方旗舰店": "4.1",
     "维乐多官方旗舰店": "4.1"
+  },
+  "douyinCreator": {
+    "loginVerifyMethod": "qr"
+  },
+  "feishu": {
+    "shop": {
+      "baseUrl": "https://a5bgloffd0.feishu.cn/base/SjmubvbmCazk27sqcTucsSAmnPb?table=tblfiIE9m2DDU2Mv&view=vewN1U0Knv",
+      "appToken": "SjmubvbmCazk27sqcTucsSAmnPb",
+      "tableId": "tblfiIE9m2DDU2Mv"
+    },
+    "creator": {
+      "baseUrl": "https://a5bgloffd0.feishu.cn/base/SjmubvbmCazk27sqcTucsSAmnPb?table=tblYnPxQjhaI4sWc&view=vewJjxCUVz",
+      "appToken": "SjmubvbmCazk27sqcTucsSAmnPb",
+      "tableId": "tblYnPxQjhaI4sWc"
+    }
   }
 }

@@ -1,5 +1,6 @@
 const path = require("path");
 const fs = require("fs");
+const { getProjectConfigPath } = require("../../project-config-path");
 
 function numberFromEnv(name, defaultValue) {
   const raw = process.env[name];
@@ -39,13 +40,10 @@ const DOM_LOAD_TIMEOUT_MS = numberFromEnv(
   30 * 1000
 );
 
-const DEFAULT_ACCOUNTS_JSON_PATH = path.resolve(
-  process.cwd(),
-  "default-add-accounts.json"
-);
+const DEFAULT_ACCOUNTS_JSON_PATH = getProjectConfigPath();
 
 /**
- * 从 default-add-accounts.json 的 emails 字段读取登录邮箱池。
+ * 从 config.json 的 emails 字段读取登录邮箱池。
  * 要求：必须是 [{ email, password }, ...]，非空；其它位置不再做兜底。
  */
 function getDefaultAccounts() {

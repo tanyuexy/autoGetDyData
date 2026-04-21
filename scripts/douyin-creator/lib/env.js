@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { getProjectConfigPath } = require("../../project-config-path");
 
 function numberFromEnv(name, defaultValue) {
   const raw = process.env[name];
@@ -28,11 +29,11 @@ const TARGET_URL =
   "https://creator.douyin.com/creator-micro/data-center/content";
 const ACCOUNTS_DIR = path.resolve(process.cwd(), "accounts");
 
-/** add 无参数时从此文件读取账号名并批量建目录；可用环境变量 ADD_ACCOUNTS_JSON 覆盖路径 */
-const DEFAULT_ADD_ACCOUNTS_JSON = path.resolve(
-  process.cwd(),
-  process.env.ADD_ACCOUNTS_JSON || "default-add-accounts.json"
-);
+/**
+ * 项目统一配置（config.json）绝对路径。
+ * 优先环境变量 PROJECT_CONFIG_PATH 或 ADD_ACCOUNTS_JSON（兼容旧名）覆盖。
+ */
+const DEFAULT_ADD_ACCOUNTS_JSON = getProjectConfigPath();
 
 const DEFAULT_ALERT_TO = "2895845213@qq.com";
 const BROWSER_VIEWPORT = { width: 1600, height: 1000 };
@@ -73,8 +74,35 @@ const OTP_RESEND_INTERVAL_MS = millisecondsFromEnvSecOrMs(
   5 * 60
 );
 
+/** 与 accounts.js 规则一致，避免 env ↔ accounts 循环引用 */
+function normalizeAccountDirName(name) {
+  return String(name || "")
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "_");
+}
+
+const CREATOR_EXPORT_ACCOUNT_FILE = "creator-export.json";
+
+function readDouyinCreatorSection() {
+  try {
+    const p = DEFAULT_ADD_ACCOUNTS_JSON;
+    if (!fs.existsSync(p)) return {};
+    const data = JSON.parse(fs.readFileSync(p, "utf-8"));
+    if (data && data.douyinCreator && typeof data.douyinCreator === "object") {
+      return data.douyinCreator;
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
 const LOGIN_VERIFY_METHOD = (() => {
-  const raw = String(process.env.LOGIN_VERIFY_METHOD || "qr")
+  const envRaw = process.env.LOGIN_VERIFY_METHOD;
+  const cfgRaw = readDouyinCreatorSection().loginVerifyMethod;
+  const raw = String(
+    (envRaw != null && String(envRaw).trim() ? envRaw : cfgRaw) || "qr"
+  )
     .trim()
     .toLowerCase();
   if (raw === "sms" || raw === "qr") return raw;
@@ -89,14 +117,7 @@ const LOGIN_VERIFY_METHOD = (() => {
   return "qr";
 })();
 
-/** 与 accounts.js 规则一致，避免 env ↔ accounts 循环引用 */
-function normalizeAccountDirName(name) {
-  return String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_");
-}
-
-const CREATOR_EXPORT_ACCOUNT_FILE = "creator-export.json";
-
-/** default-add-accounts.json 内：全局默认 + 按店铺名映射；按 mtime 缓存 */
+/** 主配置（config.json）内：全局默认 + 按店铺名映射；按 mtime 缓存 */
 let creatorExportMainJsonCache = {
   path: "",
   mtimeMs: NaN,
@@ -132,7 +153,9 @@ function readCreatorExportConfigFromMainJson() {
       data.creatorExportDateStartByAccount &&
       typeof data.creatorExportDateStartByAccount === "object"
     ) {
-      for (const [k, v] of Object.entries(data.creatorExportDateStartByAccount)) {
+      for (const [k, v] of Object.entries(
+        data.creatorExportDateStartByAccount
+      )) {
         if (typeof v === "string" && v.trim()) {
           byAccount[String(k).trim()] = v.trim();
         }
@@ -163,7 +186,10 @@ function readCreatorExportFromAccountFile(accountName) {
       const t = data.creatorExportDateStart.trim();
       v = t || null;
     }
-    creatorExportPerAccountFileCache.set(full, { mtimeMs: st.mtimeMs, value: v });
+    creatorExportPerAccountFileCache.set(full, {
+      mtimeMs: st.mtimeMs,
+      value: v
+    });
     return v;
   } catch {
     return null;
@@ -176,8 +202,8 @@ function readCreatorExportFromAccountFile(accountName) {
  * 优先级（后者被前者覆盖）：
  * 1. 环境变量 DOUYIN_CREATOR_EXPORT_DATE_START（全局，所有店铺同一规则）
  * 2. accounts/<店铺目录名>/creator-export.json 的 creatorExportDateStart
- * 3. default-add-accounts.json 的 creatorExportDateStartByAccount["店铺名"]
- * 4. default-add-accounts.json 的 creatorExportDateStart 全局默认
+ * 3. config.json 的 creatorExportDateStartByAccount["店铺名"]
+ * 4. config.json 的 creatorExportDateStart 全局默认
  *
  * @param {string} [accountName] 与 accounts 下目录名一致
  */
@@ -220,4 +246,3 @@ module.exports = {
   LOGIN_VERIFY_METHOD,
   getCreatorExportDateStartSpec
 };
-

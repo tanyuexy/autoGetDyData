@@ -2,14 +2,12 @@ const fs = require("fs/promises");
 const path = require("path");
 
 const { waitForDomLoaded } = require("./dom-ready");
+const { getProjectConfigPath } = require("../../project-config-path");
 
-const DEFAULT_ACCOUNTS_FILE = path.resolve(
-  process.cwd(),
-  "default-add-accounts.json"
-);
+const DEFAULT_ACCOUNTS_FILE = getProjectConfigPath();
 
 /**
- * 读取 default-add-accounts.json 中的店铺名称优先级列表。
+ * 读取 config.json 中的店铺名称优先级列表。
  * 文件缺失或格式异常时返回空数组，由上层决定兜底策略。
  */
 async function loadPreferredShopNames(file = DEFAULT_ACCOUNTS_FILE) {
@@ -83,8 +81,7 @@ function pickShopByPreference(items, preferredList) {
     // 再尝试双向包含
     const loose = items.find(
       (it) =>
-        it.name &&
-        (it.name.includes(preferred) || preferred.includes(it.name))
+        it.name && (it.name.includes(preferred) || preferred.includes(it.name))
     );
     if (loose) return { preferred, item: loose };
   }
@@ -92,7 +89,7 @@ function pickShopByPreference(items, preferredList) {
 }
 
 /**
- * 若当前页面是店铺选择页，按 default-add-accounts.json 顺序选中第一个匹配项并点击。
+ * 若当前页面是店铺选择页，按 config.json accounts 顺序选中第一个匹配项并点击。
  *
  * @param {import('playwright').Page} page
  * @param {{ tag?: string, preferredList?: string[], timeoutMs?: number }} options
@@ -121,7 +118,7 @@ async function selectShopIfPicker(page, options = {}) {
 
   if (preferredList.length === 0) {
     console.warn(
-      `[${tag}] 检测到店铺选择页，但未配置优先级名单（default-add-accounts.json），跳过自动选店`
+      `[${tag}] 检测到店铺选择页，但未配置优先级名单（config.json accounts），跳过自动选店`
     );
     return { picked: false };
   }
@@ -181,10 +178,10 @@ async function selectShopIfPicker(page, options = {}) {
         const url = location.href || "";
         const leftPicker = !/请选择店铺/.test(document.body?.innerText || "");
         const onDomain =
-          /fxg\.jinritemai\.com/.test(url) || /compass\.jinritemai\.com/.test(url);
+          /fxg\.jinritemai\.com/.test(url) ||
+          /compass\.jinritemai\.com/.test(url);
         const notLogin =
-          !/\/login\//.test(url) &&
-          !/login\/(common|phone|email)/.test(url);
+          !/\/login\//.test(url) && !/login\/(common|phone|email)/.test(url);
         const changed = prev ? url !== prev : true;
         return leftPicker && onDomain && notLogin && changed;
       },

@@ -426,7 +426,7 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
 
 /**
  * 登录成功后统一执行的后续动作：
- * 1) 若出现「请选择店铺」页，按 default-add-accounts.json 选中第一个匹配项并等待落地稳定
+ * 1) 若出现「请选择店铺」页，按 config.json accounts 选中第一个匹配项并等待落地稳定
  * 2) 若无选店页（cookie 等），必要时通过「切换数据视角」切到名单中的第一家
  * 3) 每店依次下载短视频明细与图文分析明细，再切到下一个未处理名单店铺重复
  *

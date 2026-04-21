@@ -82,7 +82,7 @@ async function main() {
     console.log(`当前账号数量: ${accounts.length}`);
     if (accounts.length === 0) {
       console.log(
-        "未找到账号目录。可先执行: npm run add -- 账号A 或 npm run add（按 default-add-accounts.json 批量建目录）"
+        "未找到账号目录。可先执行: npm run add -- 账号A 或 npm run add（按 config.json 批量建目录）"
       );
       return;
     }

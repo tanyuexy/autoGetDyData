@@ -48,6 +48,7 @@ function printHelp() {
   node scripts/feishu/index.js sync-data-xlsx [--dir ./data] [--file ./data/某.xlsx] [--sheet Sheet1] [--keep-rows N] [--dry-run]
 
 说明:
+  - 多维表格 appToken/tableId：优先读环境变量 FEISHU_BITABLE_*；未设置时读项目根目录 config.json 的 feishu.<profile>（默认 profile=shop，抖创同步可设 FEISHU_BITABLE_PROFILE=creator 并在 config 中配置 feishu.creator）
   - auth-url: 生成 OAuth 授权地址（默认自动拉起浏览器，可用 --no-open 关闭）
   - feishu:callback: 启动本地回调服务，自动 exchange 并保存 token
   - exchange: 用回调 code 换取 access_token/refresh_token 并写入本地缓存
@@ -132,7 +133,10 @@ function openUrlInDefaultBrowser(url) {
 async function readFieldsFromArgs(args) {
   const fieldsFile = readOption(args, "fields-file", "fieldsFile");
   if (fieldsFile) {
-    const raw = await fs.readFile(path.resolve(process.cwd(), fieldsFile), "utf8");
+    const raw = await fs.readFile(
+      path.resolve(process.cwd(), fieldsFile),
+      "utf8"
+    );
     return JSON.parse(raw);
   }
   const inlineFields = readOption(args, "fields");
@@ -143,7 +147,9 @@ async function readFieldsFromArgs(args) {
   if (envFields) {
     return JSON.parse(envFields);
   }
-  throw new Error("请提供 --fields 或 --fields-file，或设置 FEISHU_INSERT_FIELDS_JSON");
+  throw new Error(
+    "请提供 --fields 或 --fields-file，或设置 FEISHU_INSERT_FIELDS_JSON"
+  );
 }
 
 function toPositiveInteger(value, fallback = 0) {
@@ -202,7 +208,8 @@ function parseXlsxRows(filePath, sheetName = "") {
     cellDates: true
   });
 
-  const targetSheetName = String(sheetName || "").trim() || workbook.SheetNames[0];
+  const targetSheetName =
+    String(sheetName || "").trim() || workbook.SheetNames[0];
   if (!targetSheetName) {
     throw new Error("xlsx 文件中没有可用的 sheet");
   }
@@ -293,7 +300,10 @@ function sleepMs(ms) {
 }
 
 async function findLatestXlsxFile(relativeDir) {
-  const dirPath = path.resolve(process.cwd(), String(relativeDir || "./data").trim());
+  const dirPath = path.resolve(
+    process.cwd(),
+    String(relativeDir || "./data").trim()
+  );
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
   let bestFull = "";
   let bestMtime = 0;
@@ -341,15 +351,23 @@ async function buildLinkFieldResolvers(config, tokenRecord, tableFields) {
 
   for (const linkField of linkFields) {
     const fieldName = String(linkField.field_name || "").trim();
-    const linkTableId = String((linkField.property && linkField.property.table_id) || "").trim();
+    const linkTableId = String(
+      (linkField.property && linkField.property.table_id) || ""
+    ).trim();
     if (!fieldName || !linkTableId) continue;
 
-    const linkTableFields = await listBitableFields(config, tokenRecord.accessToken, linkTableId);
+    const linkTableFields = await listBitableFields(
+      config,
+      tokenRecord.accessToken,
+      linkTableId
+    );
     const primaryField =
       linkTableFields.find((field) => field && field.is_primary) ||
       linkTableFields.find((field) => field && field.type === 1) ||
       linkTableFields[0];
-    const lookupFieldName = String((primaryField && primaryField.field_name) || "").trim();
+    const lookupFieldName = String(
+      (primaryField && primaryField.field_name) || ""
+    ).trim();
     if (!lookupFieldName) continue;
 
     const linkTableRecords = await listAllBitableRecords(
@@ -363,7 +381,9 @@ async function buildLinkFieldResolvers(config, tokenRecord, tableFields) {
     for (const item of linkTableRecords) {
       const rid = String((item && item.record_id) || "").trim();
       if (!rid) continue;
-      const text = extractComparableText(item && item.fields && item.fields[lookupFieldName]);
+      const text = extractComparableText(
+        item && item.fields && item.fields[lookupFieldName]
+      );
       const key = normalizeLookupKey(text);
       if (!key) continue;
       const ids = nameToRecordIds.get(key) || [];
@@ -374,7 +394,9 @@ async function buildLinkFieldResolvers(config, tokenRecord, tableFields) {
     resolvers.set(fieldName, {
       fieldName,
       linkTableId,
-      linkTableName: String((linkField.property && linkField.property.table_name) || "").trim(),
+      linkTableName: String(
+        (linkField.property && linkField.property.table_name) || ""
+      ).trim(),
       lookupFieldName,
       nameToRecordIds
     });
@@ -383,18 +405,30 @@ async function buildLinkFieldResolvers(config, tokenRecord, tableFields) {
   return resolvers;
 }
 
-async function prepareBitableRowsFromXlsx({ filePath, sheet, limit, fieldAliases }, config, tokenRecord) {
+async function prepareBitableRowsFromXlsx(
+  { filePath, sheet, limit, fieldAliases },
+  config,
+  tokenRecord
+) {
   const sheetNameArg = String(sheet || "").trim();
   const { sheetName, headers, records } = parseXlsxRows(filePath, sheetNameArg);
   const limitN = toPositiveInteger(limit, 0);
   const selectedRecords = limitN > 0 ? records.slice(0, limitN) : records;
 
   const tableFields = await listBitableFields(config, tokenRecord.accessToken);
-  const writableFields = tableFields.filter((item) => !NON_WRITABLE_FIELD_TYPES.has(item.type));
-  const writableFieldMap = new Map(
-    writableFields.map((item) => [String(item.field_name || "").trim(), item]).filter((item) => item[0])
+  const writableFields = tableFields.filter(
+    (item) => !NON_WRITABLE_FIELD_TYPES.has(item.type)
   );
-  const linkFieldResolvers = await buildLinkFieldResolvers(config, tokenRecord, writableFields);
+  const writableFieldMap = new Map(
+    writableFields
+      .map((item) => [String(item.field_name || "").trim(), item])
+      .filter((item) => item[0])
+  );
+  const linkFieldResolvers = await buildLinkFieldResolvers(
+    config,
+    tokenRecord,
+    writableFields
+  );
 
   const unknownHeaders = [];
   const aliasHeaders = [];
@@ -427,12 +461,14 @@ async function prepareBitableRowsFromXlsx({ filePath, sheet, limit, fieldAliases
           const matchedIds = resolver.nameToRecordIds.get(lookupKey) || [];
           if (!matchedIds.length) {
             const missKey = `${targetField}:${lookupText}`;
-            unresolvedLinkValueStats[missKey] = (unresolvedLinkValueStats[missKey] || 0) + 1;
+            unresolvedLinkValueStats[missKey] =
+              (unresolvedLinkValueStats[missKey] || 0) + 1;
             continue;
           }
           if (matchedIds.length > 1) {
             const ambKey = `${targetField}:${lookupText}`;
-            ambiguousLinkValueStats[ambKey] = (ambiguousLinkValueStats[ambKey] || 0) + 1;
+            ambiguousLinkValueStats[ambKey] =
+              (ambiguousLinkValueStats[ambKey] || 0) + 1;
             continue;
           }
           normalizedFields[targetField] = [matchedIds[0]];
@@ -500,7 +536,10 @@ function sanitizeFieldValue(value, fieldMeta, droppedValueStats, fieldName) {
   return value;
 }
 
-function printLinkMappingWarnings(unresolvedLinkValueStats, ambiguousLinkValueStats) {
+function printLinkMappingWarnings(
+  unresolvedLinkValueStats,
+  ambiguousLinkValueStats
+) {
   const unresolvedEntries = Object.entries(unresolvedLinkValueStats || {});
   if (unresolvedEntries.length) {
     console.warn(
@@ -534,7 +573,12 @@ async function run() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0];
 
-  if (!command || command === "help" || command === "--help" || command === "-h") {
+  if (
+    !command ||
+    command === "help" ||
+    command === "--help" ||
+    command === "-h"
+  ) {
     printHelp();
     return;
   }
@@ -551,7 +595,10 @@ async function run() {
         await openUrlInDefaultBrowser(url);
         console.log("已尝试使用默认浏览器打开授权地址。");
       } catch (openError) {
-        console.warn("自动打开浏览器失败，请手动复制链接打开。", openError.message || "");
+        console.warn(
+          "自动打开浏览器失败，请手动复制链接打开。",
+          openError.message || ""
+        );
       }
     }
     return;
@@ -566,7 +613,10 @@ async function run() {
     const tokenRecord = await exchangeCodeForToken(config, code.trim());
     await writeTokenCache(config.tokenCachePath, tokenRecord);
     console.log("授权成功，token 已写入:", config.tokenCachePath);
-    console.log("access_token 到期时间:", new Date(tokenRecord.expiresAt).toISOString());
+    console.log(
+      "access_token 到期时间:",
+      new Date(tokenRecord.expiresAt).toISOString()
+    );
     return;
   }
 
@@ -578,14 +628,21 @@ async function run() {
     const tokenRecord = await refreshAccessToken(config, cached.refreshToken);
     await writeTokenCache(config.tokenCachePath, tokenRecord);
     console.log("刷新成功，token 已更新:", config.tokenCachePath);
-    console.log("access_token 到期时间:", new Date(tokenRecord.expiresAt).toISOString());
+    console.log(
+      "access_token 到期时间:",
+      new Date(tokenRecord.expiresAt).toISOString()
+    );
     return;
   }
 
   if (command === "insert") {
     const fields = await readFieldsFromArgs(args);
     const tokenRecord = await getValidAccessToken(config);
-    const data = await createBitableRecord(config, tokenRecord.accessToken, fields);
+    const data = await createBitableRecord(
+      config,
+      tokenRecord.accessToken,
+      fields
+    );
     const recordId = data && data.record && data.record.record_id;
     console.log("插入成功");
     if (recordId) {
@@ -670,7 +727,11 @@ async function run() {
 
     for (const record of normalizedRecords) {
       try {
-        await createBitableRecord(config, tokenRecord.accessToken, record.fields);
+        await createBitableRecord(
+          config,
+          tokenRecord.accessToken,
+          record.fields
+        );
         successCount += 1;
       } catch (error) {
         failedRows.push({
@@ -680,7 +741,9 @@ async function run() {
       }
     }
 
-    console.log(`写入完成: 成功 ${successCount} 行，失败 ${failedRows.length} 行`);
+    console.log(
+      `写入完成: 成功 ${successCount} 行，失败 ${failedRows.length} 行`
+    );
     const droppedEntries = Object.entries(droppedValueStats);
     if (droppedEntries.length) {
       console.log(
@@ -735,7 +798,9 @@ async function run() {
 
     console.log(`同步来源: ${filePath}`);
     console.log(`sheet: ${sheetName}`);
-    console.log(`xlsx 有效行: ${totalXlsxRows}，本次准备写入: ${normalizedRecords.length} 行`);
+    console.log(
+      `xlsx 有效行: ${totalXlsxRows}，本次准备写入: ${normalizedRecords.length} 行`
+    );
 
     if (aliasHeaders.length) {
       console.log("自动字段映射:", aliasHeaders.join(", "));
@@ -771,11 +836,12 @@ async function run() {
       return;
     }
 
-    const existingIds = await listAllBitableRecordIds(config, tokenRecord.accessToken);
+    const existingIds = await listAllBitableRecordIds(
+      config,
+      tokenRecord.accessToken
+    );
     const idsToDelete =
-      keepLeadingRows > 0
-        ? existingIds.slice(keepLeadingRows)
-        : existingIds;
+      keepLeadingRows > 0 ? existingIds.slice(keepLeadingRows) : existingIds;
 
     if (keepLeadingRows > 0) {
       const kept = Math.min(keepLeadingRows, existingIds.length);
@@ -788,7 +854,11 @@ async function run() {
 
     const deleteChunks = chunkArray(idsToDelete, 500);
     for (let i = 0; i < deleteChunks.length; i += 1) {
-      await batchDeleteBitableRecords(config, tokenRecord.accessToken, deleteChunks[i]);
+      await batchDeleteBitableRecords(
+        config,
+        tokenRecord.accessToken,
+        deleteChunks[i]
+      );
       if (i < deleteChunks.length - 1) {
         await sleepMs(200);
       }
@@ -801,7 +871,11 @@ async function run() {
     );
     let created = 0;
     for (let i = 0; i < createChunks.length; i += 1) {
-      await batchCreateBitableRecords(config, tokenRecord.accessToken, createChunks[i]);
+      await batchCreateBitableRecords(
+        config,
+        tokenRecord.accessToken,
+        createChunks[i]
+      );
       created += createChunks[i].length;
       if (i < createChunks.length - 1) {
         await sleepMs(200);
@@ -832,4 +906,3 @@ run().catch((error) => {
   console.error("执行失败:", error.message || error);
   process.exitCode = 1;
 });
-
