@@ -411,7 +411,10 @@ async function prepareBitableRowsFromXlsx(
   tokenRecord
 ) {
   const sheetNameArg = String(sheet || "").trim();
-  const { sheetName, headers, records } = parseXlsxRows(filePath, sheetNameArg);
+  const { sheetName, headers, records } = parseXlsxRows(
+    filePath,
+    sheetNameArg
+  );
   const limitN = toPositiveInteger(limit, 0);
   const selectedRecords = limitN > 0 ? records.slice(0, limitN) : records;
 

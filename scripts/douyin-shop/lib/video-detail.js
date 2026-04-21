@@ -4,6 +4,7 @@ const fs = require("fs/promises");
 const {
   pickLatestSelectableCalendarDay
 } = require("./pick-latest-calendar-day");
+const { appendDataDateColumn } = require("./append-data-date-column");
 
 const VIDEO_SELF_URL =
   process.env.SHOP_VIDEO_SELF_URL ||
@@ -124,7 +125,7 @@ async function selectDateRangeYesterday(page, tag) {
     .catch(() => false);
   if (!moreVisible) {
     logWarn(tag, '未找到"更多"按钮，跳过日期选择（默认保留近7天）');
-    return false;
+    return { ok: false, dataDate: null };
   }
 
   // 2) hover 展开弹层；抖音罗盘的 ecom-dropdown 是 hover 触发，停留时间要够
@@ -182,9 +183,14 @@ async function selectDateRangeYesterday(page, tag) {
     ? rightPanel
     : page;
 
-  let clicked = await pickLatestSelectableCalendarDay(page, scope);
+  const pickResult = await pickLatestSelectableCalendarDay(page, scope);
+  const clicked = Boolean(pickResult.ok);
+  const dataDate = pickResult.dataDate || null;
   if (clicked) {
     logStep(tag, "已选择日历中最新可选自然日");
+    if (dataDate) {
+      logStep(tag, `解析到的数据日期: ${dataDate}`);
+    }
   } else {
     logWarn(tag, "日历中未找到可点击的日期格");
   }
@@ -200,7 +206,7 @@ async function selectDateRangeYesterday(page, tag) {
     `selectDateRangeYesterday ${clicked ? "成功" : "未能点中日期"}`,
     started
   );
-  return clicked;
+  return { ok: clicked, dataDate };
 }
 
 /**
@@ -377,7 +383,7 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName }) {
   logStep(tag, `下载开始，目标店铺: ${shopName || "(未指定)"}`);
 
   await gotoVideoSelf(page, tag);
-  await selectDateRangeYesterday(page, tag);
+  const { dataDate } = await selectDateRangeYesterday(page, tag);
   await selectNonAdTab(page, tag);
 
   // 给表格一个 loading → 刷新完成的缓冲；实测切换 tab + 改 date 后需要重新拉数据
@@ -390,8 +396,14 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName }) {
     exportLabel: "视频明细"
   });
 
+  try {
+    appendDataDateColumn(savePath, dataDate);
+  } catch (e) {
+    logWarn(tag, `写入「数据日期」列失败（仍可保留原文件）: ${e.message || e}`);
+  }
+
   logStep(tag, `下载流程完成`, startedAll);
-  return { savePath };
+  return { savePath, dataDate };
 }
 
 module.exports = {

@@ -10,6 +10,8 @@ const OUTPUT_SHEET_NAME = "全部作品";
 const SOURCE_FIELD = "数据来源";
 const SOURCE_TAG = "抖店";
 const SHOP_FIELD = "所属店铺";
+/** 与视频/图文明细导出里 append-data-date-column 写入的列名一致 */
+const DATA_DATE_FIELD = "数据日期";
 const TITLE_FIELD = "作品标题";
 const PAY_FIELD = "用户支付金额";
 
@@ -18,7 +20,13 @@ const VIDEO_PAY_COL = "用户支付金额(元)";
 const GRAPHIC_TITLE_COL = "图文标题";
 const GRAPHIC_PAY_COL = "用户支付金额";
 
-const ORDERED_HEADERS = [SOURCE_FIELD, SHOP_FIELD, TITLE_FIELD, PAY_FIELD];
+const ORDERED_HEADERS = [
+  SOURCE_FIELD,
+  SHOP_FIELD,
+  DATA_DATE_FIELD,
+  TITLE_FIELD,
+  PAY_FIELD
+];
 
 function parsePaymentYuan(value) {
   if (value === undefined || value === null || value === "") return 0;
@@ -74,6 +82,13 @@ function readFirstSheetRows(filePath) {
   return XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
 }
 
+function cellDateText(row) {
+  const raw = row[DATA_DATE_FIELD];
+  if (raw === undefined || raw === null) return "";
+  const s = String(raw).trim();
+  return s;
+}
+
 function pushVideoRows(allRows, rows, shopName) {
   for (const row of rows) {
     const pay = parsePaymentYuan(row[VIDEO_PAY_COL]);
@@ -82,6 +97,7 @@ function pushVideoRows(allRows, rows, shopName) {
     allRows.push({
       [SOURCE_FIELD]: SOURCE_TAG,
       [SHOP_FIELD]: shopName,
+      [DATA_DATE_FIELD]: cellDateText(row),
       [TITLE_FIELD]: title,
       [PAY_FIELD]: pay
     });
@@ -96,6 +112,7 @@ function pushGraphicRows(allRows, rows, shopName) {
     allRows.push({
       [SOURCE_FIELD]: SOURCE_TAG,
       [SHOP_FIELD]: shopName,
+      [DATA_DATE_FIELD]: cellDateText(row),
       [TITLE_FIELD]: title,
       [PAY_FIELD]: pay
     });

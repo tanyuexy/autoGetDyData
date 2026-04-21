@@ -4,7 +4,7 @@
     "value": "eyJtYXRjaCI6dHJ1ZSwicGVyY2VudCI6MC4xMjUzMzczMzg4OTgwNzIzfQ==.J1sMp9yMp7WEN0y1pRdg22G1WeqIrzTJg0eKng/3S38=",
     "domain": "fxg.jinritemai.com",
     "path": "/ffa-micro-config/feedback_entry",
-    "expires": 1777340521.857213,
+    "expires": 1777348196.251481,
     "httpOnly": true,
     "secure": false,
     "sameSite": "Lax"
@@ -44,7 +44,7 @@
     "value": "1776671304",
     "domain": ".fxg.jinritemai.com",
     "path": "/",
-    "expires": 1808271723,
+    "expires": 1808279397,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
@@ -360,23 +360,23 @@
     "sameSite": "None"
   },
   {
-    "name": "ttwid",
-    "value": "1%7CLRNd7r37IA9PjETbtatvHmMOKoYaCNulnNYHum2DsZQ%7C1776735723%7Cb2781480860df80fcc0f42e9ba8f7b7c1cebac136832d256a6d7067d67dcf8fa",
-    "domain": ".jinritemai.com",
-    "path": "/",
-    "expires": 1808271723.050078,
-    "httpOnly": true,
-    "secure": true,
-    "sameSite": "None"
-  },
-  {
     "name": "Hm_lpvt_b6520b076191ab4b36812da4c90f7a5e",
-    "value": "1776735723",
+    "value": "1776743397",
     "domain": ".fxg.jinritemai.com",
     "path": "/",
     "expires": -1,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
+  },
+  {
+    "name": "ttwid",
+    "value": "1%7CLRNd7r37IA9PjETbtatvHmMOKoYaCNulnNYHum2DsZQ%7C1776743397%7C204aa15bacba426f67b09411a7319207624b9a9c17d0f806f671fbadc56995dd",
+    "domain": ".jinritemai.com",
+    "path": "/",
+    "expires": 1808279397.530375,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None"
   }
 ]

@@ -4,6 +4,7 @@ const fs = require("fs/promises");
 const {
   pickLatestSelectableCalendarDay
 } = require("./pick-latest-calendar-day");
+const { appendDataDateColumn } = require("./append-data-date-column");
 
 const GRAPHIC_URL =
   process.env.SHOP_GRAPHIC_URL ||
@@ -36,9 +37,14 @@ async function pickLatestInGraphicCalendar(page, tag) {
     ? rightPanel
     : page;
 
-  const clicked = await pickLatestSelectableCalendarDay(page, scope);
+  const pickResult = await pickLatestSelectableCalendarDay(page, scope);
+  const clicked = Boolean(pickResult.ok);
+  const dataDate = pickResult.dataDate || null;
   if (clicked) {
     logStep(tag, "图文页已选择日历中最新可选自然日", started);
+    if (dataDate) {
+      logStep(tag, `解析到的数据日期: ${dataDate}`, started);
+    }
   } else {
     logWarn(tag, "图文页日历中未找到可点击的日期格");
   }
@@ -47,7 +53,7 @@ async function pickLatestInGraphicCalendar(page, tag) {
   await page.keyboard.press("Escape").catch(() => {});
   await page.mouse.move(10, 10).catch(() => {});
   await page.waitForTimeout(300);
-  return clicked;
+  return { ok: clicked, dataDate };
 }
 
 /**
@@ -69,7 +75,7 @@ async function selectGraphicNaturalDayYesterday(page, tag) {
     .catch(() => false);
   if (!vis) {
     logWarn(tag, '图文页未找到「自然日」日期触发器，跳过改日期');
-    return false;
+    return { ok: false, dataDate: null };
   }
 
   await nat.hover({ timeout: 1000 }).catch(() => {});
@@ -103,7 +109,7 @@ async function selectGraphicNaturalDayYesterday(page, tag) {
   const picked = await pickLatestInGraphicCalendar(page, tag);
   logStep(
     tag,
-    `selectGraphicNaturalDayYesterday ${picked ? "完成" : "可能未点到最新可选日"}`,
+    `selectGraphicNaturalDayYesterday ${picked.ok ? "完成" : "可能未点到最新可选日"}`,
     started
   );
   return picked;
@@ -200,7 +206,7 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName }) {
   logStep(tag, `图文明细下载开始，店铺: ${shopName || "(未指定)"}`);
 
   await gotoGraphic(page, tag);
-  await selectGraphicNaturalDayYesterday(page, tag);
+  const { dataDate } = await selectGraphicNaturalDayYesterday(page, tag);
 
   await page.waitForTimeout(1200);
 
@@ -209,8 +215,17 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName }) {
     : saveDir;
   const savePath = await clickGraphicDownloadAndSave(page, tag, targetDir);
 
+  try {
+    appendDataDateColumn(savePath, dataDate);
+  } catch (e) {
+    logWarn(
+      tag,
+      `写入「数据日期」列失败（仍可保留原文件）: ${e.message || e}`
+    );
+  }
+
   logStep(tag, "图文明细下载流程完成", startedAll);
-  return { savePath };
+  return { savePath, dataDate };
 }
 
 module.exports = {
