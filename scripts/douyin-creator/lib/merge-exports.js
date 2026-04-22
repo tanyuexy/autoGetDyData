@@ -12,6 +12,14 @@ const SOURCE_TAG = "抖创";
 const SHOP_FIELD_NAME = "所属店铺";
 const PUBLISH_TIME_CANDIDATES = ["发布时间", "发布时间（北京时间）", "发布时间(北京时间)"];
 
+/** 汇总表写入前：作品标题列去掉所有空白（含空格、制表、全角空格等） */
+const WORK_TITLE_HEADER_NAMES = new Set(["作品名称", "作品名"]);
+
+function stripAllWhitespaceText(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).replace(/\s/g, "");
+}
+
 function normalizeCellValue(value) {
   if (value === undefined || value === null) return "";
   return value;
@@ -104,7 +112,11 @@ async function mergeExportFiles(accountResults) {
   const normalizedRows = allRows.map((row) => {
     const normalized = {};
     for (const header of orderedHeaders) {
-      normalized[header] = normalizeCellValue(row[header]);
+      let cell = normalizeCellValue(row[header]);
+      if (WORK_TITLE_HEADER_NAMES.has(header)) {
+        cell = stripAllWhitespaceText(cell);
+      }
+      normalized[header] = cell;
     }
     return normalized;
   });

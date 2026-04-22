@@ -5,7 +5,11 @@ const fs = require("fs/promises");
 const path = require("path");
 const { spawn } = require("child_process");
 const XLSX = require("xlsx");
-const { loadFeishuConfig, optionalEnv } = require("./lib/config");
+const {
+  loadFeishuConfig,
+  loadFeishuBitableConfigForProfile,
+  optionalEnv
+} = require("./lib/config");
 const {
   buildAuthorizeUrl,
   exchangeCodeForToken,
@@ -63,6 +67,7 @@ function printHelp() {
   node scripts/feishu/index.js insert-xlsx --file ./data/作品列表.xlsx [--sheet Sheet1] [--dry-run]
   node scripts/feishu/index.js sync-data-xlsx [--dir ./data] [--file ./data/某.xlsx] [--sheet Sheet1] [--keep-rows N] [--dry-run]
   node scripts/feishu/index.js sync-data-xlsx-shop [--file ./data/抖店-全部店铺-每日支付增量汇总.xlsx] [--sheet Sheet1] [--replace] [--dry-run]
+  node scripts/feishu/index.js backup-bitable [--dir ./data] [--profiles creator,shop] [--dry-run]
 
 说明:
   - 多维表格 appToken/tableId：优先读环境变量 FEISHU_BITABLE_*；未设置时读项目根目录 config.json 的 feishu.<profile>（默认 profile=shop，抖创同步可设 FEISHU_BITABLE_PROFILE=creator 并在 config 中配置 feishu.creator）
@@ -74,6 +79,7 @@ function printHelp() {
   - insert-xlsx: 读取 xlsx 第一行作为字段名，按行写入飞书多维表格（追加）
   - sync-data-xlsx: 未指定 --file 时，在指定目录下按 FEISHU_BITABLE_PROFILE 选取文件名前缀（creator=抖创、shop=抖店）匹配且「修改时间最新」的 xlsx；可用 --file 覆盖；默认先清空当前飞书表全部记录再批量写入；可用 --keep-rows N 保留「列出记录」接口顺序下的前 N 条，仅删除之后的记录再写入（不清空整张表）
   - sync-data-xlsx-shop: 抖店汇总表同步到 feishu.shop 表；默认读取 ${SHOP_DEFAULT_XLSX_RELATIVE}（列为数据来源、所属店铺、作品名、日期、增加销售额；飞书会忽略本地表中无对应字段的列）；缺列时仍可映射：作品标题→作品名、用户支付金额→增加销售额、数据日期→日期；默认在表格末尾追加记录（不删除已有行）；加 --replace 则与 sync-data-xlsx 相同先删后写（可用 --keep-rows）
+  - backup-bitable: 从飞书多维表格拉取当前表全部记录并导出为 xlsx（默认各一份固定文件名，覆盖写入）：data/抖创-飞书表备份.xlsx、data/抖店-飞书表备份.xlsx；此类文件名不会被 sync-data-xlsx 的「按前缀选最新 xlsx」选中；未传 --profiles 时默认 creator,shop
 `);
 }
 
@@ -336,6 +342,11 @@ function sleepMs(ms) {
   });
 }
 
+/** 飞书表本地备份文件名，勿与业务总表混用；sync 按前缀选「最新 xlsx」时会跳过 */
+function isFeishuBitableBackupXlsxFileName(fileName) {
+  return String(fileName || "").includes("飞书表备份");
+}
+
 async function findLatestXlsxFile(relativeDir, namePrefix = "") {
   const dirPath = path.resolve(
     process.cwd(),
@@ -347,6 +358,7 @@ async function findLatestXlsxFile(relativeDir, namePrefix = "") {
   let bestMtime = 0;
   for (const ent of entries) {
     if (!ent.isFile() || !ent.name.toLowerCase().endsWith(".xlsx")) continue;
+    if (isFeishuBitableBackupXlsxFileName(ent.name)) continue;
     if (prefix && !ent.name.startsWith(prefix)) continue;
     const full = path.join(dirPath, ent.name);
     const st = await fs.stat(full);
@@ -584,6 +596,162 @@ function sanitizeFieldValue(value, fieldMeta, droppedValueStats, fieldName) {
   }
 
   return value;
+}
+
+function parseBackupProfilesArg(args) {
+  const raw = readOption(args, "profiles");
+  if (raw === undefined || raw === true) {
+    return ["creator", "shop"];
+  }
+  const text = String(raw).trim();
+  if (!text) {
+    return ["creator", "shop"];
+  }
+  return text
+    .split(/[,，\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function bitableFieldValueToCellForBackup(value, fieldMeta) {
+  if (value === undefined || value === null) return "";
+  const type = fieldMeta && fieldMeta.type;
+
+  if (type === 2) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    const n = Number(
+      typeof value === "string" ? String(value).replace(/,/g, "") : value
+    );
+    return Number.isFinite(n) ? n : String(value);
+  }
+
+  if (type === 5) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 1e11) {
+      return new Date(value);
+    }
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Date.parse(value.replace(/\//g, "-").replace(" ", "T"));
+      if (Number.isFinite(parsed)) return new Date(parsed);
+    }
+    return String(value);
+  }
+
+  if (type === 7) {
+    if (typeof value === "boolean") return value ? "是" : "否";
+    return String(value);
+  }
+
+  if (typeof value === "string" || typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "boolean") {
+    return value ? "TRUE" : "FALSE";
+  }
+
+  if (Array.isArray(value)) {
+    if (
+      value.length > 0 &&
+      value.every((item) => typeof item === "string" || typeof item === "number")
+    ) {
+      return value.map((item) => String(item)).join(", ");
+    }
+    if (
+      value.length > 0 &&
+      value.every(
+        (item) => item && typeof item === "object" && item.file_token != null
+      )
+    ) {
+      return value
+        .map((item) => String(item.name || item.file_token || "").trim())
+        .filter(Boolean)
+        .join(", ");
+    }
+    const parts = [];
+    for (const item of value) {
+      if (item == null) continue;
+      if (typeof item === "string" || typeof item === "number") {
+        parts.push(String(item));
+        continue;
+      }
+      if (typeof item === "object") {
+        if (item.text != null) {
+          parts.push(String(item.text));
+          continue;
+        }
+        if (item.name != null) {
+          parts.push(String(item.name));
+          continue;
+        }
+      }
+    }
+    if (parts.length) return parts.join("; ");
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  if (typeof value === "object") {
+    if (value.text != null) return String(value.text);
+    if (value.link != null) return String(value.link);
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  return String(value);
+}
+
+async function backupBitableProfileToXlsx({
+  profile,
+  outDir,
+  tokenRecord,
+  dryRun
+}) {
+  const config = loadFeishuBitableConfigForProfile(profile);
+  const label = DEFAULT_XLSX_NAME_PREFIX_BY_PROFILE[profile] || profile;
+  const fileName = `${label}-飞书表备份.xlsx`;
+  const outPath = path.join(outDir, fileName);
+
+  const fieldMetas = (
+    await listBitableFields(config, tokenRecord.accessToken)
+  ).filter((item) => item && String(item.field_name || "").trim());
+  const records = await listAllBitableRecords(
+    config,
+    tokenRecord.accessToken
+  );
+
+  const headers = [
+    "record_id",
+    ...fieldMetas.map((f) => String(f.field_name).trim())
+  ];
+  const rows = [headers];
+  for (const rec of records) {
+    const rid = String((rec && rec.record_id) || "");
+    const flds = (rec && rec.fields) || {};
+    const row = [rid];
+    for (const fm of fieldMetas) {
+      const name = String(fm.field_name).trim();
+      row.push(bitableFieldValueToCellForBackup(flds[name], fm));
+    }
+    rows.push(row);
+  }
+
+  if (dryRun) {
+    console.log(`[dry-run] ${profile}（${label}）-> ${outPath}（${records.length} 行）`);
+    return outPath;
+  }
+
+  await fs.mkdir(outDir, { recursive: true });
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(workbook, worksheet, "备份");
+  XLSX.writeFile(workbook, outPath);
+  console.log(`已备份 ${label}（${records.length} 行）: ${outPath}`);
+  return outPath;
 }
 
 function printLinkMappingWarnings(
@@ -1105,6 +1273,28 @@ async function run() {
         "写入前已跳过无法转换的单元格:",
         droppedEntries.map(([name, count]) => `${name}(${count})`).join(", ")
       );
+    }
+    return;
+  }
+
+  if (command === "backup-bitable") {
+    const dirOption = readOption(args, "dir") || "./data";
+    const outDir = path.resolve(process.cwd(), String(dirOption).trim());
+    const dryRun = Boolean(readOption(args, "dry-run", "dryRun"));
+    const profiles = parseBackupProfilesArg(args);
+    const tokenRecord = await getValidAccessToken(loadFeishuConfig());
+
+    console.log(
+      `飞书表备份: profiles=[${profiles.join(", ")}]，输出目录: ${outDir}` +
+        (dryRun ? "（dry-run）" : "")
+    );
+    for (const profile of profiles) {
+      await backupBitableProfileToXlsx({
+        profile,
+        outDir,
+        tokenRecord,
+        dryRun
+      });
     }
     return;
   }

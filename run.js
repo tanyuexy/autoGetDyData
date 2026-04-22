@@ -34,6 +34,11 @@ const ROUTES = {
     argv: ["sync-data-xlsx-shop"],
     env: { FEISHU_BITABLE_PROFILE: "shop" }
   },
+  "feishu:backup-bitable": { script: "scripts/feishu/index.js", argv: ["backup-bitable"] },
+  "feishu:copy-works-strip": {
+    script: "scripts/feishu/copy-works-table-strip-spaces.js",
+    argv: []
+  },
 
   "shop:login": { script: "scripts/douyin-shop/index.js", argv: ["login"] },
   "shop:list": { script: "scripts/douyin-shop/index.js", argv: ["list"] },

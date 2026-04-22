@@ -11,11 +11,12 @@ const {
   OUT_TITLE,
   OUT_DATE,
   OUT_PAY,
-  parsePaymentYuan
+  parsePaymentYuan,
+  normalizeTitle
 } = require("./merge-shop-exports");
 
-/** 源表表头别名 → 规范字段名 */
-const TITLE_ALIASES = [OUT_TITLE, "作品标题"];
+/** 源表表头别名 → 规范字段名（与飞书抖店表、导出 xlsx 列名对齐） */
+const TITLE_ALIASES = [OUT_TITLE, "作品标题", "作品名称"];
 const DATE_ALIASES = [OUT_DATE, "数据日期"];
 const PAY_ALIASES = [OUT_PAY, "用户支付金额", "用户支付金额(元)"];
 
@@ -37,8 +38,31 @@ function pickField(row, aliases) {
   return "";
 }
 
+/** 飞书多维表格文本类字段可能是 [{ text }] 多段结构，拼成一行再交给 normalizeTitle 去空白 */
+function coerceTitleRawToString(raw) {
+  if (raw === undefined || raw === null) return "";
+  if (typeof raw === "string" || typeof raw === "number") {
+    return String(raw);
+  }
+  if (Array.isArray(raw)) {
+    const parts = [];
+    for (const item of raw) {
+      if (item != null && typeof item === "object" && typeof item.text === "string") {
+        parts.push(item.text);
+      } else if (typeof item === "string" || typeof item === "number") {
+        parts.push(String(item));
+      }
+    }
+    return parts.join("");
+  }
+  if (typeof raw === "object" && raw !== null && typeof raw.text === "string") {
+    return raw.text;
+  }
+  return String(raw);
+}
+
 function normalizeIncomingRow(row) {
-  const title = String(pickField(row, TITLE_ALIASES) ?? "").trim();
+  const title = normalizeTitle(coerceTitleRawToString(pickField(row, TITLE_ALIASES)));
   const dateRaw = pickField(row, DATE_ALIASES);
   const dateStr =
     dateRaw instanceof Date
@@ -97,7 +121,7 @@ function ensureRowShape(row) {
   return {
     [SOURCE_FIELD]: row[SOURCE_FIELD] ?? "",
     [SHOP_FIELD]: row[SHOP_FIELD] ?? "",
-    [OUT_TITLE]: row[OUT_TITLE] ?? "",
+    [OUT_TITLE]: normalizeTitle(row[OUT_TITLE]),
     [OUT_DATE]: row[OUT_DATE] ?? "",
     [OUT_PAY]:
       typeof row[OUT_PAY] === "number"

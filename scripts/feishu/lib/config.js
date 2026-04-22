@@ -46,6 +46,30 @@ function readFeishuSectionFromProjectConfig(profile) {
   }
 }
 
+/**
+ * OAuth 等与 loadFeishuConfig 相同，但多维表格定位到 config.json / 环境变量下的指定 profile（如 creator、shop）。
+ * 用于同一应用下多张表的脚本（例如分别备份抖创表与抖店表）。
+ */
+function loadFeishuBitableConfigForProfile(profile) {
+  const base = loadFeishuConfig();
+  const key = String(profile || "shop").trim() || "shop";
+  const fromFile = readFeishuSectionFromProjectConfig(key);
+  if (fromFile) {
+    return {
+      ...base,
+      bitableAppToken: fromFile.appToken,
+      bitableTableId: fromFile.tableId
+    };
+  }
+  const envProfile = optionalEnv("FEISHU_BITABLE_PROFILE", "shop");
+  if (key === envProfile) {
+    return base;
+  }
+  throw new Error(
+    `无法解析 feishu.${key}：请在项目 config.json 的 feishu.${key} 中填写 appToken 与 tableId，或设置 FEISHU_BITABLE_PROFILE=${key} 及 FEISHU_BITABLE_APP_TOKEN / FEISHU_BITABLE_TABLE_ID`
+  );
+}
+
 function loadFeishuConfig() {
   let bitableAppToken = optionalEnv("FEISHU_BITABLE_APP_TOKEN", "");
   let bitableTableId = optionalEnv("FEISHU_BITABLE_TABLE_ID", "");
@@ -76,6 +100,7 @@ function loadFeishuConfig() {
 
 module.exports = {
   loadFeishuConfig,
+  loadFeishuBitableConfigForProfile,
   requireEnv,
   optionalEnv
 };

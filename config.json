@@ -40,6 +40,12 @@
       "baseUrl": "https://a5bgloffd0.feishu.cn/base/SjmubvbmCazk27sqcTucsSAmnPb?table=tblYnPxQjhaI4sWc&view=vewJjxCUVz",
       "appToken": "SjmubvbmCazk27sqcTucsSAmnPb",
       "tableId": "tblYnPxQjhaI4sWc"
+    },
+    "worksStripCopy": {
+      "appToken": "SjmubvbmCazk27sqcTucsSAmnPb",
+      "sourceTableId": "tblhYJVzMgee5ESt",
+      "targetTableId": "tblJp18kcVC3eJPU",
+      "titleFieldName": "作品名"
     }
   }
 }

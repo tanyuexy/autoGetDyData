@@ -168,8 +168,8 @@ async function listAllBitableRecords(config, accessToken, tableId = "", fieldNam
   return records;
 }
 
-async function listAllBitableRecordIds(config, accessToken) {
-  const records = await listAllBitableRecords(config, accessToken);
+async function listAllBitableRecordIds(config, accessToken, tableId = "") {
+  const records = await listAllBitableRecords(config, accessToken, tableId);
   const ids = [];
   for (const item of records) {
     const id = item && item.record_id;
@@ -180,12 +180,26 @@ async function listAllBitableRecordIds(config, accessToken) {
   return ids;
 }
 
-async function batchDeleteBitableRecords(config, accessToken, recordIds) {
+function resolveBitableTableIdForMutation(config, tableIdOverride = "") {
+  const resolved = String(
+    (tableIdOverride && String(tableIdOverride).trim()) ||
+      config.bitableTableId ||
+      ""
+  ).trim();
+  if (!resolved) {
+    throw new Error("缺少 FEISHU_BITABLE_TABLE_ID 或显式 tableId");
+  }
+  return resolved;
+}
+
+async function batchDeleteBitableRecords(
+  config,
+  accessToken,
+  recordIds,
+  tableIdOverride = ""
+) {
   if (!config.bitableAppToken) {
     throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
-  }
-  if (!config.bitableTableId) {
-    throw new Error("缺少 FEISHU_BITABLE_TABLE_ID");
   }
   if (!Array.isArray(recordIds) || !recordIds.length) {
     return { deleted: 0 };
@@ -194,9 +208,14 @@ async function batchDeleteBitableRecords(config, accessToken, recordIds) {
     throw new Error("batchDeleteBitableRecords 单次最多 500 条，请在上层分批");
   }
 
+  const resolvedTableId = resolveBitableTableIdForMutation(
+    config,
+    tableIdOverride
+  );
+
   const url = `${config.apiBase}/open-apis/bitable/v1/apps/${encodeURIComponent(
     config.bitableAppToken
-  )}/tables/${encodeURIComponent(config.bitableTableId)}/records/batch_delete`;
+  )}/tables/${encodeURIComponent(resolvedTableId)}/records/batch_delete`;
 
   const response = await fetch(url, {
     method: "POST",
@@ -228,12 +247,14 @@ async function batchDeleteBitableRecords(config, accessToken, recordIds) {
   return parsed.data || parsed;
 }
 
-async function batchCreateBitableRecords(config, accessToken, recordsPayload) {
+async function batchCreateBitableRecords(
+  config,
+  accessToken,
+  recordsPayload,
+  tableIdOverride = ""
+) {
   if (!config.bitableAppToken) {
     throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
-  }
-  if (!config.bitableTableId) {
-    throw new Error("缺少 FEISHU_BITABLE_TABLE_ID");
   }
   if (!Array.isArray(recordsPayload) || !recordsPayload.length) {
     return { created: 0 };
@@ -242,9 +263,14 @@ async function batchCreateBitableRecords(config, accessToken, recordsPayload) {
     throw new Error("batchCreateBitableRecords 单次最多 1000 条，请在上层分批");
   }
 
+  const resolvedTableId = resolveBitableTableIdForMutation(
+    config,
+    tableIdOverride
+  );
+
   const url = `${config.apiBase}/open-apis/bitable/v1/apps/${encodeURIComponent(
     config.bitableAppToken
-  )}/tables/${encodeURIComponent(config.bitableTableId)}/records/batch_create`;
+  )}/tables/${encodeURIComponent(resolvedTableId)}/records/batch_create`;
 
   const body = {
     records: recordsPayload.map((item) => {

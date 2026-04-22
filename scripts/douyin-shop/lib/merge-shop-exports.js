@@ -42,11 +42,9 @@ function parsePaymentYuan(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** 作品名列写入汇总 xlsx 前去掉所有空白（含空格、制表、全角空格等） */
 function normalizeTitle(value) {
-  const t = String(value ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return t;
+  return String(value ?? "").replace(/\s/g, "");
 }
 
 async function pickLatestXlsx(dirPath) {
@@ -213,5 +211,6 @@ module.exports = {
   OUT_DATE,
   OUT_PAY,
   SOURCE_TAG,
-  parsePaymentYuan
+  parsePaymentYuan,
+  normalizeTitle
 };
