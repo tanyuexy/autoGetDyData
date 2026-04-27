@@ -12,23 +12,15 @@ const VIDEO_SELF_URL =
 
 function logStep(tag, msg, started) {
   const dur = started ? ` (+${Date.now() - started}ms)` : "";
-  // eslint-disable-next-line no-console
   console.log(`[${tag}] ${msg}${dur}`);
 }
 
 function logWarn(tag, msg) {
-  // eslint-disable-next-line no-console
   console.warn(`[${tag}] ${msg}`);
 }
 
-/**
- * 等待自营视频明细页的"结构信号"就绪。
- * 实测：页面加载时即便 `text=短视频明细` 已出现，右侧筛选区 tabs 也可能还在 mount。
- * 真正能用的就绪信号是：顶部 "更多" 日期按钮 + "投放属性" 筛选 tab 同时可见。
- */
 async function waitForVideoSelfReady(page, tag, timeoutMs = 20000) {
   const started = Date.now();
-  // 先用常规页面指示器等一波（SPA 首次渲染）
   await Promise.race([
     page
       .locator("text=短视频明细")
@@ -42,7 +34,6 @@ async function waitForVideoSelfReady(page, tag, timeoutMs = 20000) {
       .catch(() => null)
   ]);
 
-  // 等日期筛选器（"更多" 按钮）或"投放属性" tab 任一出现，再多等一点让另一个也到位
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const hasMore = await page
@@ -61,17 +52,10 @@ async function waitForVideoSelfReady(page, tag, timeoutMs = 20000) {
     }
     await page.waitForTimeout(300);
   }
-  logWarn(
-    tag,
-    `视频明细页筛选区 ${timeoutMs}ms 内未全部就绪（"更多"或"非投放"缺失）`
-  );
+  logWarn(tag, `视频明细页筛选区 ${timeoutMs}ms 内未全部就绪`);
   return false;
 }
 
-/**
- * 导航到"短视频 > 自营视频 > 视频明细"页面。
- * 如果当前 URL 已经是目标页，直接等待页面就绪即可。
- */
 async function gotoVideoSelf(page, tag) {
   const started = Date.now();
   const url = page.url() || "";
@@ -95,25 +79,13 @@ async function gotoVideoSelf(page, tag) {
 }
 
 /**
- * 视频明细：悬浮「更多」→ 左侧选「自然日」→ 日历里点「当前可选的最后一个自然日」
- *（罗盘多为 T+1，即最新可导出日，而非固定「昨天」字面匹配）。
- *
- * 页面结构（罗盘 ecom-dorami-date-picker + ecom-picker 日历）：
- *  - 顶部 radio 组：实时/近1天/近7天/近30天/自然月/大促/更多
- *    "更多"按钮：label.ecom-radio-button-wrapper.ecom-dropdown-trigger（:has-text("更多")）
- *  - hover "更多"后出现弹层（挂在 body 下的 portal）：
- *      .ecom-dorami-date-picker-quick-picker-dropdown
- *        ├─ .ecom-dorami-date-picker-left-container  左侧菜单 ul.ecom-menu
- *        │    └─ li.ecom-menu-item > span.ecom-menu-title-content > div "自然日"/"自然周"/...
- *        └─ .ecom-dorami-date-picker-right-container 右侧日期面板
- *             └─ .ecom-picker-body 日历，每格是 td.ecom-picker-cell，
- *                可点击的包了 .ecom-picker-cell-in-view，不可点击是 .ecom-picker-cell-disabled，
- *                cell 内的点击热区是 .ecom-picker-cell-inner（其 innerText 为日期数字）
+ * 视频明细：悬浮「更多」→ 左侧选「自然日」→ 日历里点「当前可选的最后一个自然日 - dayOffset」
+ * dayOffset=0 最新一天，dayOffset=1 前一天，以此类推。
+ * 适用于需要回溯导出多天数据的场景。
  */
-async function selectDateRangeYesterday(page, tag) {
+async function selectDateRangeYesterday(page, tag, dayOffset = 0) {
   const started = Date.now();
 
-  // 1) 找"更多"按钮；有时页面刚加载完 DOM 还没挂上，这里额外 poll 一段时间
   const moreTrigger = page
     .locator(
       'label.ecom-radio-button-wrapper.ecom-dropdown-trigger:has-text("更多"), label.ecom-radio-button-wrapper:has-text("更多")'
@@ -124,11 +96,10 @@ async function selectDateRangeYesterday(page, tag) {
     .then(() => true)
     .catch(() => false);
   if (!moreVisible) {
-    logWarn(tag, '未找到"更多"按钮，跳过日期选择（默认保留近7天）');
+    logWarn(tag, '未找到"更多"按钮，跳过日期选择');
     return { ok: false, dataDate: null };
   }
 
-  // 2) hover 展开弹层；抖音罗盘的 ecom-dropdown 是 hover 触发，停留时间要够
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await moreTrigger.hover({ timeout: 1500 }).catch(() => {});
     await page.waitForTimeout(350);
@@ -139,7 +110,7 @@ async function selectDateRangeYesterday(page, tag) {
       .catch(() => false);
     if (dropdownVisible) break;
     if (attempt === 2) {
-      logWarn(tag, `hover "更多" 3 次后弹层仍未出现，尝试在日历中直接选择昨天`);
+      logWarn(tag, `hover "更多" 3 次后弹层仍未出现`);
     }
   }
 
@@ -147,7 +118,6 @@ async function selectDateRangeYesterday(page, tag) {
     .locator(".ecom-dorami-date-picker-quick-picker-dropdown")
     .first();
 
-  // 3) 点击"自然日"
   let naturalDay = dropdown
     .locator('li.ecom-menu-item:has-text("自然日")')
     .first();
@@ -165,13 +135,9 @@ async function selectDateRangeYesterday(page, tag) {
     await page.waitForTimeout(400);
     logStep(tag, '已点击"自然日"分类');
   } else {
-    logWarn(
-      tag,
-      '悬浮"更多"后仍未找到"自然日"选项，将尝试在日历中直接点选最新可选日'
-    );
+    logWarn(tag, '悬浮"更多"后仍未找到"自然日"选项');
   }
 
-  // 4) 右侧日历：点击「可选格子里 DOM 序最后一个」（最新可选自然日）
   const rightPanel = page
     .locator(
       ".ecom-dorami-date-picker-right-container, .ecom-picker-panel-container"
@@ -183,11 +149,11 @@ async function selectDateRangeYesterday(page, tag) {
     ? rightPanel
     : page;
 
-  const pickResult = await pickLatestSelectableCalendarDay(page, scope);
+  const pickResult = await pickLatestSelectableCalendarDay(page, scope, dayOffset);
   const clicked = Boolean(pickResult.ok);
   const dataDate = pickResult.dataDate || null;
   if (clicked) {
-    logStep(tag, "已选择日历中最新可选自然日");
+    logStep(tag, `已选择日历第${dayOffset + 1}个可选自然日`);
     if (dataDate) {
       logStep(tag, `解析到的数据日期: ${dataDate}`);
     }
@@ -195,35 +161,21 @@ async function selectDateRangeYesterday(page, tag) {
     logWarn(tag, "日历中未找到可点击的日期格");
   }
 
-  // 5) 收面板，把鼠标移开
   await page.waitForTimeout(400);
   await page.keyboard.press("Escape").catch(() => {});
   await page.mouse.move(10, 10).catch(() => {});
   await page.waitForTimeout(300);
 
-  logStep(
-    tag,
-    `selectDateRangeYesterday ${clicked ? "成功" : "未能点中日期"}`,
-    started
-  );
+  logStep(tag, `selectDateRangeYesterday(offset=${dayOffset}) ${clicked ? "成功" : "失败"}`, started);
   return { ok: clicked, dataDate };
 }
 
-/**
- * 确保进入"视频明细"二级 Tab（页面顶部 tab：数据/经营建议/流量来源/带货商品/看后搜/视频明细）。
- * 若已选中则跳过。
- *
- * 注意：页面顶部"数据"tab 默认也有"下载明细"按钮和"投放属性"筛选，
- * 所以即使这一步失败也不会阻塞后续下载；这里成失败都只打日志。
- */
 async function ensureVideoDetailTab(page, tag) {
   const started = Date.now();
   const tabSel = 'div[role="tab"]:has-text("视频明细"), :text-is("视频明细")';
   let tab = page.locator(tabSel).first();
   const visible1 = await tab.isVisible({ timeout: 2000 }).catch(() => false);
   if (!visible1) {
-    // 实测：有些账号/分辨率下顶部 tab 条需要滚动页面后才渲染/露出（非首屏）。
-    // 这里向下滚动一小段并重试一次；仍失败就按“非阻塞”策略继续流程。
     await page.mouse.wheel(0, 900).catch(() => {});
     await page.waitForTimeout(300);
     tab = page.locator(tabSel).first();
@@ -245,14 +197,8 @@ async function ensureVideoDetailTab(page, tag) {
   return true;
 }
 
-/**
- * 将"投放属性"切换为"非投放"。
- * 页面结构：label "投放属性" 同级是一个 ecom-tabs 容器，内含 全部/投放/非投放。
- * 容器 id=_auto__ad_type；页面刷新后这个容器需要等一下才挂载。
- */
 async function selectNonAdTab(page, tag) {
   const started = Date.now();
-  // 先等容器或"非投放"任一出现（哪个先就用哪个）
   let targetTab = page.locator('#_auto__ad_type div[role="tab"]:has-text("非投放")').first();
   const viaContainer = await targetTab
     .waitFor({ state: "visible", timeout: 8000 })
@@ -268,10 +214,7 @@ async function selectNonAdTab(page, tag) {
       .then(() => true)
       .catch(() => false);
     if (!byText) {
-      logWarn(
-        tag,
-        '未找到"非投放" Tab（容器 #_auto__ad_type 与文本匹配都超时），跳过切换'
-      );
+      logWarn(tag, '未找到"非投放" Tab，跳过切换');
       return false;
     }
   }
@@ -284,7 +227,6 @@ async function selectNonAdTab(page, tag) {
 
   await targetTab.click({ timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(600);
-  // 等待"非投放"真正进入 selected 状态
   const ok = await page
     .locator('div[role="tab"][aria-selected="true"]:has-text("非投放")')
     .first()
@@ -299,10 +241,6 @@ async function selectNonAdTab(page, tag) {
   return ok;
 }
 
-/**
- * 把任意店铺名规整为可作为目录的字符串。
- * Windows/macOS 禁用字符统一替换为 _，避免 fs.mkdir 失败。
- */
 function safeShopDirName(name) {
   return String(name || "")
     .trim()
@@ -310,15 +248,6 @@ function safeShopDirName(name) {
     .replace(/\s+/g, " ");
 }
 
-/**
- * 点击"下载明细"按钮并保存文件。
- * 罗盘的下载可能是：
- * 1) 直接触发 download 事件（a[download] 或 Blob）
- * 2) 走异步导出中心（暂不处理）
- *
- * 页面可能同时存在多个"下载明细"按钮（数据 tab 与 视频明细 tab 各一个），
- * 这里优先用 nth-last（离视频明细区最近的那个，按 DOM 顺序通常排在后面）。
- */
 async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   const exportLabel = options.exportLabel || "视频明细";
   const started = Date.now();
@@ -329,7 +258,6 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   if (btnCount === 0) {
     throw new Error('页面上未找到"下载明细"按钮');
   }
-  // 优先选最后一个（自营视频/明细 tab 对应的下载按钮）
   const downloadBtn = allButtons.nth(btnCount - 1);
   await downloadBtn.waitFor({ state: "visible", timeout: 8000 });
 
@@ -362,48 +290,71 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   return savePath;
 }
 
+/** 根据 dayOffset 计算实际数据日期（昨天 - offset），格式 YYYY/MM/DD */
+function calcDataDate(dayOffset) {
+  const d = new Date();
+  d.setDate(d.getDate() - 1 - dayOffset);
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}/${mo}/${day}`;
+}
+
 /**
  * 对外入口：
  *  - 导航到视频明细页
- *  - 选择「更多 → 自然日」后日历中的最新可选日
- *  - 确保在"视频明细"子 tab
- *  - 切换"投放属性 = 非投放"
- *  - 点击"下载明细"并保存
- *
- * 当传入 shopName 时，文件会落到 saveDir/<shopName>/ 目录下，
- * 便于同一个账号切换多店铺时按店铺归档。
- *
- * 每一步独立容错，总体失败会抛异常并由上层截图记录。
+ *  - 循环导出多天数据：dayOffset=0..daysToExport-1
+ *    每天依次：选择自然日(offset)→非投放 tab→下载明细→追加数据日期
  *
  * @param {import('playwright').Page} page
- * @param {{ tag: string, saveDir: string, shopName?: string }} options
+ * @param {{ tag: string, saveDir: string, shopName?: string, daysToExport?: number }} options
  */
-async function downloadVideoSelfDetail(page, { tag, saveDir, shopName }) {
+async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExport = 1 }) {
   const startedAll = Date.now();
-  logStep(tag, `下载开始，目标店铺: ${shopName || "(未指定)"}`);
+  logStep(tag, `视频下载开始，目标店铺: ${shopName || "(未指定)"}，循环天数: ${daysToExport}`);
 
   await gotoVideoSelf(page, tag);
-  const { dataDate } = await selectDateRangeYesterday(page, tag);
-  await selectNonAdTab(page, tag);
 
-  // 给表格一个 loading → 刷新完成的缓冲；实测切换 tab + 改 date 后需要重新拉数据
-  await page.waitForTimeout(1200);
+  const results = [];
 
-  const targetDir = shopName
-    ? path.join(saveDir, safeShopDirName(shopName), "视频明细")
-    : saveDir;
-  const savePath = await clickDownloadAndSave(page, tag, targetDir, {
-    exportLabel: "视频明细"
-  });
+  for (let offset = 0; offset < daysToExport; offset++) {
+    logStep(tag, `--- 第 ${offset + 1}/${daysToExport} 轮（offset=${offset}）---`);
 
-  try {
-    appendDataDateColumn(savePath, dataDate);
-  } catch (e) {
-    logWarn(tag, `写入「数据日期」列失败（仍可保留原文件）: ${e.message || e}`);
+    // 如果是首轮且 daysToExport>1，可能已有当天数据需要清除
+    const { dataDate } = await selectDateRangeYesterday(page, tag, offset);
+    await selectNonAdTab(page, tag);
+
+    await page.waitForTimeout(1200);
+
+    const targetDir = shopName
+      ? path.join(saveDir, safeShopDirName(shopName), "视频明细")
+      : saveDir;
+    const savePath = await clickDownloadAndSave(page, tag, targetDir, {
+      exportLabel: "视频明细"
+    });
+
+    // 用计算的实际数据日期覆盖（比日历解析的更可靠）
+    const actualDate = calcDataDate(offset);
+    const dateToWrite = dataDate || actualDate;
+    try {
+      appendDataDateColumn(savePath, dateToWrite);
+      logStep(tag, `数据日期写入: ${dateToWrite}`);
+    } catch (e) {
+      logWarn(tag, `写入「数据日期」列失败: ${e.message || e}`);
+    }
+
+    results.push({ savePath, dataDate: dateToWrite });
+
+    // 非最后一轮，让页面稳定后再进入下一轮
+    if (offset < daysToExport - 1) {
+      await page.waitForTimeout(800);
+    }
   }
 
-  logStep(tag, `下载流程完成`, startedAll);
-  return { savePath, dataDate };
+  logStep(tag, `视频下载流程完成，共 ${results.length} 天`, startedAll);
+  return results.length > 0
+    ? { savePath: results[0].savePath, dataDate: results[0].dataDate, allResults: results }
+    : { savePath: null, dataDate: null, allResults: [] };
 }
 
 module.exports = {
@@ -415,5 +366,6 @@ module.exports = {
   selectDateRangeYesterday,
   clickDownloadAndSave,
   downloadVideoSelfDetail,
-  safeShopDirName
+  safeShopDirName,
+  calcDataDate
 };

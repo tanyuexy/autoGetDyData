@@ -1,12 +1,14 @@
 /**
- * 罗盘 ecom-picker：在已展开的自然日面板中点击「可选日期里 DOM 序最后一个」，
- * 并尝试解析年月日，格式化为 YYYY/MM/DD（与业务「最新一个可选自然日」一致）。
+ * 罗盘 ecom-picker：在已展开的自然日面板中点击「可选日期里 DOM 序最后一个」。
+ * dayOffset=0 点最后一个（最新一天），dayOffset=1 点倒数第二个，以此类推。
+ * 并尝试解析年月日，格式化为 YYYY/MM/DD。
  *
  * @param {import('playwright').Page} page
  * @param {import('playwright').Locator} [scopeRoot] 限定在右侧面板；缺省为 page
+ * @param {number} [dayOffset=0] 从最新日期往前的偏移量
  * @returns {Promise<{ ok: boolean, dataDate: string | null }>}
  */
-async function pickLatestSelectableCalendarDay(page, scopeRoot) {
+async function pickLatestSelectableCalendarDay(page, scopeRoot, dayOffset = 0) {
   const scope = scopeRoot || page;
 
   await page
@@ -23,13 +25,17 @@ async function pickLatestSelectableCalendarDay(page, scopeRoot) {
   let count = await inViewCells.count().catch(() => 0);
   let target = null;
   if (count > 0) {
-    target = inViewCells.nth(count - 1);
+    const idx = Math.max(0, count - 1 - dayOffset);
+    target = inViewCells.nth(idx);
   } else {
     const anyCells = scope.locator(
       "td.ecom-picker-cell:not(.ecom-picker-cell-disabled) .ecom-picker-cell-inner"
     );
     count = await anyCells.count().catch(() => 0);
-    if (count > 0) target = anyCells.nth(count - 1);
+    if (count > 0) {
+      const idx = Math.max(0, count - 1 - dayOffset);
+      target = anyCells.nth(idx);
+    }
   }
 
   if (!target) {

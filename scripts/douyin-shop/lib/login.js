@@ -346,6 +346,11 @@ async function captureFailureShot(page, debugDir, kind) {
  * 下载当前店铺的短视频明细 + 图文明细；二者独立 try/catch，互不影响。
  * 店铺名优先从当前页读取；读不到时用上游 hint。
  *
+ * @param {import('playwright').Page} page
+ * @param {string} tag
+ * @param {object} paths
+ * @param {object} [options]
+ * @param {number} [options.daysToExport] 循环导出天数，默认 1
  * @returns {Promise<{ok: boolean, shopName: string, videoPath?: string, graphicPath?: string, videoError?: string, graphicError?: string, downloadPath?: string, error?: string}>}
  */
 async function downloadCurrentShop(page, tag, paths, options = {}) {
@@ -368,19 +373,25 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
 
   const shopTag = shopName ? `${tag}|${shopName}` : tag;
   const sn = shopName || "unknown";
+  const daysToExport = options.daysToExport || 1;
 
-  let videoPath;
-  let graphicPath;
+  let videoPaths = [];
+  let graphicPaths = [];
   let videoError;
   let graphicError;
 
   try {
-    const { savePath } = await downloadVideoSelfDetail(page, {
+    const result = await downloadVideoSelfDetail(page, {
       tag: shopTag,
       saveDir: paths.dataDir,
-      shopName: sn
+      shopName: sn,
+      daysToExport
     });
-    videoPath = savePath;
+    if (result.allResults) {
+      videoPaths = result.allResults.map(r => r.savePath).filter(Boolean);
+    } else if (result.savePath) {
+      videoPaths = [result.savePath];
+    }
   } catch (error) {
     videoError = error?.message || String(error);
     console.error(`[${shopTag}] 视频明细下载失败: ${videoError}`);
@@ -393,12 +404,17 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
   }
 
   try {
-    const { savePath } = await downloadGraphicDetail(page, {
+    const result = await downloadGraphicDetail(page, {
       tag: shopTag,
       saveDir: paths.dataDir,
-      shopName: sn
+      shopName: sn,
+      daysToExport
     });
-    graphicPath = savePath;
+    if (result.allResults) {
+      graphicPaths = result.allResults.map(r => r.savePath).filter(Boolean);
+    } else if (result.savePath) {
+      graphicPaths = [result.savePath];
+    }
   } catch (error) {
     graphicError = error?.message || String(error);
     console.error(`[${shopTag}] 图文明细下载失败: ${graphicError}`);
@@ -410,16 +426,30 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     if (shot) console.error(`[${shopTag}] 失败截图: ${shot}`);
   }
 
-  const ok = Boolean(videoPath && graphicPath);
+  const ok = Boolean(videoPaths.length && graphicPaths.length);
   const parts = [videoError, graphicError].filter(Boolean);
+
+  // ─── 店铺汇总 ───
+  const videoDaysOk = videoError ? 0 : videoPaths.length;
+  const graphicDaysOk = graphicError ? 0 : graphicPaths.length;
+  console.log(
+    `[${shopTag}] ─── 导出汇总: 视频 ${videoDaysOk}/${daysToExport}天 ${videoDaysOk === daysToExport ? '✓' : '✗'} | ` +
+    `图文 ${graphicDaysOk}/${daysToExport}天 ${graphicDaysOk === daysToExport ? '✓' : '✗'}` +
+    (videoError ? ` | 视频错误: ${videoError}` : '') +
+    (graphicError ? ` | 图文错误: ${graphicError}` : '')
+  );
+
   return {
     ok,
     shopName,
-    videoPath,
-    graphicPath,
+    videoDays: videoDaysOk,
+    graphicDays: graphicDaysOk,
+    daysToExport,
+    videoPath: videoPaths[0] || null,
+    graphicPath: graphicPaths[0] || null,
     videoError,
     graphicError,
-    downloadPath: videoPath || graphicPath,
+    downloadPath: videoPaths[0] || graphicPaths[0] || null,
     error: parts.length ? parts.join("；") : undefined
   };
 }
@@ -543,12 +573,14 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
     preferredList.length > 0 ? preferredList.length + 2 : 1;
 
   for (let i = 0; i < maxShops; i += 1) {
+    const daysToExport = options.daysToExport || 1;
     console.log(
-      `\n[${tag}] ========== 第 ${i + 1}/${maxShops} 轮（${maxShops}=名单${preferredList.length}项+2，防死循环，非本账号匹配店数）==========`
+      `\n[${tag}] ========== 第 ${i + 1}/${maxShops} 轮（${maxShops}=名单${preferredList.length}项+2）| 导出天数: ${daysToExport}天 ==========`
     );
     // 下载当前店铺（仅名单店铺）
     const round = await downloadCurrentShop(page, tag, paths, {
-      shopNameHint: pendingShopHint
+      shopNameHint: pendingShopHint,
+      daysToExport
     });
     if (round.shopName) {
       processed.add(round.shopName);
@@ -567,6 +599,9 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
       shopName: round.shopName,
       videoPath: round.videoPath,
       graphicPath: round.graphicPath,
+      videoDays: round.videoDays,
+      graphicDays: round.graphicDays,
+      daysToExport: round.daysToExport,
       videoError: round.videoError,
       graphicError: round.graphicError
     });
@@ -585,15 +620,15 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
 
     if (round.ok) {
       console.log(
-        `[${tag}] 本轮视频+图文明细均成功，店铺=${round.shopName || "unknown"}`
+        `[${tag}] 本轮全部成功: ${round.shopName || "unknown"} | 视频 ${round.videoDays}/${round.daysToExport}天 ✓ | 图文 ${round.graphicDays}/${round.daysToExport}天 ✓`
       );
     } else {
       const detail = [
-        round.videoPath ? "视频OK" : `视频失败: ${round.videoError || "-"}`,
-        round.graphicPath ? "图文OK" : `图文失败: ${round.graphicError || "-"}`
+        round.videoError ? `视频 ✗ ${round.videoError}` : `视频 ${round.videoDays}/${round.daysToExport}天 ✓`,
+        round.graphicError ? `图文 ✗ ${round.graphicError}` : `图文 ${round.graphicDays}/${round.daysToExport}天 ✓`
       ].join(" | ");
       console.warn(
-        `[${tag}] 本轮未全部成功，店铺=${round.shopName || "unknown"}（${detail}）`
+        `[${tag}] 本轮部分失败: ${round.shopName || "unknown"}（${detail}）`
       );
     }
 
@@ -646,8 +681,18 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
     (d) => d.videoPath && d.graphicPath
   ).length;
   console.log(
-    `\n[${tag}] ========== 多店铺循环结束: 共 ${result.downloads.length} 轮，视频+图文均成功 ${fullOk} ==========`
+    `\n[${tag}] ========== 多店铺循环结束: 共 ${result.downloads.length} 家店铺 ==========`
   );
+  for (const d of result.downloads) {
+    const videoIcon = d.videoDays === d.daysToExport ? '✓' : '✗';
+    const graphicIcon = d.graphicDays === d.daysToExport ? '✓' : '✗';
+    console.log(
+      `  [${d.shopName || "unknown"}] 视频 ${d.videoDays}/${d.daysToExport}天 ${videoIcon}` +
+      ` | 图文 ${d.graphicDays}/${d.daysToExport}天 ${graphicIcon}` +
+      (d.videoError ? ` | 视频问题: ${d.videoError}` : '') +
+      (d.graphicError ? ` | 图文问题: ${d.graphicError}` : '')
+    );
+  }
   return result;
 }
 
@@ -701,7 +746,8 @@ async function runShopLogin(context, account, options = {}) {
     options.processedNames instanceof Set
       ? options.processedNames
       : new Set(options.processedNames || []);
-  const postLoginOptions = { processedNames };
+  const daysToExport = options.daysToExport || 1;
+  const postLoginOptions = { processedNames, daysToExport };
 
   const page = await context.newPage();
   const tag = email;

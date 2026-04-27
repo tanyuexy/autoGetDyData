@@ -388,6 +388,54 @@ function normalizeLookupKey(value) {
     .toLowerCase();
 }
 
+/** 去重辅助：标准化作名（去空格、小写） */
+function normalizeDedupKey(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim().replace(/\s+/g, "").toLowerCase();
+}
+
+/** 去重辅助：标准化日期，兼容 timestamp（飞书返回）和字符串格式 */
+function normalizeDedupDate(value) {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = value > 1e15 ? value / 1000 : value;
+    const d = new Date(ms);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}/${m}/${day}`;
+  }
+  const s = String(value).trim();
+  if (!s) return "";
+  const m = s.match(/(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/);
+  if (m) {
+    return `${m[1]}/${m[2].padStart(2, "0")}/${m[3].padStart(2, "0")}`;
+  }
+  return s;
+}
+
+function normalizeDedupAmount(value) {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(Math.round(value * 100) / 100) : "";
+  }
+  const s = String(value).trim().replace(/,/g, "");
+  if (!s) return "";
+  const n = Number(s);
+  if (Number.isFinite(n)) {
+    return String(Math.round(n * 100) / 100);
+  }
+  return s;
+}
+
+function makeShopDedupKey(fields) {
+  const title = normalizeDedupKey(fields && fields["作品名"]);
+  const date = normalizeDedupDate(fields && fields["日期"]);
+  const amount = normalizeDedupAmount(fields && fields["增加销售额"]);
+  if (!title || !date || !amount) return "";
+  return `${title}|${date}|${amount}`;
+}
+
 function extractComparableText(value) {
   if (typeof value === "string" || typeof value === "number") {
     return String(value).trim();
@@ -1177,6 +1225,37 @@ async function run() {
       return;
     }
 
+    // === 去重：追加模式下对比飞书表已有记录，按 作品名+日期+增加销售额 去重 ===
+    let recordsToCreate = normalizedRecords;
+    let dedupSkipped = 0;
+    if (!replaceMode && recordsToCreate.length > 0) {
+      const DEDUP_FIELDS = ["作品名", "日期", "增加销售额"];
+      const existing = await listAllBitableRecords(
+        config,
+        tokenRecord.accessToken,
+        "",
+        DEDUP_FIELDS
+      );
+
+      const seen = new Set();
+      for (const rec of existing) {
+        const key = makeShopDedupKey((rec && rec.fields) || {});
+        if (key) seen.add(key);
+      }
+
+      if (seen.size > 0) {
+        const before = recordsToCreate.length;
+        recordsToCreate = recordsToCreate.filter((record) => {
+          const key = makeShopDedupKey(record.fields || {});
+          if (!key) return true;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        dedupSkipped = before - recordsToCreate.length;
+      }
+    }
+
     if (dryRun) {
       let dryMsg;
       if (replaceMode) {
@@ -1184,14 +1263,19 @@ async function run() {
           keepLeadingRows > 0
             ? `dry-run（replace）：将保留飞书表前 ${keepLeadingRows} 条，删除其余记录后批量写入；预览前 3 行:`
             : "dry-run（replace）：将清空飞书表全部记录后批量写入；预览前 3 行:";
+      } else if (dedupSkipped > 0) {
+        dryMsg = `dry-run（追加+去重）：多维表格中已有 ${dedupSkipped} 条记录（按 作品名+日期+增加销售额 匹配），跳过；新增 ${recordsToCreate.length} 条；预览前 3 行:`;
       } else {
         dryMsg =
           "dry-run（追加）：将在表格末尾批量新增记录（不删除已有行）；预览前 3 行:";
       }
       console.log(dryMsg);
-      normalizedRecords.slice(0, 3).forEach((record) => {
+      recordsToCreate.slice(0, 3).forEach((record) => {
         console.log(`- 行 ${record.rowNumber}:`, JSON.stringify(record.fields));
       });
+      if (dedupSkipped > 0) {
+        console.log(`去重: 飞书表中已存在 ${dedupSkipped} 条重复记录（按 作品名+日期+增加销售额），已排除`);
+      }
       const droppedEntries = Object.entries(droppedValueStats);
       if (droppedEntries.length) {
         console.log(
@@ -1235,12 +1319,23 @@ async function run() {
       }
       deletedCount = idsToDelete.length;
     } else {
-      console.log("追加模式：不删除已有记录，仅在末尾批量新增…");
+      if (dedupSkipped > 0) {
+        console.log(
+          `追加模式（去重）：飞书表中已有 ${dedupSkipped} 条重复（按 作品名+日期+增加销售额），跳过。准备新增 ${recordsToCreate.length} 条…`
+        );
+      } else {
+        console.log("追加模式：不删除已有记录，仅在末尾批量新增…");
+      }
+    }
+
+    if (!recordsToCreate.length) {
+      console.log("去重后没有新数据需要写入，跳过。");
+      return;
     }
 
     const BATCH = 500;
     const createChunks = chunkArray(
-      normalizedRecords.map((record) => ({ fields: record.fields })),
+      recordsToCreate.map((record) => ({ fields: record.fields })),
       BATCH
     );
     let created = 0;

@@ -5,6 +5,7 @@ const { ACCOUNTS_DIR } = require("./env");
 
 const OUTPUT_DIR = path.resolve(process.cwd(), "data");
 const OUTPUT_FILE_NAME = "抖店-全部店铺-每日支付增量汇总.xlsx";
+const BACKUP_FILE_NAME = "抖店-飞书表备份.xlsx";
 const OUTPUT_SHEET_NAME = "全部作品";
 
 /** 视频/图文明细里 append-data-date-column 写入的列名（源表读取用） */
@@ -47,15 +48,15 @@ function normalizeTitle(value) {
   return String(value ?? "").replace(/\s/g, "");
 }
 
-async function pickLatestXlsx(dirPath) {
+/** 返回目录下最新的 xlsx 文件路径列表（按修改时间倒序），不存在则返回 [] */
+async function pickLatestXlsxFiles(dirPath) {
   let names;
   try {
     names = await fs.readdir(dirPath);
   } catch {
-    return null;
+    return [];
   }
-  let bestPath = null;
-  let bestMtime = 0;
+  const files = [];
   for (const name of names) {
     if (!name.toLowerCase().endsWith(".xlsx")) continue;
     const full = path.join(dirPath, name);
@@ -66,13 +67,11 @@ async function pickLatestXlsx(dirPath) {
       continue;
     }
     if (!st.isFile()) continue;
-    const t = st.mtimeMs || 0;
-    if (t >= bestMtime) {
-      bestMtime = t;
-      bestPath = full;
-    }
+    files.push({ path: full, mtime: st.mtimeMs || 0 });
   }
-  return bestPath;
+  if (!files.length) return [];
+  files.sort((a, b) => b.mtime - a.mtime);
+  return files.map((f) => f.path);
 }
 
 function readFirstSheetRows(filePath) {
@@ -120,19 +119,59 @@ function pushGraphicRows(allRows, rows, shopName) {
   }
 }
 
-async function collectShopRows(dataRoot, shopName) {
+/** 检查文件首行表头是否包含「数据日期」列 */
+function hasDateColumn(headers) {
+  return headers.some((h) => String(h ?? "").trim() === SOURCE_DATA_DATE_COL);
+}
+
+async function collectShopRows(dataRoot, shopName, options = {}) {
   const rows = [];
+  const daysToExport = Math.max(1, Number(options.daysToExport) || 1);
   const videoDir = path.join(dataRoot, shopName, "视频明细");
   const graphicDir = path.join(dataRoot, shopName, "图文明细");
-  const videoFile = await pickLatestXlsx(videoDir);
-  const graphicFile = await pickLatestXlsx(graphicDir);
-  if (videoFile) {
-    pushVideoRows(rows, readFirstSheetRows(videoFile), shopName);
+  const latestVideoFiles = (await pickLatestXlsxFiles(videoDir)).slice(
+    0,
+    daysToExport
+  );
+  const latestGraphicFiles = (await pickLatestXlsxFiles(graphicDir)).slice(
+    0,
+    daysToExport
+  );
+  const seen = new Set();
+
+  function processLatestFiles(filePaths, pushFn, typeName) {
+    for (const filePath of filePaths) {
+      const sheetRows = readFirstSheetRows(filePath);
+      if (!sheetRows.length) continue;
+      // 循环导出的文件若缺少日期列则跳过，避免空日期进入汇总
+      if (!hasDateColumn(Object.keys(sheetRows[0] || {}))) {
+        console.warn(
+          `  跳过${typeName}文件（缺少「${SOURCE_DATA_DATE_COL}」列）: ${filePath}`
+        );
+        continue;
+      }
+      pushFn(rows, sheetRows, shopName);
+    }
   }
-  if (graphicFile) {
-    pushGraphicRows(rows, readFirstSheetRows(graphicFile), shopName);
+
+  processLatestFiles(latestVideoFiles, pushVideoRows, "视频");
+  processLatestFiles(latestGraphicFiles, pushGraphicRows, "图文");
+
+  // 按(作品名, 日期)去重，保留第一条
+  const deduped = [];
+  for (const r of rows) {
+    const key = `${r[OUT_TITLE]}|${r[OUT_DATE]}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(r);
   }
-  return rows;
+  // 按日期排序（旧→新）
+  deduped.sort((a, b) => {
+    if (a[OUT_DATE] < b[OUT_DATE]) return -1;
+    if (a[OUT_DATE] > b[OUT_DATE]) return 1;
+    return 0;
+  });
+  return deduped;
 }
 
 async function listShopNames(dataRoot) {
@@ -149,11 +188,12 @@ async function listShopNames(dataRoot) {
 }
 
 /**
- * 扫描 accounts-shop 下各账号 data/<店铺>/视频明细|图文明细 中最新 xlsx，
- * 过滤支付金额为 0 的行，输出列为「数据来源」「所属店铺」「作品名」「日期」「增加销售额」，并写入 data/抖店-….
+ * 扫描 accounts-shop 下各账号 data/<店铺>/视频明细|图文明细 中最近 N 个 xlsx（N=daysToExport），
+ * 按(作品名,日期)去重并排序后输出为「数据来源」「所属店铺」「作品名」「日期」「增加销售额」，写入 data/抖店-….
  */
-async function mergeAllShopExportsToData() {
+async function mergeAllShopExportsToData(options = {}) {
   const allRows = [];
+  const daysToExport = Math.max(1, Number(options.daysToExport) || 1);
   let accountDirs;
   try {
     accountDirs = await fs.readdir(ACCOUNTS_DIR, { withFileTypes: true });
@@ -166,10 +206,21 @@ async function mergeAllShopExportsToData() {
     const dataRoot = path.join(ACCOUNTS_DIR, ent.name, "data");
     const shops = await listShopNames(dataRoot);
     for (const shopName of shops) {
-      const chunk = await collectShopRows(dataRoot, shopName);
+      const chunk = await collectShopRows(dataRoot, shopName, { daysToExport });
       allRows.push(...chunk);
     }
   }
+
+  // 全局按日期排序（旧→新），同日期下按店铺与作品名稳定排序，便于对账与比对
+  allRows.sort((a, b) => {
+    if (a[OUT_DATE] < b[OUT_DATE]) return -1;
+    if (a[OUT_DATE] > b[OUT_DATE]) return 1;
+    if (a[SHOP_FIELD] < b[SHOP_FIELD]) return -1;
+    if (a[SHOP_FIELD] > b[SHOP_FIELD]) return 1;
+    if (a[OUT_TITLE] < b[OUT_TITLE]) return -1;
+    if (a[OUT_TITLE] > b[OUT_TITLE]) return 1;
+    return 0;
+  });
 
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
   const outputPath = path.join(OUTPUT_DIR, OUTPUT_FILE_NAME);
@@ -177,7 +228,7 @@ async function mergeAllShopExportsToData() {
   try {
     const names = await fs.readdir(OUTPUT_DIR);
     for (const name of names) {
-      if (name === OUTPUT_FILE_NAME) continue;
+      if (name === OUTPUT_FILE_NAME || name === BACKUP_FILE_NAME) continue;
       if (name.startsWith("抖店-") && name.toLowerCase().endsWith(".xlsx")) {
         await fs.unlink(path.join(OUTPUT_DIR, name)).catch(() => {});
       }
@@ -194,7 +245,7 @@ async function mergeAllShopExportsToData() {
   XLSX.writeFile(workbook, outputPath);
 
   console.log(
-    `抖店汇总完成（共 ${allRows.length} 条，增加销售额>0）: ${outputPath}`
+    `抖店汇总完成（最近 ${daysToExport} 天文件，共 ${allRows.length} 条，增加销售额>0）: ${outputPath}`
   );
   return { outputPath, rowCount: allRows.length };
 }

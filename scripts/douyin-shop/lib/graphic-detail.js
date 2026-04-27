@@ -12,19 +12,17 @@ const GRAPHIC_URL =
 
 function logStep(tag, msg, started) {
   const dur = started ? ` (+${Date.now() - started}ms)` : "";
-  // eslint-disable-next-line no-console
   console.log(`[${tag}] ${msg}${dur}`);
 }
 
 function logWarn(tag, msg) {
-  // eslint-disable-next-line no-console
   console.warn(`[${tag}] ${msg}`);
 }
 
 /**
- * 图文分析页：在已展开的自然日面板中点击日历「最新可选日」。
+ * 图文分析页：在已展开的自然日面板中点击日历「最新可选日 - dayOffset」。
  */
-async function pickLatestInGraphicCalendar(page, tag) {
+async function pickLatestInGraphicCalendar(page, tag, dayOffset = 0) {
   const started = Date.now();
   const rightPanel = page
     .locator(
@@ -37,11 +35,11 @@ async function pickLatestInGraphicCalendar(page, tag) {
     ? rightPanel
     : page;
 
-  const pickResult = await pickLatestSelectableCalendarDay(page, scope);
+  const pickResult = await pickLatestSelectableCalendarDay(page, scope, dayOffset);
   const clicked = Boolean(pickResult.ok);
   const dataDate = pickResult.dataDate || null;
   if (clicked) {
-    logStep(tag, "图文页已选择日历中最新可选自然日", started);
+    logStep(tag, `图文页已选择日历第${dayOffset + 1}个可选自然日`, started);
     if (dataDate) {
       logStep(tag, `解析到的数据日期: ${dataDate}`, started);
     }
@@ -57,11 +55,10 @@ async function pickLatestInGraphicCalendar(page, tag) {
 }
 
 /**
- * 图文分析页：直接点顶部「自然日」触发器（无需先悬浮「更多」），
- * 弹层内确认「自然日」后，在日历中选最新一个可选日期。
- * 与自营视频明细「更多 → 自然日」路径不同。
+ * 图文分析页：直接点顶部「自然日」触发器，弹层内确认「自然日」后，
+ * 在日历中选第 (dayOffset+1) 个可选日期。
  */
-async function selectGraphicNaturalDayYesterday(page, tag) {
+async function selectGraphicNaturalDayYesterday(page, tag, dayOffset = 0) {
   const started = Date.now();
   const nat = page
     .locator(
@@ -106,12 +103,8 @@ async function selectGraphicNaturalDayYesterday(page, tag) {
     }
   }
 
-  const picked = await pickLatestInGraphicCalendar(page, tag);
-  logStep(
-    tag,
-    `selectGraphicNaturalDayYesterday ${picked.ok ? "完成" : "可能未点到最新可选日"}`,
-    started
-  );
+  const picked = await pickLatestInGraphicCalendar(page, tag, dayOffset);
+  logStep(tag, `selectGraphicNaturalDayYesterday(offset=${dayOffset}) ${picked.ok ? "完成" : "可能未点到"}`, started);
   return picked;
 }
 
@@ -194,38 +187,63 @@ async function clickGraphicDownloadAndSave(page, tag, saveDir) {
   return savePath;
 }
 
+/** 根据 dayOffset 计算实际数据日期（昨天 - offset），格式 YYYY/MM/DD */
+function calcDataDate(dayOffset) {
+  const d = new Date();
+  d.setDate(d.getDate() - 1 - dayOffset);
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}/${mo}/${day}`;
+}
+
 /**
- *罗盘「图文分析」导出：自然日 + 日历最新可选日 + 下载明细。
- * 文件落在 saveDir/<店铺名>/图文明细/ 下，文件名含「图文明细」前缀。
+ * 罗盘「图文分析」导出：自然日 + 日历循环多天 + 下载明细。
+ * 文件落在 saveDir/<店铺名>/图文明细/ 下。
  *
  * @param {import('playwright').Page} page
- * @param {{ tag: string, saveDir: string, shopName?: string }} options
+ * @param {{ tag: string, saveDir: string, shopName?: string, daysToExport?: number }} options
  */
-async function downloadGraphicDetail(page, { tag, saveDir, shopName }) {
+async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExport = 1 }) {
   const startedAll = Date.now();
-  logStep(tag, `图文明细下载开始，店铺: ${shopName || "(未指定)"}`);
+  logStep(tag, `图文明细下载开始，店铺: ${shopName || "(未指定)"}，循环天数: ${daysToExport}`);
 
   await gotoGraphic(page, tag);
-  const { dataDate } = await selectGraphicNaturalDayYesterday(page, tag);
 
-  await page.waitForTimeout(1200);
+  const results = [];
 
-  const targetDir = shopName
-    ? path.join(saveDir, safeShopDirName(shopName), "图文明细")
-    : saveDir;
-  const savePath = await clickGraphicDownloadAndSave(page, tag, targetDir);
+  for (let offset = 0; offset < daysToExport; offset++) {
+    logStep(tag, `--- 图文明细第 ${offset + 1}/${daysToExport} 轮（offset=${offset}）---`);
 
-  try {
-    appendDataDateColumn(savePath, dataDate);
-  } catch (e) {
-    logWarn(
-      tag,
-      `写入「数据日期」列失败（仍可保留原文件）: ${e.message || e}`
-    );
+    const { dataDate } = await selectGraphicNaturalDayYesterday(page, tag, offset);
+
+    await page.waitForTimeout(1200);
+
+    const targetDir = shopName
+      ? path.join(saveDir, safeShopDirName(shopName), "图文明细")
+      : saveDir;
+    const savePath = await clickGraphicDownloadAndSave(page, tag, targetDir);
+
+    const actualDate = calcDataDate(offset);
+    const dateToWrite = dataDate || actualDate;
+    try {
+      appendDataDateColumn(savePath, dateToWrite);
+      logStep(tag, `图文数据日期写入: ${dateToWrite}`);
+    } catch (e) {
+      logWarn(tag, `写入「数据日期」列失败: ${e.message || e}`);
+    }
+
+    results.push({ savePath, dataDate: dateToWrite });
+
+    if (offset < daysToExport - 1) {
+      await page.waitForTimeout(800);
+    }
   }
 
-  logStep(tag, "图文明细下载流程完成", startedAll);
-  return { savePath, dataDate };
+  logStep(tag, `图文明细下载完成，共 ${results.length} 天`, startedAll);
+  return results.length > 0
+    ? { savePath: results[0].savePath, dataDate: results[0].dataDate, allResults: results }
+    : { savePath: null, dataDate: null, allResults: [] };
 }
 
 module.exports = {

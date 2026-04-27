@@ -14,6 +14,7 @@ const { loadPreferredShopNames } = require("./lib/shop-picker");
 const { mergeAllShopExportsToData } = require("./lib/merge-shop-exports");
 const { prependRowsToShopSummary } = require("./lib/prepend-rows-to-shop-summary");
 const { prependRowsFromFeishuShop } = require("./lib/prepend-from-feishu-shop");
+const { calcDaysToExport } = require("./lib/backup-dates");
 
 function parseArgs(argv) {
   // 支持 "login"（默认）或 "login <email> <password>"
@@ -104,7 +105,13 @@ async function main() {
   }
 
   if (command === "merge") {
-    await mergeAllShopExportsToData();
+    let daysToExport = 1;
+    try {
+      daysToExport = await calcDaysToExport();
+    } catch (e) {
+      console.warn(`读取备份表失败（merge 使用默认值 1 天）: ${e.message}`);
+    }
+    await mergeAllShopExportsToData({ daysToExport });
     return;
   }
 
@@ -152,6 +159,14 @@ async function main() {
     args: ["--start-maximized"]
   });
 
+  // 读取飞书备份表最后日期，计算需要循环导出多少天
+  let daysToExport = 1;
+  try {
+    daysToExport = await calcDaysToExport();
+  } catch (e) {
+    console.warn(`读取备份表失败（不影响登录，使用默认值 1 天）: ${e.message}`);
+  }
+
   const results = [];
   const processedNames = new Set();
   const totalTargets = preferredList.length;
@@ -183,7 +198,7 @@ async function main() {
       } ==========`
     );
 
-    const result = await runOne(browser, account, { processedNames });
+    const result = await runOne(browser, account, { processedNames, daysToExport });
     results.push(result);
 
     if (result.processedNames instanceof Set) {
@@ -198,7 +213,7 @@ async function main() {
 
   await browser.close();
 
-  await mergeAllShopExportsToData().catch((err) => {
+  await mergeAllShopExportsToData({ daysToExport }).catch((err) => {
     console.error("抖店数据汇总失败:", err.message || err);
   });
 
@@ -216,50 +231,35 @@ async function main() {
   const okCount = results.filter((r) => r.ok).length;
   console.log(`\n完成: 成功 ${okCount} / ${results.length}`);
 
+  console.log(`\n最终结果明细:`);
   for (const item of results) {
-    if (!item.ok) continue;
-    const parts = [`账号 ${item.account} 登录 OK`];
-    const downloads = Array.isArray(item.downloads) ? item.downloads : [];
-    if (downloads.length > 0) {
-      const fullOk = downloads.filter((d) => d.videoPath && d.graphicPath)
-        .length;
-      parts.push(
-        `已处理 ${downloads.length} 轮（视频+图文均成功 ${fullOk}）`
-      );
-      console.log("- " + parts.join(" | "));
-      for (const d of downloads) {
-        const name = d.shopName || "未知店铺";
-        if (d.videoPath) {
-          console.log(`    · [${name}] 视频明细: ${d.videoPath}`);
-        }
-        if (d.graphicPath) {
-          console.log(`    · [${name}] 图文明细: ${d.graphicPath}`);
-        }
-        if (d.videoError) {
-          console.log(`    · [${name}] 视频失败: ${d.videoError}`);
-        }
-        if (d.graphicError) {
-          console.log(`    · [${name}] 图文失败: ${d.graphicError}`);
-        }
-        if (
-          d.downloadPath &&
-          !d.videoPath &&
-          !d.graphicPath &&
-          !d.videoError &&
-          !d.graphicError
-        ) {
-          console.log(`    · [${name}] 明细: ${d.downloadPath}`);
-        }
-        if (d.error && !d.videoError && !d.graphicError) {
-          console.log(`    · [${name}] 失败: ${d.error}`);
-        }
-      }
+    if (!item.ok) {
+      console.log(`  [${item.account}] 登录失败: ${item.error}`);
       continue;
     }
-    if (item.shopName) parts.push(`选中店铺: ${item.shopName}`);
-    if (item.downloadPath) parts.push(`明细文件: ${item.downloadPath}`);
-    if (item.downloadError) parts.push(`下载异常: ${item.downloadError}`);
-    console.log("- " + parts.join(" | "));
+    const downloads = Array.isArray(item.downloads) ? item.downloads : [];
+    if (downloads.length === 0) {
+      console.log(`  [${item.account}] 无数据导出`);
+      continue;
+    }
+    for (const d of downloads) {
+      const name = d.shopName || "未知店铺";
+      const videoIcon = d.videoDays === d.daysToExport ? '✓' : '✗';
+      const graphicIcon = d.graphicDays === d.daysToExport ? '✓' : '✗';
+      const status = d.videoPath && d.graphicPath ? '全部完成' :
+                     d.videoPath ? '仅视频完成' :
+                     d.graphicPath ? '仅图文完成' : '全部失败';
+      console.log(
+        `  ✓ [${item.account}] ${name}` +
+        ` | 视频 ${d.videoDays || 0}/${d.daysToExport || 1}天 ${videoIcon}` +
+        ` | 图文 ${d.graphicDays || 0}/${d.daysToExport || 1}天 ${graphicIcon}` +
+        ` | ${status}`
+      );
+      if (d.videoError) console.log(`      视频错误: ${d.videoError}`);
+      if (d.graphicError) console.log(`      图文错误: ${d.graphicError}`);
+      if (d.videoPath) console.log(`      视频文件: ${d.videoPath}`);
+      if (d.graphicPath) console.log(`      图文文件: ${d.graphicPath}`);
+    }
   }
 
   const failed = results.filter((r) => !r.ok);
