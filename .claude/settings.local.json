@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "Bash(pip3 list *)",
+      "Bash(curl -s -H \"User-Agent: Mozilla/5.0 \\(Macintosh; Intel Mac OS X 10_15_7\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" \"https://api.bilibili.com/x/web-interface/ranking/v2?type=all\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -H \"User-Agent: Mozilla/5.0 \\(Macintosh; Intel Mac OS X 10_15_7\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" -H \"Referer: https://www.bilibili.com/\" \"https://api.bilibili.com/x/web-interface/popular\")",
+      "Bash(yt-dlp *)",
+      "Bash(brew list *)",
+      "Bash(pip3 install *)"
+    ]
+  }
+}

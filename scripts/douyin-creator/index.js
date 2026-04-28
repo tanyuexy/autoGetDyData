@@ -1,4 +1,6 @@
 require("dotenv").config();
+const path = require("path");
+const { spawnSync } = require("child_process");
 const { chromium } = require("playwright");
 
 const { ensureDir, fileExists } = require("./lib/fs-utils");
@@ -69,6 +71,24 @@ async function runAccountQueue(browser, accounts, command, options = {}) {
   return results;
 }
 
+function runFeishuSyncDataXlsxCreator() {
+  const projectRoot = path.resolve(__dirname, "../..");
+  const result = spawnSync("npm", ["run", "feishu:sync-data-xlsx-creator"], {
+    cwd: projectRoot,
+    stdio: "inherit",
+    env: { ...process.env },
+    shell: process.platform === "win32"
+  });
+
+  if (result.status !== 0) {
+    throw new Error(
+      `写入飞书多维表格失败，退出码: ${
+        result.status == null ? "unknown" : result.status
+      }`
+    );
+  }
+}
+
 async function main() {
   const parsed = parseCliCommand();
   const { command, accountName, exportAccountFilters } = parsed;
@@ -115,6 +135,8 @@ async function main() {
     return;
   }
 
+  const shouldSyncFeishuAfterExport = command === "export:feishu";
+
   console.log(`当前命令: ${command}`);
   console.log(`本次将处理 ${accounts.length} 个账号: ${accounts.join(", ")}`);
 
@@ -155,6 +177,8 @@ async function main() {
 
   const successCount = results.filter((item) => item.ok).length;
   const failed = results.filter((item) => !item.ok);
+  const allSuccess = results.length > 0 && successCount === results.length;
+
   console.log(`\n全部执行完成: 成功 ${successCount} / ${results.length}`);
   if (failed.length > 0) {
     console.log("失败账号:");
@@ -162,7 +186,15 @@ async function main() {
       console.log(`- ${item.accountName}: ${item.error}`);
     }
   }
+
   await mergeExportFiles(results);
+
+  if (shouldSyncFeishuAfterExport && allSuccess) {
+    console.log("全部店铺导出成功，开始写入飞书多维表格...");
+    runFeishuSyncDataXlsxCreator();
+  } else if (shouldSyncFeishuAfterExport) {
+    console.log("存在失败店铺，已跳过写入飞书多维表格。");
+  }
 }
 
 main().catch((error) => {

@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const path = require("path");
 const fs = require("fs/promises");
+const { execSync } = require("child_process");
 const { chromium } = require("playwright");
 
 const {
@@ -11,7 +12,10 @@ const {
 } = require("./lib/env");
 const { runShopLogin, getAccountPaths } = require("./lib/login");
 const { loadPreferredShopNames } = require("./lib/shop-picker");
-const { mergeAllShopExportsToData } = require("./lib/merge-shop-exports");
+const {
+  mergeAllShopExportsToData,
+  validateShopExportFiles
+} = require("./lib/merge-shop-exports");
 const { prependRowsToShopSummary } = require("./lib/prepend-rows-to-shop-summary");
 const { prependRowsFromFeishuShop } = require("./lib/prepend-from-feishu-shop");
 const { calcDaysToExport } = require("./lib/backup-dates");
@@ -25,7 +29,7 @@ function parseArgs(argv) {
       : "login";
   const positional = args[0] && !args[0].includes("@") ? args.slice(1) : args;
 
-  if (command === "list" || command === "merge" || command === "prepend") {
+  if (command === "list" || command === "merge" || command === "prepend" || command === "sync-feishu") {
     return { command, accounts: [] };
   }
 
@@ -78,6 +82,104 @@ async function runOne(browser, account, options = {}) {
   } finally {
     await context.close();
   }
+}
+
+async function runShopSyncFeishu(accounts) {
+  const preferredList = await loadPreferredShopNames();
+  console.log("抖店同步飞书：开始登录拉取 → 校验 → 合并 → 同步飞书");
+
+  const browser = await chromium.launch({
+    headless: false,
+    args: ["--start-maximized"]
+  });
+
+  let daysToExport = 1;
+  try {
+    daysToExport = await calcDaysToExport();
+  } catch (e) {
+    console.warn(`读取备份表失败（sync-feishu 使用默认值 1 天）: ${e.message}`);
+  }
+
+  const results = [];
+  const processedNames = new Set();
+  const totalTargets = preferredList.length;
+
+  function remainingTargets() {
+    if (totalTargets === 0) return [];
+    return preferredList.filter((name) => {
+      for (const done of processedNames) {
+        if (!done) continue;
+        if (done === name) return false;
+        if (name.includes(done) || done.includes(name)) return false;
+      }
+      return true;
+    });
+  }
+
+  try {
+    for (let i = 0; i < accounts.length; i += 1) {
+      const account = accounts[i];
+      const remaining = remainingTargets();
+      if (totalTargets > 0 && remaining.length === 0) {
+        console.log(
+          `所有目标店铺均已处理 (${processedNames.size}/${totalTargets})，提前结束登录拉取`
+        );
+        break;
+      }
+      console.log(
+        `\n========== 同步飞书前拉取 ${i + 1}/${accounts.length}: ${account.email} | 导出天数 ${daysToExport} ==========`
+      );
+      const result = await runOne(browser, account, { processedNames, daysToExport });
+      results.push(result);
+      if (result.processedNames instanceof Set) {
+        for (const n of result.processedNames) processedNames.add(n);
+      }
+      if (Array.isArray(result.downloads)) {
+        for (const d of result.downloads) {
+          if (d && d.shopName) processedNames.add(d.shopName);
+        }
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+
+  const failed = results.filter((r) => !r.ok);
+  if (failed.length > 0) {
+    throw new Error(
+      `抖店登录拉取失败账号：${failed.map((item) => `${item.account}: ${item.error}`).join("；")}`
+    );
+  }
+
+  const validation = await validateShopExportFiles({
+    daysToExport,
+    preferredShopNames: preferredList
+  });
+  console.log(
+    `抖店导出文件校验：期望日期 ${validation.expectedDates.join(", ")}，检查店铺 ${validation.shopReports.length} 个`
+  );
+  if (!validation.ok) {
+    for (const problem of validation.problems) {
+      console.error(`抖店导出文件校验失败: ${problem}`);
+    }
+    throw new Error("抖店导出文件校验失败，已停止合并与飞书同步");
+  }
+
+  const mergeResult = await mergeAllShopExportsToData({ daysToExport });
+  const missingMergedDates = mergeResult.expectedDates.filter(
+    (d) => !mergeResult.actualDates.includes(d)
+  );
+  if (missingMergedDates.length > 0) {
+    throw new Error(
+      `抖店汇总数据校验失败：缺失日期 ${missingMergedDates.join(", ")}；实际日期=${mergeResult.actualDates.join(", ") || "(空)"}`
+    );
+  }
+
+  console.log("抖店数据拉取、文件校验、汇总校验均通过，开始同步飞书表格…");
+  execSync("node run.js feishu:sync-data-xlsx-shop", {
+    stdio: "inherit",
+    cwd: process.cwd()
+  });
 }
 
 async function main() {
@@ -141,6 +243,11 @@ async function main() {
       return;
     }
     await prependRowsFromFeishuShop({ dryRun });
+    return;
+  }
+
+  if (command === "sync-feishu") {
+    await runShopSyncFeishu(accounts);
     return;
   }
 

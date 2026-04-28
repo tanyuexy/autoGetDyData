@@ -70,13 +70,13 @@ async function listAccountDirs() {
 function parseCliCommand() {
   const args = process.argv.slice(2);
   const command = (args[0] || "export").toLowerCase();
-  if (!["add", "export", "list"].includes(command)) {
+  if (!["add", "export", "export:feishu", "list"].includes(command)) {
     throw new Error(
-      "只支持三种命令: add / export / list。示例: npm run add -- 账号A / npm run add / npm run export / npm run export -- 账号A [账号B] / npm run list"
+      "只支持四种命令: add / export / export:feishu / list。示例: npm run add -- 账号A / npm run add / npm run export / npm run export:feishu / npm run export -- 账号A [账号B] / npm run export:feishu -- 账号A [账号B] / npm run list"
     );
   }
   const tail = args.slice(1);
-  if (command === "export") {
+  if (command === "export" || command === "export:feishu") {
     const exportAccountFilters = tail
       .map((s) => normalizeAccountName(s))
       .filter(Boolean);

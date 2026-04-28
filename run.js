@@ -12,6 +12,10 @@ const root = path.resolve(__dirname);
 const ROUTES = {
   add: { script: "scripts/douyin-creator/index.js", argv: ["add"] },
   export: { script: "scripts/douyin-creator/index.js", argv: ["export"] },
+  "export:feishu": {
+    script: "scripts/douyin-creator/index.js",
+    argv: ["export:feishu"]
+  },
   list: { script: "scripts/douyin-creator/index.js", argv: ["list"] },
 
   "feishu:auth": { script: "scripts/feishu/index.js", argv: ["auth-url"] },
@@ -43,6 +47,7 @@ const ROUTES = {
   "shop:login": { script: "scripts/douyin-shop/index.js", argv: ["login"] },
   "shop:list": { script: "scripts/douyin-shop/index.js", argv: ["list"] },
   "shop:merge": { script: "scripts/douyin-shop/index.js", argv: ["merge"] },
+  "shop:sync-feishu": { script: "scripts/douyin-shop/index.js", argv: ["sync-feishu"] },
   "shop:prepend": { script: "scripts/douyin-shop/index.js", argv: ["prepend"] }
 };
 
