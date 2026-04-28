@@ -424,7 +424,5 @@ async function solveCaptchaIfPresent(page, options = {}) {
 module.exports = {
   findCaptchaScope,
   isCaptchaVisible,
-  waitForCaptchaAppear,
-  waitForCaptchaDisappear,
   solveCaptchaIfPresent
 };

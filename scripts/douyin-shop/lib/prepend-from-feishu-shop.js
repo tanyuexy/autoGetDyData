@@ -136,4 +136,4 @@ async function prependRowsFromFeishuShop(options = {}) {
   });
 }
 
-module.exports = { prependRowsFromFeishuShop, fetchShopBitablePlainRows };
+module.exports = { prependRowsFromFeishuShop };

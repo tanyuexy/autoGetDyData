@@ -120,4 +120,4 @@ function fmtDate(d) {
   return `${y}/${m}/${day}`;
 }
 
-module.exports = { calcDaysToExport, readBackupMaxDate, ensureBackupExists, fmtDate };
+module.exports = { calcDaysToExport };

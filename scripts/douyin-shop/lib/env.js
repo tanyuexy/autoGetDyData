@@ -84,7 +84,6 @@ function getDefaultAccounts() {
 }
 
 module.exports = {
-  numberFromEnv,
   SHOP_LOGIN_URL,
   SHOP_HOME_URL,
   ACCOUNTS_DIR,

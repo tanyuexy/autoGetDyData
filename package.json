@@ -18,8 +18,7 @@
     "shop:list": "node run.js shop:list",
     "shop:merge": "node run.js shop:merge",
     "shop:feishu": "node run.js shop:sync-feishu",
-    "shop:prepend": "node run.js shop:prepend",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "shop:prepend": "node run.js shop:prepend"
   },
   "keywords": [],
   "author": "",

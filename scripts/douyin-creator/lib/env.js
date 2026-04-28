@@ -2,14 +2,6 @@ const fs = require("fs");
 const path = require("path");
 const { getProjectConfigPath } = require("../../project-config-path");
 
-function numberFromEnv(name, defaultValue) {
-  const raw = process.env[name];
-  if (!raw) return defaultValue;
-  const val = Number(raw);
-  if (!Number.isFinite(val) || val <= 0) return defaultValue;
-  return val;
-}
-
 /** 优先读 *_SEC（秒），否则读 *_MS（毫秒，兼容旧配置），最后 defaultSeconds（秒）→ 毫秒 */
 function millisecondsFromEnvSecOrMs(secName, msName, defaultSeconds) {
   const msRaw = process.env[msName];
@@ -229,8 +221,6 @@ function getCreatorExportDateStartSpec(accountName) {
 }
 
 module.exports = {
-  numberFromEnv,
-  millisecondsFromEnvSecOrMs,
   TARGET_URL,
   ACCOUNTS_DIR,
   DEFAULT_ADD_ACCOUNTS_JSON,

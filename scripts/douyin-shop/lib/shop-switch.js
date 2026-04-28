@@ -661,13 +661,6 @@ async function switchToNextPreferredShop(page, options = {}) {
 }
 
 module.exports = {
-  COMPASS_HOME_URL,
   readCurrentShopName,
-  ensureOnCompassHome,
-  openUserDropdown,
-  clickSwitchEntryAndWaitModal,
-  openSwitchShopModal,
-  readModalShopItems,
-  closeSwitchModalIfOpen,
   switchToNextPreferredShop
 };
