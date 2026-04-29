@@ -345,6 +345,10 @@ async function main() {
       if (d.graphicError) console.log(`      图文错误: ${d.graphicError}`);
       if (d.videoPath) console.log(`      视频文件: ${d.videoPath}`);
       if (d.graphicPath) console.log(`      图文文件: ${d.graphicPath}`);
+      const vdm = Array.isArray(d.videoDateMismatches) ? d.videoDateMismatches : [];
+      const gdm = Array.isArray(d.graphicDateMismatches) ? d.graphicDateMismatches : [];
+      if (vdm.length) console.log(`      ⚠ 视频日期不符（日历选中≠预期）: ${vdm.join(', ')}`);
+      if (gdm.length) console.log(`      ⚠ 图文日期不符（日历选中≠预期）: ${gdm.join(', ')}`);
     }
   }
 

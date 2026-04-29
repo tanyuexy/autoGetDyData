@@ -322,6 +322,13 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
 
     // 如果是首轮且 daysToExport>1，可能已有当天数据需要清除
     const { dataDate } = await selectDateRangeYesterday(page, tag, offset);
+
+    const expectedDate = calcDataDate(offset);
+    const dateMatch = dataDate && dataDate === expectedDate;
+    if (dataDate && !dateMatch) {
+      console.warn(`[${tag}] ⚠ 日历选中日期 ${dataDate} ≠ 预期 ${expectedDate} (offset=${offset})`);
+    }
+
     await selectNonAdTab(page, tag);
 
     await page.waitForTimeout(1200);
@@ -333,9 +340,7 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
       exportLabel: "视频明细"
     });
 
-    // 用计算的实际数据日期覆盖（比日历解析的更可靠）
-    const actualDate = calcDataDate(offset);
-    const dateToWrite = dataDate || actualDate;
+    const dateToWrite = expectedDate;
     try {
       appendDataDateColumn(savePath, dateToWrite);
       logStep(tag, `数据日期写入: ${dateToWrite}`);
@@ -343,7 +348,7 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
       logWarn(tag, `写入「数据日期」列失败: ${e.message || e}`);
     }
 
-    results.push({ savePath, dataDate: dateToWrite });
+    results.push({ savePath, dataDate: dateToWrite, dateMatch });
 
     // 非最后一轮，让页面稳定后再进入下一轮
     if (offset < daysToExport - 1) {

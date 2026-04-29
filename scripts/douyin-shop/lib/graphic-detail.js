@@ -217,6 +217,12 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExpor
 
     const { dataDate } = await selectGraphicNaturalDayYesterday(page, tag, offset);
 
+    const expectedDate = calcDataDate(offset);
+    const dateMatch = dataDate && dataDate === expectedDate;
+    if (dataDate && !dateMatch) {
+      console.warn(`[${tag}] ⚠ 日历选中日期 ${dataDate} ≠ 预期 ${expectedDate} (offset=${offset})`);
+    }
+
     await page.waitForTimeout(1200);
 
     const targetDir = shopName
@@ -224,8 +230,7 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExpor
       : saveDir;
     const savePath = await clickGraphicDownloadAndSave(page, tag, targetDir);
 
-    const actualDate = calcDataDate(offset);
-    const dateToWrite = dataDate || actualDate;
+    const dateToWrite = expectedDate;
     try {
       appendDataDateColumn(savePath, dateToWrite);
       logStep(tag, `图文数据日期写入: ${dateToWrite}`);
@@ -233,7 +238,7 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExpor
       logWarn(tag, `写入「数据日期」列失败: ${e.message || e}`);
     }
 
-    results.push({ savePath, dataDate: dateToWrite });
+    results.push({ savePath, dataDate: dateToWrite, dateMatch });
 
     if (offset < daysToExport - 1) {
       await page.waitForTimeout(800);

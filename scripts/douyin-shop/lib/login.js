@@ -379,6 +379,8 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
   let graphicPaths = [];
   let videoError;
   let graphicError;
+  let videoDateMismatches = [];
+  let graphicDateMismatches = [];
 
   try {
     const result = await downloadVideoSelfDetail(page, {
@@ -388,7 +390,14 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       daysToExport
     });
     if (result.allResults) {
-      videoPaths = result.allResults.map(r => r.savePath).filter(Boolean);
+      // 仅保留日历日期与预期匹配的文件
+      videoPaths = result.allResults
+        .filter(r => r.dateMatch !== false)
+        .map(r => r.savePath)
+        .filter(Boolean);
+      videoDateMismatches = result.allResults
+        .filter(r => r.dateMatch === false)
+        .map(r => r.dataDate);
     } else if (result.savePath) {
       videoPaths = [result.savePath];
     }
@@ -411,7 +420,13 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       daysToExport
     });
     if (result.allResults) {
-      graphicPaths = result.allResults.map(r => r.savePath).filter(Boolean);
+      graphicPaths = result.allResults
+        .filter(r => r.dateMatch !== false)
+        .map(r => r.savePath)
+        .filter(Boolean);
+      graphicDateMismatches = result.allResults
+        .filter(r => r.dateMatch === false)
+        .map(r => r.dataDate);
     } else if (result.savePath) {
       graphicPaths = [result.savePath];
     }
@@ -432,9 +447,15 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
   // ─── 店铺汇总 ───
   const videoDaysOk = videoError ? 0 : videoPaths.length;
   const graphicDaysOk = graphicError ? 0 : graphicPaths.length;
+  const dateMismatchWarn = [];
+  if (videoDateMismatches.length) dateMismatchWarn.push(`视频日期不符: ${videoDateMismatches.join(', ')}`);
+  if (graphicDateMismatches.length) dateMismatchWarn.push(`图文日期不符: ${graphicDateMismatches.join(', ')}`);
+  const dateOk = videoDateMismatches.length === 0 && graphicDateMismatches.length === 0;
+
   console.log(
     `[${shopTag}] ─── 导出汇总: 视频 ${videoDaysOk}/${daysToExport}天 ${videoDaysOk === daysToExport ? '✓' : '✗'} | ` +
     `图文 ${graphicDaysOk}/${daysToExport}天 ${graphicDaysOk === daysToExport ? '✓' : '✗'}` +
+    (!dateOk ? ` | ⚠ ${dateMismatchWarn.join('; ')}` : '') +
     (videoError ? ` | 视频错误: ${videoError}` : '') +
     (graphicError ? ` | 图文错误: ${graphicError}` : '')
   );
@@ -449,6 +470,8 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     graphicPath: graphicPaths[0] || null,
     videoError,
     graphicError,
+    videoDateMismatches,
+    graphicDateMismatches,
     downloadPath: videoPaths[0] || graphicPaths[0] || null,
     error: parts.length ? parts.join("；") : undefined
   };
