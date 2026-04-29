@@ -1,6 +1,6 @@
 "use client";
 
-import { Table, Input } from "antd";
+import { Table, Input, Divider } from "antd";
 
 interface Props {
   accounts: string[];
@@ -9,7 +9,7 @@ interface Props {
   onChange: (dateMap: Record<string, string>, globalDate: string | null) => void;
 }
 
-export default function ConfigDateTab({
+export default function ConfigCreatorDatesSection({
   accounts,
   dateMap,
   globalDate,
@@ -42,6 +42,10 @@ export default function ConfigDateTab({
 
   return (
     <div>
+      <Divider titlePlacement="left" plain style={{ marginTop: 0 }}>
+        导出日期
+      </Divider>
+
       <div style={{ marginBottom: 12 }}>
         <label style={{ marginRight: 8 }}>全局默认开始日期：</label>
         <Input
@@ -52,6 +56,7 @@ export default function ConfigDateTab({
           allowClear
         />
       </div>
+
       <Table
         columns={columns}
         dataSource={accounts.map((name) => ({

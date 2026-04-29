@@ -28,14 +28,8 @@ export function getConfig(): ConfigData {
     douyinCreator: data?.douyinCreator || { loginVerifyMethod: "qr" },
     headless: data?.headless ?? false,
     feishu: {
-      shop: data?.feishu?.shop || { appToken: "", tableId: "" },
+      shop: data?.feishu?.shop || { appToken: "", tableId: "", keepRows: 0 },
       creator: data?.feishu?.creator || { appToken: "", tableId: "" },
-      worksStripCopy: data?.feishu?.worksStripCopy || {
-        appToken: "",
-        sourceTableId: "",
-        targetTableId: "",
-        titleFieldName: "作品名",
-      },
     },
   };
 }

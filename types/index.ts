@@ -26,14 +26,8 @@ export interface ConfigData {
   douyinCreator: { loginVerifyMethod: string };
   headless: boolean;
   feishu: {
-    shop: { baseUrl?: string; appToken: string; tableId: string };
+    shop: { baseUrl?: string; appToken: string; tableId: string; keepRows?: number };
     creator: { baseUrl?: string; appToken: string; tableId: string };
-    worksStripCopy: {
-      appToken: string;
-      sourceTableId: string;
-      targetTableId: string;
-      titleFieldName: string;
-    };
   };
 }
 

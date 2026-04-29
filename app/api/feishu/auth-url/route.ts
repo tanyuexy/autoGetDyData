@@ -1,15 +1,25 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 export async function POST() {
   try {
-    require("dotenv").config();
-    const {
-      buildAuthorizeUrl,
-    } = require("@/scripts/feishu/lib/oauth");
+    const { loadFeishuConfig } = require("@/scripts/feishu/lib/config");
+    const { buildAuthorizeUrl } = require("@/scripts/feishu/lib/oauth");
 
-    const url = buildAuthorizeUrl();
+    const config = loadFeishuConfig();
+    if (!config.redirectUri) {
+      return NextResponse.json(
+        {
+          error:
+            "缺少 FEISHU_OAUTH_REDIRECT_URI。请在 .env 中配置，例如：http://localhost:3000/api/feishu/callback"
+        },
+        { status: 500 }
+      );
+    }
+
+    const url = buildAuthorizeUrl(config);
     return NextResponse.json({ url });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
+

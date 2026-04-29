@@ -1,50 +1,10 @@
 const fs = require("fs/promises");
 const path = require("path");
 const { ensureDir, fileExists } = require("./fs-utils");
-const { ACCOUNTS_DIR, DEFAULT_ADD_ACCOUNTS_JSON } = require("./env");
+const { ACCOUNTS_DIR } = require("./env");
 
 function normalizeAccountName(name) {
   return String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_");
-}
-
-async function loadDefaultAddAccountNames() {
-  let raw;
-  try {
-    raw = await fs.readFile(DEFAULT_ADD_ACCOUNTS_JSON, "utf-8");
-  } catch (err) {
-    if (err && err.code === "ENOENT") {
-      throw new Error(
-        `未找到 ${DEFAULT_ADD_ACCOUNTS_JSON}。请创建该文件，或使用: npm run add -- 账号名`
-      );
-    }
-    throw err;
-  }
-  let data;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    throw new Error(`${DEFAULT_ADD_ACCOUNTS_JSON} 不是合法 JSON`);
-  }
-  let list = [];
-  if (Array.isArray(data)) {
-    list = data;
-  } else if (data && Array.isArray(data.accounts)) {
-    list = data.accounts;
-  } else {
-    throw new Error(
-      `${DEFAULT_ADD_ACCOUNTS_JSON} 格式应为 ["名称"] 或 {"accounts":["名称"]}`
-    );
-  }
-  const names = [];
-  const seen = new Set();
-  for (const item of list) {
-    if (typeof item !== "string") continue;
-    const n = normalizeAccountName(item);
-    if (!n || seen.has(n)) continue;
-    seen.add(n);
-    names.push(n);
-  }
-  return names;
 }
 
 function getAccountPaths(accountName) {
@@ -70,9 +30,9 @@ async function listAccountDirs() {
 function parseCliCommand() {
   const args = process.argv.slice(2);
   const command = (args[0] || "export").toLowerCase();
-  if (!["add", "export", "export:feishu", "list"].includes(command)) {
+  if (!["export", "export:feishu"].includes(command)) {
     throw new Error(
-      "只支持四种命令: add / export / export:feishu / list。示例: npm run add -- 账号A / npm run add / npm run export / npm run export:feishu / npm run export -- 账号A [账号B] / npm run export:feishu -- 账号A [账号B] / npm run list"
+      "只支持: export / export:feishu。示例: npm run export / npm run export -- 账号A [账号B] / npm run export:feishu / npm run export:feishu -- 账号A [账号B]"
     );
   }
   const tail = args.slice(1);
@@ -92,21 +52,6 @@ async function resolveAccountsToRun(
   exportAccountFilters
 ) {
   const existingAccounts = await listAccountDirs();
-  if (command === "list") {
-    return existingAccounts;
-  }
-  if (command === "add") {
-    if (accountNameFromArg) {
-      return [accountNameFromArg];
-    }
-    const names = await loadDefaultAddAccountNames();
-    if (names.length === 0) {
-      throw new Error(
-        `${DEFAULT_ADD_ACCOUNTS_JSON} 中没有有效账号名（需为非空字符串）`
-      );
-    }
-    return names;
-  }
 
   if (existingAccounts.length === 0) {
     throw new Error(
@@ -157,7 +102,6 @@ async function splitAccountsByStorageState(accounts) {
 
 module.exports = {
   normalizeAccountName,
-  loadDefaultAddAccountNames,
   getAccountPaths,
   listAccountDirs,
   parseCliCommand,

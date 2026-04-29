@@ -12,8 +12,8 @@ export async function POST(request: NextRequest) {
 
     const taskId = `feishu-backup-${Date.now()}`;
     spawnTask(taskId, "node", [
-      "scripts/feishu/index.js",
-      "backup-bitable",
+      "scripts/run.js",
+      "feishu:backup",
       "--profiles",
       profiles,
     ]);

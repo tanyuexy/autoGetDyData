@@ -98,43 +98,6 @@ async function main() {
     exportAccountFilters
   );
 
-  if (command === "list") {
-    console.log(`当前账号数量: ${accounts.length}`);
-    if (accounts.length === 0) {
-      console.log(
-        "未找到账号目录。可先执行: npm run add -- 账号A 或 npm run add（按 config.json 批量建目录）"
-      );
-      return;
-    }
-
-    console.log("\n账号状态:");
-    for (const name of accounts) {
-      const paths = getAccountPaths(name);
-      const hasStorage = await fileExists(paths.storageStatePath);
-      const hasCookies = await fileExists(paths.cookiesPath);
-      console.log(
-        `- ${name} | storageState: ${
-          hasStorage ? "yes" : "no"
-        } | cookies: ${hasCookies ? "yes" : "no"}`
-      );
-    }
-    return;
-  }
-
-  if (command === "add") {
-    console.log(`当前命令: ${command}`);
-    console.log(
-      `本次将创建 ${accounts.length} 个账号目录: ${accounts.join(", ")}`
-    );
-    for (const name of accounts) {
-      const paths = getAccountPaths(name);
-      await ensureDir(paths.accountDir);
-      console.log(`- 已创建: ${paths.accountDir}`);
-    }
-    console.log("\n登录与导出请使用: npm run export");
-    return;
-  }
-
   const shouldSyncFeishuAfterExport = command === "export:feishu";
 
   console.log(`当前命令: ${command}`);

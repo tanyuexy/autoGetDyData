@@ -1,36 +1,130 @@
 "use client";
 
-import { useState } from "react";
-import { Space, Divider, Select, InputNumber, App } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { App, Button, Divider, Space, Typography, Table, Tag } from "antd";
 import FeishuAuthPanel from "@/components/FeishuAuthPanel";
 import TaskPanel from "@/components/TaskPanel";
 import { useTaskContext } from "@/contexts/TaskContext";
 
+const { Text } = Typography;
+
+type BackupFileKey = "creator" | "shop";
+
+type BackupFileInfo = {
+  key: BackupFileKey;
+  filename: string;
+  exists: boolean;
+  size: number;
+  mtime: string | null;
+};
+
 export default function FeishuPage() {
   const { message } = App.useApp();
-  const [profile, setProfile] = useState<string>("creator");
-  const [keepRows, setKeepRows] = useState<number>(4);
-  const [backupProfiles, setBackupProfiles] = useState<string>("creator,shop");
 
-  const { taskId, isRunning, startTask, resetTask, logs, progress, done, exitCode, summary, clearLogs } = useTaskContext();
+  const {
+    taskId,
+    isRunning,
+    startTask,
+    logs,
+    progress,
+    done,
+    exitCode,
+    summary,
+    clearLogs,
+  } = useTaskContext();
 
-  async function handleBackup() {
+  const [files, setFiles] = useState<BackupFileInfo[]>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+
+  async function refreshFiles() {
+    setFilesLoading(true);
     try {
-      await startTask("/api/feishu/backup", { profiles: backupProfiles });
+      const res = await fetch("/api/feishu/backup-files", { cache: "no-store" });
+      if (!res.ok) throw new Error("获取备份文件列表失败");
+      const data = await res.json();
+      setFiles(Array.isArray(data?.files) ? data.files : []);
+    } catch (e: any) {
+      message.error(e.message || "获取失败");
+    } finally {
+      setFilesLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshFiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (done) refreshFiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done]);
+
+  async function handleBackupBoth() {
+    try {
+      await startTask("/api/feishu/backup", { profiles: "creator,shop" });
       message.info("备份任务已启动");
     } catch (e: any) {
       message.error(e.message || "启动失败");
     }
   }
 
-  async function handleSync() {
-    try {
-      await startTask("/api/feishu/sync", { profile, keepRows });
-      message.info("同步任务已启动");
-    } catch (e: any) {
-      message.error(e.message || "启动失败");
-    }
-  }
+  const columns = useMemo(
+    () => [
+      {
+        title: "表",
+        dataIndex: "key",
+        key: "key",
+        width: 90,
+        render: (v: BackupFileKey) => (v === "creator" ? "抖创" : "抖店"),
+      },
+      {
+        title: "文件",
+        dataIndex: "filename",
+        key: "filename",
+        render: (v: string) => <Text code>{v}</Text>,
+      },
+      {
+        title: "状态",
+        dataIndex: "exists",
+        key: "exists",
+        width: 90,
+        render: (exists: boolean) =>
+          exists ? <Tag color="success">已生成</Tag> : <Tag>不存在</Tag>,
+      },
+      {
+        title: "更新时间",
+        dataIndex: "mtime",
+        key: "mtime",
+        width: 190,
+        render: (v: string | null) => (v ? new Date(v).toLocaleString("zh-CN") : "-"),
+      },
+      {
+        title: "大小",
+        dataIndex: "size",
+        key: "size",
+        width: 110,
+        render: (v: number) => (v ? `${Math.round(v / 1024)} KB` : "-"),
+      },
+      {
+        title: "操作",
+        key: "actions",
+        width: 120,
+        render: (_: any, row: BackupFileInfo) => (
+          <Button
+            size="small"
+            disabled={!row.exists}
+            onClick={() => {
+              window.open(`/api/feishu/backup-download/${row.key}`, "_blank");
+            }}
+          >
+            下载
+          </Button>
+        ),
+      },
+    ],
+    []
+  );
 
   return (
     <Space orientation="vertical" size="small" style={{ width: "100%" }}>
@@ -43,57 +137,31 @@ export default function FeishuPage() {
 
       <div>
         <h3 style={{ marginTop: 0, fontSize: 15 }}>数据操作</h3>
-        <Space orientation="vertical" size="small" style={{ marginBottom: 8 }}>
-          <Space>
-            <span>备份配置：</span>
-            <Select
-              value={backupProfiles}
-              onChange={setBackupProfiles}
-              style={{ width: 200 }}
-              options={[
-                { value: "creator", label: "抖创" },
-                { value: "shop", label: "抖店" },
-                { value: "creator,shop", label: "全部" },
-              ]}
-            />
-          </Space>
-          <Space>
-            <span>同步目标：</span>
-            <Select
-              value={profile}
-              onChange={setProfile}
-              style={{ width: 120 }}
-              options={[
-                { value: "creator", label: "抖创" },
-                { value: "shop", label: "抖店" },
-              ]}
-            />
-            <span>保留行数：</span>
-            <InputNumber
-              min={0}
-              value={keepRows}
-              onChange={(v) => setKeepRows(v ?? 0)}
-              style={{ width: 80 }}
-            />
-          </Space>
+
+        <Space style={{ marginBottom: 8 }} wrap>
+          <Button type="primary" onClick={handleBackupBoth} loading={isRunning}>
+            备份多维表格文件（抖创 + 抖店）
+          </Button>
+          <Button onClick={refreshFiles} loading={filesLoading}>
+            刷新备份列表
+          </Button>
         </Space>
+
+        <Table
+          size="small"
+          rowKey={(r) => r.key}
+          loading={filesLoading}
+          columns={columns as any}
+          dataSource={files}
+          pagination={false}
+        />
+
+        <Divider />
 
         <TaskPanel
           taskId={taskId}
           isRunning={isRunning}
-          taskButtons={[
-            {
-              key: "backup",
-              label: "备份飞书表到 xlsx",
-              onClick: handleBackup,
-            },
-            {
-              key: "sync",
-              label: `同步数据到飞书 (${profile})`,
-              onClick: handleSync,
-              danger: profile === "shop",
-            },
-          ]}
+          taskButtons={[]}
           logs={logs}
           progress={progress}
           done={done}

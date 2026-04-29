@@ -34,18 +34,13 @@
     "shop": {
       "baseUrl": "https://a5bgloffd0.feishu.cn/base/SjmubvbmCazk27sqcTucsSAmnPb?table=tblfiIE9m2DDU2Mv&view=vewN1U0Knv",
       "appToken": "SjmubvbmCazk27sqcTucsSAmnPb",
-      "tableId": "tblfiIE9m2DDU2Mv"
+      "tableId": "tblfiIE9m2DDU2Mv",
+      "keepRows": 0
     },
     "creator": {
       "baseUrl": "https://a5bgloffd0.feishu.cn/base/SjmubvbmCazk27sqcTucsSAmnPb?table=tblYnPxQjhaI4sWc&view=vewJjxCUVz",
       "appToken": "SjmubvbmCazk27sqcTucsSAmnPb",
       "tableId": "tblYnPxQjhaI4sWc"
-    },
-    "worksStripCopy": {
-      "appToken": "SjmubvbmCazk27sqcTucsSAmnPb",
-      "sourceTableId": "tblhYJVzMgee5ESt",
-      "targetTableId": "tblJp18kcVC3eJPU",
-      "titleFieldName": "作品名"
     }
   },
   "creatorExportDateStart": null,

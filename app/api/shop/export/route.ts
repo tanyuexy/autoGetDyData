@@ -15,7 +15,7 @@ export async function POST(_request: NextRequest) {
     require("dotenv").config();
 
     const taskId = `shop-export-${Date.now()}`;
-    spawnTask(taskId, "node", ["scripts/douyin-shop/index.js", "export"]);
+    spawnTask(taskId, "node", ["scripts/run.js", "shop:export"]);
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

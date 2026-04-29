@@ -3,7 +3,7 @@ import { spawnTask, isTaskRunning } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
   try {
     if (isTaskRunning()) {
       return NextResponse.json(
@@ -12,18 +12,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json().catch(() => ({}));
-    const { accounts = [], syncFeishu = false } = body;
-
-    const taskId = `creator-export-${Date.now()}`;
-
-    // Read dotenv first so the child process has env vars
     require("dotenv").config();
 
-    const command = syncFeishu ? "export:feishu" : "export";
-    const args = ["scripts/douyin-creator/index.js", command, ...accounts.filter(Boolean)];
-
-    spawnTask(taskId, "node", args);
+    const taskId = `creator-export-${Date.now()}`;
+    spawnTask(taskId, "node", ["scripts/run.js", "creator:export"]);
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

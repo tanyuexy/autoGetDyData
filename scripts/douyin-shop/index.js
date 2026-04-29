@@ -28,7 +28,7 @@ function parseArgs(argv) {
       : "login";
   const positional = args[0] && !args[0].includes("@") ? args.slice(1) : args;
 
-  if (command === "list" || command === "merge" || command === "feishu-sync" || command === "sync-feishu") {
+  if (command === "merge" || command === "feishu-sync" || command === "sync-feishu") {
     return { command, accounts: [] };
   }
 
@@ -175,7 +175,7 @@ async function runShopSyncFeishu(accounts) {
   }
 
   console.log("抖店数据拉取、文件校验、汇总校验均通过，开始同步飞书表格…");
-  execSync("node run.js feishu:sync-data-xlsx-shop", {
+  execSync("node scripts/run.js feishu:sync-data-xlsx-shop", {
     stdio: "inherit",
     cwd: process.cwd()
   });
@@ -183,27 +183,6 @@ async function runShopSyncFeishu(accounts) {
 
 async function main() {
   const { command, accounts } = parseArgs(process.argv);
-
-  if (command === "list") {
-    const safeList = await fs.readdir(ACCOUNTS_DIR).catch(() => []);
-    if (safeList.length === 0) {
-      console.log(`账号目录 ${ACCOUNTS_DIR} 为空`);
-      return;
-    }
-    console.log(`已保存账号 (${ACCOUNTS_DIR}):`);
-    for (const name of safeList) {
-      const stat = await fs
-        .stat(path.join(ACCOUNTS_DIR, name))
-        .catch(() => null);
-      if (!stat?.isDirectory()) continue;
-      const hasStorage = await fs
-        .access(path.join(ACCOUNTS_DIR, name, "storageState.json"))
-        .then(() => true)
-        .catch(() => false);
-      console.log(`- ${name} | storageState: ${hasStorage ? "yes" : "no"}`);
-    }
-    return;
-  }
 
   if (command === "merge") {
     let daysToExport = 1;
@@ -218,7 +197,7 @@ async function main() {
 
   if (command === "feishu-sync") {
     console.log("同步抖店汇总数据到飞书多维表格…");
-    execSync("node run.js feishu:sync-data-xlsx-shop", {
+    execSync("node scripts/run.js feishu:sync-data-xlsx-shop", {
       stdio: "inherit",
       cwd: process.cwd()
     });

@@ -1,22 +1,33 @@
 #!/usr/bin/env node
 /**
- * 项目脚本统一入口。请在仓库根目录执行：node run.js <命令> [参数...]
- * npm scripts 已改为调用本文件，工作目录应为项目根（process.cwd()）。
+ * 项目脚本统一入口。请在仓库根目录执行：node scripts/run.js <命令> [参数...]
+ * npm scripts 与 Next API 都应调用本文件，避免散落依赖具体脚本路径。
  */
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const root = path.resolve(__dirname);
+const projectRoot = path.resolve(__dirname, "..");
 
 /** @type {Record<string, { script: string, argv?: string[], env?: Record<string, string> }>} */
 const ROUTES = {
-  add: { script: "scripts/douyin-creator/index.js", argv: ["add"] },
+  "creator:export": {
+    script: "scripts/douyin-creator/index.js",
+    argv: ["export"]
+  },
+  "creator:export-feishu": {
+    script: "scripts/douyin-creator/index.js",
+    argv: ["export:feishu"]
+  },
+  "creator:list": {
+    script: "scripts/douyin-creator/index.js",
+    argv: ["list"]
+  },
+
   export: { script: "scripts/douyin-creator/index.js", argv: ["export"] },
   "export:feishu": {
     script: "scripts/douyin-creator/index.js",
     argv: ["export:feishu"]
   },
-  list: { script: "scripts/douyin-creator/index.js", argv: ["list"] },
 
   "feishu:auth": { script: "scripts/feishu/index.js", argv: ["auth-url"] },
   "feishu:callback": { script: "scripts/feishu/callback-server.js", argv: [] },
@@ -38,23 +49,43 @@ const ROUTES = {
     argv: ["sync-data-xlsx-shop"],
     env: { FEISHU_BITABLE_PROFILE: "shop" }
   },
-  "feishu:backup-bitable": { script: "scripts/feishu/index.js", argv: ["backup-bitable"] },
-  "feishu:copy-works-strip": {
-    script: "scripts/feishu/copy-works-table-strip-spaces.js",
-    argv: []
+  "feishu:sync-creator": {
+    script: "scripts/feishu/index.js",
+    argv: ["sync-data-xlsx"],
+    env: { FEISHU_BITABLE_PROFILE: "creator" }
+  },
+  "feishu:sync-shop": {
+    script: "scripts/feishu/index.js",
+    argv: ["sync-data-xlsx-shop"],
+    env: { FEISHU_BITABLE_PROFILE: "shop" }
+  },
+  "feishu:backup-bitable": {
+    script: "scripts/feishu/index.js",
+    argv: ["backup-bitable"]
+  },
+  "feishu:backup": {
+    script: "scripts/feishu/index.js",
+    argv: ["backup-bitable"]
   },
 
   "shop:login": { script: "scripts/douyin-shop/index.js", argv: ["login"] },
-  "shop:list": { script: "scripts/douyin-shop/index.js", argv: ["list"] },
+  "shop:export": { script: "scripts/douyin-shop/index.js", argv: ["export"] },
   "shop:merge": { script: "scripts/douyin-shop/index.js", argv: ["merge"] },
-  "shop:sync-feishu": { script: "scripts/douyin-shop/index.js", argv: ["sync-feishu"] }
+  "shop:feishu-sync": {
+    script: "scripts/douyin-shop/index.js",
+    argv: ["feishu-sync"]
+  },
+  "shop:sync-feishu": {
+    script: "scripts/douyin-shop/index.js",
+    argv: ["sync-feishu"]
+  }
 };
 
 function printHelp() {
   const names = Object.keys(ROUTES).sort().join(", ");
-  console.error(`用法: node run.js <命令> [参数...]
+  console.error(`用法: node scripts/run.js <命令> [参数...]
 可用命令: ${names}
-示例: node run.js add 账号名`);
+示例: node scripts/run.js creator:export`);
 }
 
 function main() {
@@ -71,13 +102,13 @@ function main() {
     process.exit(1);
   }
 
-  const scriptPath = path.join(root, route.script);
+  const scriptPath = path.join(projectRoot, route.script);
   const childArgv = [scriptPath, ...(route.argv || []), ...rest];
   const env =
     route.env != null ? { ...process.env, ...route.env } : { ...process.env };
 
   const result = spawnSync(process.execPath, childArgv, {
-    cwd: root,
+    cwd: projectRoot,
     stdio: "inherit",
     env
   });

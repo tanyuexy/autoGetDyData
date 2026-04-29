@@ -14,16 +14,16 @@ export async function POST(_request: NextRequest) {
 
     require("dotenv").config();
 
-    const taskId = `shop-sync-feishu-${Date.now()}`;
+    const taskId = `creator-feishu-sync-${Date.now()}`;
     spawnTask(taskId, "node", [
       "scripts/run.js",
       "feishu:backup",
       "--profiles",
-      "shop",
+      "creator",
       "&&",
       "node",
       "scripts/run.js",
-      "shop:sync-feishu",
+      "feishu:sync-creator",
     ]);
 
     return NextResponse.json({ taskId });

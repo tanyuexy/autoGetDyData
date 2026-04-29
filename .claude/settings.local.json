@@ -33,7 +33,8 @@
       "Bash(kill 65393)",
       "Bash(g *)",
       "Bash(curl -s http://localhost:3999/api/shop/list)",
-      "Bash(kill %1)"
+      "Bash(kill %1)",
+      "Bash(npx tsc *)"
     ]
   }
 }

@@ -41,19 +41,6 @@ export default function AccountTable(props: Props) {
             </Tag>
           ),
       },
-      {
-        title: "Cookies",
-        dataIndex: "hasCookies",
-        key: "hasCookies",
-        render: (v: boolean) =>
-          v ? <Tag color="blue">有</Tag> : <Tag color="default">无</Tag>,
-      },
-      {
-        title: "导出日期",
-        dataIndex: "exportDateStart",
-        key: "exportDateStart",
-        render: (v: string | null) => v || "-",
-      },
     ];
 
     const dataSource = (accounts as CreatorAccount[]).map((a, i) => ({

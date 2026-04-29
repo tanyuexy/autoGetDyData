@@ -16,8 +16,14 @@ export async function POST(_request: NextRequest) {
 
     const taskId = `shop-feishu-sync-${Date.now()}`;
     spawnTask(taskId, "node", [
-      "scripts/douyin-shop/index.js",
-      "feishu-sync",
+      "scripts/run.js",
+      "feishu:backup",
+      "--profiles",
+      "shop",
+      "&&",
+      "node",
+      "scripts/run.js",
+      "shop:feishu-sync",
     ]);
 
     return NextResponse.json({ taskId });

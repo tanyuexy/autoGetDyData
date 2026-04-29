@@ -6,7 +6,7 @@ import { SaveOutlined } from "@ant-design/icons";
 import ConfigAccountTab from "@/components/ConfigAccountTab";
 import ConfigEmailTab from "@/components/ConfigEmailTab";
 import ConfigFeishuTab from "@/components/ConfigFeishuTab";
-import ConfigDateTab from "@/components/ConfigDateTab";
+import ConfigCreatorDatesSection from "@/components/ConfigCreatorDatesSection";
 import type { ConfigData } from "@/types";
 
 export default function ConfigPage() {
@@ -78,7 +78,7 @@ export default function ConfigPage() {
   const tabItems = [
     {
       key: "general",
-      label: "通用设置",
+      label: "设置",
       children: (
         <Space orientation="vertical" size="small" style={{ width: "100%" }}>
           <Space>
@@ -105,26 +105,40 @@ export default function ConfigPage() {
       ),
     },
     {
-      key: "accounts",
-      label: "抖创账号",
+      key: "creator",
+      label: "抖创设置",
       children: (
-        <ConfigAccountTab
-          accounts={config.accounts || []}
-          loginVerifyMethod={config.douyinCreator?.loginVerifyMethod || "qr"}
-          onChange={(data) =>
-            mergeChange({
-              accounts: data.accounts,
-              douyinCreator: {
-                loginVerifyMethod: data.loginVerifyMethod,
-              },
-            })
-          }
-        />
+        <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+          <ConfigAccountTab
+            accounts={config.accounts || []}
+            loginVerifyMethod={config.douyinCreator?.loginVerifyMethod || "qr"}
+            onChange={(data) =>
+              mergeChange({
+                accounts: data.accounts,
+                douyinCreator: {
+                  loginVerifyMethod: data.loginVerifyMethod,
+                },
+              })
+            }
+          />
+
+          <ConfigCreatorDatesSection
+            accounts={config.accounts || []}
+            dateMap={config.creatorExportDateStartByAccount || {}}
+            globalDate={config.creatorExportDateStart || null}
+            onChange={(dateMap, globalDate) =>
+              mergeChange({
+                creatorExportDateStartByAccount: dateMap,
+                creatorExportDateStart: globalDate,
+              })
+            }
+          />
+        </Space>
       ),
     },
     {
-      key: "emails",
-      label: "抖店邮箱",
+      key: "shop",
+      label: "抖店设置",
       children: (
         <ConfigEmailTab
           emails={config.emails || []}
@@ -139,25 +153,7 @@ export default function ConfigPage() {
         <ConfigFeishuTab
           shop={config.feishu.shop}
           creator={config.feishu.creator}
-          worksStripCopy={config.feishu.worksStripCopy}
           onChange={(data) => mergeChange({ feishu: data })}
-        />
-      ),
-    },
-    {
-      key: "dates",
-      label: "导出日期",
-      children: (
-        <ConfigDateTab
-          accounts={config.accounts || []}
-          dateMap={config.creatorExportDateStartByAccount || {}}
-          globalDate={config.creatorExportDateStart || null}
-          onChange={(dateMap, globalDate) =>
-            mergeChange({
-              creatorExportDateStartByAccount: dateMap,
-              creatorExportDateStart: globalDate,
-            })
-          }
         />
       ),
     },

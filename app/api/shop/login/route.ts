@@ -15,7 +15,7 @@ export async function POST(_request: NextRequest) {
     require("dotenv").config();
 
     const taskId = `shop-login-${Date.now()}`;
-    spawnTask(taskId, "node", ["scripts/douyin-shop/index.js", "login"]);
+    spawnTask(taskId, "node", ["scripts/run.js", "shop:login"]);
 
     return NextResponse.json({ taskId });
   } catch (e: any) {
