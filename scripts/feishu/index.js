@@ -43,8 +43,24 @@ const SHOP_XLSX_FIELD_ALIASES = {
   数据日期: "日期"
 };
 
-const SHOP_DEFAULT_XLSX_RELATIVE =
-  "data/抖店-全部店铺-每日支付增量汇总.xlsx";
+const { existsSync } = require("fs");
+
+function getDefaultExportsDir() {
+  const envVal = process.env.EXPORTS_DIR;
+  if (envVal) return envVal;
+  const newPath = path.resolve(process.cwd(), "storage/exports");
+  const oldPath = path.resolve(process.cwd(), "data");
+  if (existsSync(oldPath) && !existsSync(newPath)) {
+    console.warn("[migration] 正在使用旧目录 \"data/\"，建议移动到 \"storage/exports/\" 或设置 EXPORTS_DIR");
+    return "data";
+  }
+  return "storage/exports";
+}
+
+const SHOP_DEFAULT_XLSX_RELATIVE = path.join(
+  getDefaultExportsDir(),
+  "抖店-全部店铺-每日支付增量汇总.xlsx"
+);
 
 /** sync-data-xlsx 未指定 --file 时，按 FEISHU_BITABLE_PROFILE 只在该前缀的 xlsx 中选修改时间最新的 */
 const DEFAULT_XLSX_NAME_PREFIX_BY_PROFILE = {
@@ -350,7 +366,7 @@ function isFeishuBitableBackupXlsxFileName(fileName) {
 async function findLatestXlsxFile(relativeDir, namePrefix = "") {
   const dirPath = path.resolve(
     process.cwd(),
-    String(relativeDir || "./data").trim()
+    String(relativeDir || getDefaultExportsDir()).trim()
   );
   const prefix = String(namePrefix || "").trim();
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
@@ -1031,7 +1047,7 @@ async function run() {
 
   if (command === "sync-data-xlsx") {
     const fileOption = readOption(args, "file");
-    const dirOption = readOption(args, "dir") || "./data";
+    const dirOption = readOption(args, "dir") || getDefaultExportsDir();
     const sheet = String(readOption(args, "sheet") || "").trim();
     const dryRun = Boolean(readOption(args, "dry-run", "dryRun"));
     const limit = toPositiveInteger(readOption(args, "limit"), 0);
@@ -1373,7 +1389,7 @@ async function run() {
   }
 
   if (command === "backup-bitable") {
-    const dirOption = readOption(args, "dir") || "./data";
+    const dirOption = readOption(args, "dir") || getDefaultExportsDir();
     const outDir = path.resolve(process.cwd(), String(dirOption).trim());
     const dryRun = Boolean(readOption(args, "dry-run", "dryRun"));
     const profiles = parseBackupProfilesArg(args);

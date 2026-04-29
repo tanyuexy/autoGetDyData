@@ -1,9 +1,20 @@
 const fs = require("fs/promises");
+const { existsSync } = require("fs");
 const path = require("path");
 const XLSX = require("xlsx");
 const { ensureDir } = require("./fs-utils");
 
-const OUTPUT_DIR = path.resolve(process.cwd(), "data");
+const OUTPUT_DIR = (() => {
+  const envVal = process.env.EXPORTS_DIR;
+  if (envVal) return path.resolve(process.cwd(), envVal);
+  const newPath = path.resolve(process.cwd(), "storage/exports");
+  const oldPath = path.resolve(process.cwd(), "data");
+  if (existsSync(oldPath) && !existsSync(newPath)) {
+    console.warn("[migration] 正在使用旧目录 \"data/\"，建议移动到 \"storage/exports/\" 或设置 EXPORTS_DIR");
+    return oldPath;
+  }
+  return newPath;
+})();
 /** 汇总表固定文件名，每次覆盖，避免 data 下堆积多份 */
 const OUTPUT_FILE_NAME = "抖创-全部店铺-作品列表.xlsx";
 const OUTPUT_SHEET_NAME = "全部作品";

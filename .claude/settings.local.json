@@ -10,7 +10,30 @@
       "Bash(yt-dlp *)",
       "Bash(brew list *)",
       "Bash(pip3 install *)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(npm --version)",
+      "Bash(npm install *)",
+      "Bash(npx next *)",
+      "Bash(timeout 30 npm run dev)",
+      "Bash(npm run *)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(curl -s http://localhost:3000/creator)",
+      "Bash(curl -s http://localhost:3001/api/creator/list)",
+      "Bash(python3 -m json.tool)",
+      "Bash(kill 51164)",
+      "Bash(curl -s http://localhost:3000/api/creator/list)",
+      "Bash(curl -s http://localhost:3000/api/shop/list)",
+      "Bash(curl -s http://localhost:3000/api/feishu/token-status)",
+      "Bash(curl -s http://localhost:3000/api/config)",
+      "Bash(curl -s http://localhost:3000/shop)",
+      "Bash(curl -s http://localhost:3000/feishu)",
+      "Bash(curl -s http://localhost:3000/config)",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(claude plugin *)",
+      "Bash(kill 65393)",
+      "Bash(g *)",
+      "Bash(curl -s http://localhost:3999/api/shop/list)",
+      "Bash(kill %1)"
     ]
   }
 }

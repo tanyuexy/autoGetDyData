@@ -1,13 +1,18 @@
 const path = require("path");
 const fs = require("fs/promises");
+const { existsSync } = require("fs");
 const { execSync } = require("child_process");
 const XLSX = require("xlsx");
 
-const BACKUP_FILE = path.resolve(
-  process.cwd(),
-  "data",
-  "抖店-飞书表备份.xlsx"
-);
+function resolveExportsDir() {
+  const envVal = process.env.EXPORTS_DIR;
+  if (envVal) return path.resolve(process.cwd(), envVal);
+  const newPath = path.resolve(process.cwd(), "storage/exports");
+  const oldPath = path.resolve(process.cwd(), "data");
+  if (existsSync(oldPath) && !existsSync(newPath)) return oldPath;
+  return newPath;
+}
+const BACKUP_FILE = path.join(resolveExportsDir(), "抖店-飞书表备份.xlsx");
 
 /**
  * 读取飞书备份表，找到「日期」列的最大值。

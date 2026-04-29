@@ -47,8 +47,7 @@ const ROUTES = {
   "shop:login": { script: "scripts/douyin-shop/index.js", argv: ["login"] },
   "shop:list": { script: "scripts/douyin-shop/index.js", argv: ["list"] },
   "shop:merge": { script: "scripts/douyin-shop/index.js", argv: ["merge"] },
-  "shop:sync-feishu": { script: "scripts/douyin-shop/index.js", argv: ["sync-feishu"] },
-  "shop:prepend": { script: "scripts/douyin-shop/index.js", argv: ["prepend"] }
+  "shop:sync-feishu": { script: "scripts/douyin-shop/index.js", argv: ["sync-feishu"] }
 };
 
 function printHelp() {

@@ -8,6 +8,7 @@ const { chromium } = require("playwright");
 const {
   BROWSER_VIEWPORT,
   ACCOUNTS_DIR,
+  HEADLESS,
   getDefaultAccounts
 } = require("./lib/env");
 const { runShopLogin, getAccountPaths } = require("./lib/login");
@@ -16,8 +17,6 @@ const {
   mergeAllShopExportsToData,
   validateShopExportFiles
 } = require("./lib/merge-shop-exports");
-const { prependRowsToShopSummary } = require("./lib/prepend-rows-to-shop-summary");
-const { prependRowsFromFeishuShop } = require("./lib/prepend-from-feishu-shop");
 const { calcDaysToExport } = require("./lib/backup-dates");
 
 function parseArgs(argv) {
@@ -29,7 +28,7 @@ function parseArgs(argv) {
       : "login";
   const positional = args[0] && !args[0].includes("@") ? args.slice(1) : args;
 
-  if (command === "list" || command === "merge" || command === "prepend" || command === "sync-feishu") {
+  if (command === "list" || command === "merge" || command === "feishu-sync" || command === "sync-feishu") {
     return { command, accounts: [] };
   }
 
@@ -89,7 +88,7 @@ async function runShopSyncFeishu(accounts) {
   console.log("抖店同步飞书：开始登录拉取 → 校验 → 合并 → 同步飞书");
 
   const browser = await chromium.launch({
-    headless: false,
+    headless: HEADLESS,
     args: ["--start-maximized"]
   });
 
@@ -217,32 +216,12 @@ async function main() {
     return;
   }
 
-  if (command === "prepend") {
-    const tail = process.argv.slice(3);
-    let filePath = null;
-    let sheet = "";
-    let dryRun = false;
-    for (let i = 0; i < tail.length; i += 1) {
-      const a = tail[i];
-      if (a === "--file" && tail[i + 1]) {
-        filePath = tail[i + 1];
-        i += 1;
-      } else if (a === "--sheet" && tail[i + 1]) {
-        sheet = tail[i + 1];
-        i += 1;
-      } else if (a === "--dry-run" || a === "--dryRun") {
-        dryRun = true;
-      }
-    }
-    if (filePath && String(filePath).trim()) {
-      await prependRowsToShopSummary({
-        sourceFile: filePath,
-        sheet,
-        dryRun
-      });
-      return;
-    }
-    await prependRowsFromFeishuShop({ dryRun });
+  if (command === "feishu-sync") {
+    console.log("同步抖店汇总数据到飞书多维表格…");
+    execSync("node run.js feishu:sync-data-xlsx-shop", {
+      stdio: "inherit",
+      cwd: process.cwd()
+    });
     return;
   }
 
@@ -262,7 +241,7 @@ async function main() {
   );
 
   const browser = await chromium.launch({
-    headless: false,
+    headless: HEADLESS,
     args: ["--start-maximized"]
   });
 

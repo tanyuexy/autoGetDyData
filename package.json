@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "add": "node run.js add",
     "export": "node run.js export",
     "export:feishu": "node run.js export:feishu",
@@ -17,20 +20,31 @@
     "shop": "node run.js shop:login && npm run shop:merge",
     "shop:list": "node run.js shop:list",
     "shop:merge": "node run.js shop:merge",
-    "shop:feishu": "node run.js shop:sync-feishu",
-    "shop:prepend": "node run.js shop:prepend"
+    "shop:feishu": "node run.js shop:sync-feishu"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@ant-design/nextjs-registry": "^1.3.0",
+    "antd": "^6.3.7",
     "dotenv": "^17.4.2",
     "imapflow": "^1.3.1",
     "jimp": "^0.22.12",
     "mailparser": "^3.9.8",
+    "next": "^16.2.4",
     "nodemailer": "^8.0.5",
     "playwright": "^1.59.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "swr": "^2.4.1",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^6.0.3"
   }
 }

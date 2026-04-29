@@ -47,5 +47,7 @@
       "targetTableId": "tblJp18kcVC3eJPU",
       "titleFieldName": "作品名"
     }
-  }
+  },
+  "creatorExportDateStart": null,
+  "headless": true
 }

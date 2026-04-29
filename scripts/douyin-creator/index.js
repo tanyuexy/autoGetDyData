@@ -10,7 +10,7 @@ const {
   resolveAccountsToRun,
   splitAccountsByStorageState
 } = require("./lib/accounts");
-const { BROWSER_VIEWPORT, LOGIN_VERIFY_METHOD } = require("./lib/env");
+const { BROWSER_VIEWPORT, LOGIN_VERIFY_METHOD, HEADLESS } = require("./lib/env");
 const { attachQrDataUrlSniffer } = require("./lib/qr");
 const { openTargetAndEnsureLogin } = require("./lib/login");
 const { saveAuth, exportPostListData } = require("./lib/exporter");
@@ -141,7 +141,7 @@ async function main() {
   console.log(`本次将处理 ${accounts.length} 个账号: ${accounts.join(", ")}`);
 
   const browser = await chromium.launch({
-    headless: false,
+    headless: HEADLESS,
     args: ["--start-maximized"]
   });
 

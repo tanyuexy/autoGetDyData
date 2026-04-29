@@ -19,7 +19,17 @@ function millisecondsFromEnvSecOrMs(secName, msName, defaultSeconds) {
 
 const TARGET_URL =
   "https://creator.douyin.com/creator-micro/data-center/content";
-const ACCOUNTS_DIR = path.resolve(process.cwd(), "accounts");
+const ACCOUNTS_DIR = (() => {
+  const envVal = process.env.CREATOR_ACCOUNTS_DIR;
+  if (envVal) return path.resolve(process.cwd(), envVal);
+  const newPath = path.resolve(process.cwd(), "storage/creator-accounts");
+  const oldPath = path.resolve(process.cwd(), "accounts");
+  if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+    console.warn("[migration] 正在使用旧目录 \"accounts/\"，建议移动到 \"storage/creator-accounts/\" 或设置 CREATOR_ACCOUNTS_DIR");
+    return oldPath;
+  }
+  return newPath;
+})();
 
 /**
  * 项目统一配置（config.json）绝对路径。
@@ -220,6 +230,9 @@ function getCreatorExportDateStartSpec(accountName) {
   return cfg.global;
 }
 
+const HEADLESS =
+  process.env.HEADLESS === "true" || process.env.HEADLESS === "1";
+
 module.exports = {
   TARGET_URL,
   ACCOUNTS_DIR,
@@ -234,5 +247,6 @@ module.exports = {
   OTP_EMAIL_MAX_AGE_MS,
   OTP_RESEND_INTERVAL_MS,
   LOGIN_VERIFY_METHOD,
+  HEADLESS,
   getCreatorExportDateStartSpec
 };

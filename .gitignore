@@ -20,6 +20,10 @@ playwright-report/
 blob-report/
 playwright/.cache/
 
+# Next.js
+.next/
+next-env.d.ts
+
 # 构建与打包
 dist/
 build/
@@ -54,7 +58,5 @@ Desktop.ini
 *.temp
 .cache/
 
-# 账号数据
-accounts/
-
-data/
+# 账号数据与导出文件
+storage/

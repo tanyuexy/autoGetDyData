@@ -18,10 +18,17 @@ const SHOP_LOGIN_URL =
 const SHOP_HOME_URL =
   process.env.SHOP_HOME_URL || "https://fxg.jinritemai.com/ffa/mshop/homepage";
 
-const ACCOUNTS_DIR = path.resolve(
-  process.cwd(),
-  process.env.SHOP_ACCOUNTS_DIR || "accounts-shop"
-);
+const ACCOUNTS_DIR = (() => {
+  const envVal = process.env.SHOP_ACCOUNTS_DIR;
+  if (envVal) return path.resolve(process.cwd(), envVal);
+  const newPath = path.resolve(process.cwd(), "storage/shop-accounts");
+  const oldPath = path.resolve(process.cwd(), "accounts-shop");
+  if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+    console.warn("[migration] 正在使用旧目录 \"accounts-shop/\"，建议移动到 \"storage/shop-accounts/\" 或设置 SHOP_ACCOUNTS_DIR");
+    return oldPath;
+  }
+  return newPath;
+})();
 
 const BROWSER_VIEWPORT = { width: 1440, height: 900 };
 
@@ -83,6 +90,9 @@ function getDefaultAccounts() {
   return normalized;
 }
 
+const HEADLESS =
+  process.env.HEADLESS === "true" || process.env.HEADLESS === "1";
+
 module.exports = {
   SHOP_LOGIN_URL,
   SHOP_HOME_URL,
@@ -92,5 +102,6 @@ module.exports = {
   SLIDER_MAX_RETRY,
   LOGIN_TIMEOUT_MS,
   DOM_LOAD_TIMEOUT_MS,
+  HEADLESS,
   getDefaultAccounts
 };
