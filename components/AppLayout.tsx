@@ -56,6 +56,8 @@ type DragState = {
   baseY: number;
 };
 
+const TERMINAL_SIZE = { w: 720, h: 460 };
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -63,17 +65,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [terminalMinimized, setTerminalMinimized] = useState(false);
   const dragRef = useRef<DragState | null>(null);
   const [pos, setPos] = useState<Pos>({ x: 0, y: 0 });
-  const [size, setSize] = useState<{ w: number; h: number }>({ w: 680, h: 460 });
-  const resizeRef = useRef<
-    | null
-    | {
-        resizing: boolean;
-        startX: number;
-        startY: number;
-        baseW: number;
-        baseH: number;
-      }
-  >(null);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -119,36 +110,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
     const onUp = () => {
       if (dragRef.current) dragRef.current.dragging = false;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }
-
-  function onMouseDownResize(e: React.MouseEvent) {
-    if (terminalMinimized) return;
-    e.stopPropagation();
-    resizeRef.current = {
-      resizing: true,
-      startX: e.clientX,
-      startY: e.clientY,
-      baseW: size.w,
-      baseH: size.h,
-    };
-
-    const onMove = (ev: MouseEvent) => {
-      if (!resizeRef.current?.resizing) return;
-      const dx = ev.clientX - resizeRef.current.startX;
-      const dy = ev.clientY - resizeRef.current.startY;
-      const nextW = Math.max(420, Math.min(window.innerWidth - 24, resizeRef.current.baseW + dx));
-      const nextH = Math.max(260, Math.min(window.innerHeight - 24, resizeRef.current.baseH + dy));
-      setSize({ w: nextW, h: nextH });
-    };
-
-    const onUp = () => {
-      if (resizeRef.current) resizeRef.current.resizing = false;
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
@@ -247,7 +208,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </Content>
       </Layout>
 
-      {/* 右下角浮动入口 */}
       {!terminalOpen && (
         <button
           type="button"
@@ -267,8 +227,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             terminalMinimized
               ? undefined
               : {
-                  width: size.w,
-                  height: size.h,
+                  width: TERMINAL_SIZE.w,
+                  height: TERMINAL_SIZE.h,
                   transform: `translateX(-50%) translate(${pos.x}px, ${pos.y}px)`,
                 }
           }
@@ -284,7 +244,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <ConsoleSqlOutlined />
             </button>
           ) : (
-            <div className="terminal-float-card">
+            <div
+              className="terminal-float-card"
+              style={{
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
               <div className="terminal-float-header" onMouseDown={onMouseDownDrag}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <ConsoleSqlOutlined />
@@ -318,7 +285,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
 
-              <div className="terminal-float-body">
+              <div
+                className="terminal-float-body"
+                style={{ flex: 1, minHeight: 0 }}
+              >
                 <TaskPanel
                   taskId={taskId}
                   isRunning={isRunning}
@@ -329,15 +299,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   exitCode={exitCode}
                   summary={summary}
                   onClearLogs={clearLogs}
-                  terminalHeight={Math.max(160, size.h - 54 - 12)}
+                  terminalHeight={Math.max(160, TERMINAL_SIZE.h - 54 - 12)}
                 />
               </div>
-
-              <div
-                className="terminal-float-resizer"
-                onMouseDown={onMouseDownResize}
-                role="presentation"
-              />
             </div>
           )}
         </div>

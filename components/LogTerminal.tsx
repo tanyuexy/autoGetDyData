@@ -85,12 +85,16 @@ export default function LogTerminal({ logs, onClear, height }: Props) {
         style={{
           flex: 1,
           minHeight: 0,
-          overflow: "auto",
+          overflowY: "auto",
+          overflowX: "hidden",
           padding: "8px 12px",
           fontFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
           fontSize: 12,
           lineHeight: "1.4",
           color: "#a9b7c6",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+          overflowWrap: "anywhere",
         }}
       >
         {isEmpty ? (

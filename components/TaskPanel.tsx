@@ -45,7 +45,15 @@ export default function TaskPanel({
   const showHeader = taskButtons.length > 0;
 
   return (
-    <div style={{ width: "100%" }}>
+    <div
+      style={{
+        width: "100%",
+        height: terminalHeight ?? "100%",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+      }}
+    >
       {showHeader && (
         <Space wrap style={{ marginBottom: 8 }}>
           {taskButtons.map((btn) => (
@@ -102,7 +110,7 @@ export default function TaskPanel({
         />
       )}
 
-      <LogTerminal logs={logs} onClear={onClearLogs} height={terminalHeight ?? "100%"} />
+      <LogTerminal logs={logs} onClear={onClearLogs} height="100%" />
     </div>
   );
 }
