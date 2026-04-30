@@ -126,7 +126,7 @@ async function main() {
       });
 
       if (modalContent.length > 0) {
-        console.log("\n⚠️ 商品编辑弹窗已打开，停留在该页面：");
+        console.log("\n⚠️ 商品编辑弹窗已打开，尝试自动填写...");
         console.log("  ┌─ 弹窗内容 ──────────────────────────");
         console.log(`  │ ${modalContent[0].text.slice(0, 200)}`);
         console.log("  │");
@@ -137,14 +137,115 @@ async function main() {
           console.log(`  │ 按钮: ${modalContent[0].buttons.join(' | ')}`);
         }
         console.log("  └────────────────────────────────────");
-        console.log("  弹窗已保留在页面，供你查看处理。");
-        await report(page, "04c-modal-open");
+
+        // 自动填写商品短标题
+        const productTitleInput = page.locator('input[placeholder="请输入商品短标题"]').first();
+        if (await productTitleInput.isVisible().catch(() => false)) {
+          await productTitleInput.fill("还少胶囊");
+          console.log("  ✓ 已填写商品短标题");
+        } else {
+          console.log("  ⚠️ 未找到商品短标题输入框");
+        }
+
+        // 自动填写广审批文号
+        const approvalInput = page.locator('input[placeholder*="广审"]').first();
+        if (await approvalInput.isVisible().catch(() => false)) {
+          await approvalInput.fill("不包含广审内容");
+          console.log("  ✓ 已填写广审批文号");
+        } else {
+          console.log("  ⚠️ 未找到广审批文号输入框");
+        }
+
+        await report(page, "04c-modal-filled");
+
+        // 点击完成编辑
+        const finishBtn = page.locator('.semi-modal-content button:has-text("完成编辑")').first();
+        if (await finishBtn.isVisible().catch(() => false)) {
+          await finishBtn.click();
+          await page.waitForTimeout(3000);
+          console.log("  ✓ 已点击完成编辑");
+          await report(page, "04d-after-finish");
+        } else {
+          console.log("  ⚠️ 未找到完成编辑按钮，停留在弹窗供查看");
+          await report(page, "04c-modal-open");
+          console.log("  弹窗已保留在页面，供你查看处理。");
+          await page.waitForTimeout(600000);
+          return;
+        }
       } else {
         console.log("  → 无弹窗，链接可能已直接添加");
       }
     }
 
     await report(page, "05-final");
+
+    // 7. 选择音乐
+    console.log("\n=== 7. 选择音乐 ===");
+    const musicAction = page.locator('span:has-text("选择音乐")').last();
+    if (await musicAction.isVisible().catch(() => false)) {
+      await musicAction.click();
+      await page.waitForTimeout(3000);
+      console.log("  ✓ 已点击选择音乐");
+
+      await report(page, "06-music-panel");
+
+      // 点击"热门榜"标签
+      const hotTab = page.locator('div[role="tab"]:has-text("热门榜")').first();
+      if (await hotTab.isVisible().catch(() => false)) {
+        await hotTab.click();
+        await page.waitForTimeout(3000);
+        console.log("  ✓ 已点击热门榜");
+
+        // 查找所有热门榜歌曲
+        const songNames = page.locator('.semi-tabs-pane-active .song-name-oRge4d');
+        const songCount = await songNames.count().catch(() => 0);
+        console.log(`\n  找到 ${songCount} 首热门歌曲`);
+
+        if (songCount > 0) {
+          const randomIdx = Math.floor(Math.random() * songCount);
+          const selectedName = await songNames.nth(randomIdx).textContent();
+          console.log(`  随机选择: [${randomIdx}] ${selectedName}`);
+
+          // hover 卡片触发 "使用" 按钮（先定位到 card-wrapper）
+          const targetCard = songNames.nth(randomIdx).locator('xpath=./ancestor::div[contains(@class, "card-wrapper")]');
+          await targetCard.hover().catch(() => {});
+          await page.waitForTimeout(1500);
+
+          // 点击 "使用" 按钮
+          const useBtn = targetCard.locator('button:has-text("使用")').first();
+          if (await useBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+            await useBtn.click();
+            await page.waitForTimeout(2000);
+            console.log("  ✓ 已点击使用");
+          } else {
+            // 后备：点击卡片 + 面板底部确定
+            await targetCard.click();
+            await page.waitForTimeout(1000);
+            console.log("  → 已点击卡片");
+            const confirmBtn = page.locator('.semi-modal-content button:has-text("确定"), button:has-text("确定")').last();
+            if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+              await confirmBtn.click();
+              await page.waitForTimeout(2000);
+              console.log("  ✓ 已点击确定");
+            }
+          }
+
+          await report(page, "06-music-selected");
+        } else {
+          console.log("  ⚠️ 未找到音乐项，检查页面结构");
+        }
+
+        await report(page, "06-hot-list-loaded");
+      } else {
+        console.log("  ⚠️ 未找到热门榜标签");
+      }
+
+      await report(page, "06-music-panel-done");
+    } else {
+      console.log("  ⚠️ 未找到选择音乐按钮");
+    }
+
+    await report(page, "07-final");
     console.log("\n✅ 浏览器保持打开 (600s)。");
     await page.waitForTimeout(600000);
   } catch(e) {

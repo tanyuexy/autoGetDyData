@@ -75,6 +75,8 @@ export default function CreatorPublishPage() {
   const [title, setTitle] = useState<string>("");
   const [description, setDescription] = useState<string>("");
   const [productLink, setProductLink] = useState<string>("");
+  const [productTitle, setProductTitle] = useState<string>("");
+  const [approvalNumber, setApprovalNumber] = useState<string>("不包含广审内容");
   const [scheduleAt, setScheduleAt] = useState<string | null>(null);
 
   const accountOptions = useMemo(
@@ -177,6 +179,14 @@ export default function CreatorPublishPage() {
       message.error("请填写描述");
       return;
     }
+    if (!productTitle.trim()) {
+      message.error("请填写商品标题");
+      return;
+    }
+    if (!approvalNumber.trim()) {
+      message.error("请填写广审批文号");
+      return;
+    }
     if (type === "article" && !productLink.trim()) {
       message.error("请填写商品链接");
       return;
@@ -188,6 +198,8 @@ export default function CreatorPublishPage() {
         type,
         title: title.trim(),
         description: description.trim(),
+        productTitle: productTitle.trim(),
+        approvalNumber: approvalNumber.trim(),
         scheduleAt,
       };
 
@@ -216,6 +228,8 @@ export default function CreatorPublishPage() {
       setTitle("");
       setDescription("");
       setProductLink("");
+      setProductTitle("");
+      setApprovalNumber("不包含广审内容");
       setScheduleAt(null);
       await fetchTasks();
     } catch (e: any) {
@@ -399,6 +413,22 @@ export default function CreatorPublishPage() {
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="描述"
                 autoSize={{ minRows: 2, maxRows: 6 }}
+              />
+            </Form.Item>
+
+            <Form.Item label="商品标题" style={{ marginBottom: 8 }}>
+              <Input
+                value={productTitle}
+                onChange={(e) => setProductTitle(e.target.value)}
+                placeholder="商品短标题，用于商品编辑弹窗自动填写"
+              />
+            </Form.Item>
+
+            <Form.Item label="广审批文号" style={{ marginBottom: 8 }}>
+              <Input
+                value={approvalNumber}
+                onChange={(e) => setApprovalNumber(e.target.value)}
+                placeholder="不包含广审内容"
               />
             </Form.Item>
 

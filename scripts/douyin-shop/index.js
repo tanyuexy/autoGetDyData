@@ -1,14 +1,11 @@
 require("dotenv").config();
 
-const path = require("path");
 const fs = require("fs/promises");
 const { execSync } = require("child_process");
 const { chromium } = require("playwright");
-const { getProjectConfigPath } = require("../project-config-path");
 
 const {
   BROWSER_VIEWPORT,
-  ACCOUNTS_DIR,
   HEADLESS,
   getDefaultAccounts
 } = require("./lib/env");
@@ -29,7 +26,7 @@ function parseArgs(argv) {
       : "login";
   const positional = args[0] && !args[0].includes("@") ? args.slice(1) : args;
 
-  if (command === "merge" || command === "feishu-sync" || command === "sync-feishu") {
+  if (command === "merge" || command === "feishu-sync") {
     return { command, accounts: [] };
   }
 
@@ -145,7 +142,11 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
       console.log(
         `\n========== 同步飞书前拉取 ${i + 1}/${accounts.length}: ${account.email} | 导出天数 ${daysToExport} ==========`
       );
-      const result = await runOne(browser, account, { processedNames, daysToExport });
+      const result = await runOne(browser, account, {
+        processedNames,
+        daysToExport,
+        selectedShopNames: preferredList
+      });
       results.push(result);
       if (result.processedNames instanceof Set) {
         for (const n of result.processedNames) processedNames.add(n);
@@ -181,7 +182,10 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
     throw new Error("抖店导出文件校验失败，已停止合并与飞书同步");
   }
 
-  const mergeResult = await mergeAllShopExportsToData({ daysToExport });
+  const mergeResult = await mergeAllShopExportsToData({
+    daysToExport,
+    preferredShopNames: preferredList
+  });
   const missingMergedDates = mergeResult.expectedDates.filter(
     (d) => !mergeResult.actualDates.includes(d)
   );
@@ -209,7 +213,10 @@ async function main() {
     } catch (e) {
       console.warn(`读取备份表失败（merge 使用默认值 1 天）: ${e.message}`);
     }
-    await mergeAllShopExportsToData({ daysToExport });
+    await mergeAllShopExportsToData({
+      daysToExport,
+      preferredShopNames: targetShopNames
+    });
     return;
   }
 
@@ -281,7 +288,11 @@ async function main() {
       } ==========`
     );
 
-    const result = await runOne(browser, account, { processedNames, daysToExport });
+    const result = await runOne(browser, account, {
+      processedNames,
+      daysToExport,
+      selectedShopNames: preferredList
+    });
     results.push(result);
 
     if (result.processedNames instanceof Set) {
@@ -296,7 +307,10 @@ async function main() {
 
   await browser.close();
 
-  await mergeAllShopExportsToData({ daysToExport }).catch((err) => {
+  await mergeAllShopExportsToData({
+    daysToExport,
+    preferredShopNames: preferredList
+  }).catch((err) => {
     console.error("抖店数据汇总失败:", err.message || err);
   });
 

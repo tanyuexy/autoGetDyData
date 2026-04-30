@@ -6,6 +6,7 @@ import { ClearOutlined, CopyOutlined } from "@ant-design/icons";
 import type { LogEntry } from "@/types";
 
 const { Text } = Typography;
+const AUTO_SCROLL_THRESHOLD = 24;
 
 interface Props {
   logs: LogEntry[];
@@ -21,12 +22,20 @@ const levelColors: Record<string, string> = {
 
 export default function LogTerminal({ logs, onClear, height }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
 
   useEffect(() => {
-    if (containerRef.current) {
+    if (containerRef.current && shouldAutoScrollRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
   }, [logs]);
+
+  function handleScroll() {
+    if (!containerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+    const distanceToBottom = scrollHeight - (scrollTop + clientHeight);
+    shouldAutoScrollRef.current = distanceToBottom <= AUTO_SCROLL_THRESHOLD;
+  }
 
   function handleCopy() {
     const text = logs.map((l) => `[${l.level.toUpperCase()}] ${l.text}`).join("\n");
@@ -82,6 +91,7 @@ export default function LogTerminal({ logs, onClear, height }: Props) {
       </div>
       <div
         ref={containerRef}
+        onScroll={handleScroll}
         style={{
           flex: 1,
           minHeight: 0,

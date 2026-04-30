@@ -42,7 +42,20 @@
       "Bash(echo \"PID: $!\")",
       "Bash(python3 *)",
       "Bash(pkill -f \"run.js creator:publish-article\")",
-      "Bash(pkill -f \"run.js creator:publish\")"
+      "Bash(pkill -f \"run.js creator:publish\")",
+      "Bash(grep -oP '.{0,200}选择音乐.{0,200}' storage/creator-publish-debug/2026-04-30T03-20-28-332Z-05-final.html)",
+      "Bash(grep -oP '.{0,300}选择音乐.{0,300}' storage/creator-publish-debug/2026-04-30T03-20-28-332Z-05-final.html)",
+      "Bash(grep -oP '.{0,200}热门榜.{0,200}' storage/creator-publish-debug/2026-04-30T03-20-28-332Z-06-music-panel.html)",
+      "Bash(grep -oP '.{0,200}热门.{0,200}' storage/creator-publish-debug/2026-04-30T03-20-28-332Z-06-music-panel.html)",
+      "Bash(grep -oP '.{0,200}热门.{0,200}' storage/creator-publish-debug/2026-04-30T03-47-42-660Z-06-music-panel.html)",
+      "Bash(grep -oP '.{0,200}热门榜.{0,200}' storage/creator-publish-debug/2026-04-30T03-47-42-660Z-06-music-panel.html)",
+      "Bash(grep -oP '.{0,400}推荐.{0,400}' storage/creator-publish-debug/2026-04-30T03-47-42-660Z-06-music-panel.html)",
+      "Bash(grep -oP '.{0,300}\\\\.music-item.{0,300}' storage/creator-publish-debug/2026-04-30T03-53-46-431Z-06-music-panel.html)",
+      "Bash(grep -oP '.{0,200}tabpanel.{0,200}' storage/creator-publish-debug/2026-04-30T03-55-54-700Z-06-hot-list-loaded.html)",
+      "Bash(grep -oP '.{0,300}semi-tabs-pane.{0,300}' storage/creator-publish-debug/2026-04-30T03-55-54-700Z-06-hot-list-loaded.html)",
+      "Bash(grep -oP 'card-wrapper.{0,500}' storage/creator-publish-debug/2026-04-30T03-55-54-700Z-06-hot-list-loaded.html、)",
+      "Bash(grep -oP 'card-container-right.{0,300}' storage/creator-publish-debug/2026-04-30T03-55-54-700Z-06-hot-list-loaded.html)",
+      "mcp__ide__getDiagnostics"
     ]
   },
   "mcpServers": {

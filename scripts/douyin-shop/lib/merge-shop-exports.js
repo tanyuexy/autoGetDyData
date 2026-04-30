@@ -355,6 +355,9 @@ async function validateShopExportFiles(options = {}) {
 async function mergeAllShopExportsToData(options = {}) {
   const allRows = [];
   const daysToExport = Math.max(1, Number(options.daysToExport) || 1);
+  const preferredShopNames = Array.isArray(options.preferredShopNames)
+    ? options.preferredShopNames.filter((name) => String(name || "").trim())
+    : [];
   let accountDirs;
   try {
     accountDirs = await fs.readdir(ACCOUNTS_DIR, { withFileTypes: true });
@@ -368,7 +371,9 @@ async function mergeAllShopExportsToData(options = {}) {
   for (const ent of accountDirs) {
     if (!ent.isDirectory()) continue;
     const dataRoot = path.join(ACCOUNTS_DIR, ent.name, "data");
-    const shops = await listShopNames(dataRoot);
+    const shops = (await listShopNames(dataRoot)).filter((shopName) =>
+      matchesPreferredShop(shopName, preferredShopNames)
+    );
     for (const shopName of shops) {
       const chunk = await collectShopRows(dataRoot, shopName, { daysToExport });
       allRows.push(...chunk.rows);
@@ -376,8 +381,21 @@ async function mergeAllShopExportsToData(options = {}) {
     }
   }
 
+  const globallyDedupedRows = [];
+  const globalSeen = new Set();
+  for (const row of allRows) {
+    const key = [
+      row[SHOP_FIELD],
+      row[OUT_TITLE],
+      row[OUT_DATE]
+    ].join("|");
+    if (globalSeen.has(key)) continue;
+    globalSeen.add(key);
+    globallyDedupedRows.push(row);
+  }
+
   // 全局按日期排序（旧→新），同日期下按店铺与作品名稳定排序，便于对账与比对
-  allRows.sort((a, b) => {
+  globallyDedupedRows.sort((a, b) => {
     if (a[OUT_DATE] < b[OUT_DATE]) return -1;
     if (a[OUT_DATE] > b[OUT_DATE]) return 1;
     if (a[SHOP_FIELD] < b[SHOP_FIELD]) return -1;
@@ -402,7 +420,7 @@ async function mergeAllShopExportsToData(options = {}) {
     // ignore
   }
 
-  const worksheet = XLSX.utils.json_to_sheet(allRows, {
+  const worksheet = XLSX.utils.json_to_sheet(globallyDedupedRows, {
     header: ORDERED_HEADERS
   });
   const workbook = XLSX.utils.book_new();
@@ -410,7 +428,7 @@ async function mergeAllShopExportsToData(options = {}) {
   XLSX.writeFile(workbook, outputPath);
 
   console.log(
-    `抖店汇总完成（最近 ${daysToExport} 天文件，共 ${allRows.length} 条，增加销售额>0）: ${outputPath}`
+    `抖店汇总完成（最近 ${daysToExport} 天文件，共 ${globallyDedupedRows.length} 条，增加销售额>0，去重 ${allRows.length - globallyDedupedRows.length} 条）: ${outputPath}`
   );
 
   const expectedDates = [...expectedDateSet].sort();
@@ -423,7 +441,7 @@ async function mergeAllShopExportsToData(options = {}) {
     );
   }
 
-  return { outputPath, rowCount: allRows.length, actualDates: [...actualDateSet].sort(), expectedDates };
+  return { outputPath, rowCount: globallyDedupedRows.length, actualDates: [...actualDateSet].sort(), expectedDates };
 }
 
 module.exports = {

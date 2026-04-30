@@ -500,7 +500,12 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
     processedNames: processed
   };
 
-  const fullPreferredList = await loadPreferredShopNames();
+  const selectedShopNames = Array.isArray(options.selectedShopNames)
+    ? options.selectedShopNames.map((name) => String(name || "").trim()).filter(Boolean)
+    : [];
+  const fullPreferredList = selectedShopNames.length > 0
+    ? selectedShopNames
+    : await loadPreferredShopNames();
   const preferredList = fullPreferredList.filter((name) => {
     for (const done of processed) {
       if (!done) continue;
@@ -770,7 +775,10 @@ async function runShopLogin(context, account, options = {}) {
       ? options.processedNames
       : new Set(options.processedNames || []);
   const daysToExport = options.daysToExport || 1;
-  const postLoginOptions = { processedNames, daysToExport };
+  const selectedShopNames = Array.isArray(options.selectedShopNames)
+    ? options.selectedShopNames.map((name) => String(name || "").trim()).filter(Boolean)
+    : [];
+  const postLoginOptions = { processedNames, daysToExport, selectedShopNames };
 
   const page = await context.newPage();
   const tag = email;

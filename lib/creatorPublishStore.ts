@@ -20,6 +20,8 @@ export interface CreatorPublishPayloadBase {
   title?: string;
   description?: string;
   scheduleAt?: string | null; // ISO string
+  productTitle: string; // 商品短标题（必填）
+  approvalNumber: string; // 广审批文号（必填，默认：不包含广审内容）
 }
 
 export interface CreatorPublishVideoPayload extends CreatorPublishPayloadBase {

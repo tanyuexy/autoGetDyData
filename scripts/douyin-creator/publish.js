@@ -151,7 +151,7 @@ async function fillTitleAndDescription(page, title, description) {
   console.log("已填写标题与作品描述");
 }
 
-async function selectShoppingCartAndPasteLink(page, productLink) {
+async function selectShoppingCartAndPasteLink(page, productLink, productTitle, approvalNumber) {
   if (!productLink) return;
 
   const selectTrigger = await waitVisible(page, [
@@ -193,7 +193,28 @@ async function selectShoppingCartAndPasteLink(page, productLink) {
   // 检查弹窗：有"完成编辑"=链接成功(商品编辑弹窗)；仅有"确定"=链接失败
   const editModal = page.locator('.semi-modal-content').filter({ hasText: '完成编辑' }).first();
   if (await editModal.isVisible().catch(() => false)) {
-    console.log("商品链接已添加，当前停留在商品编辑弹窗，需要人工填写短标题和广审批文号后点击完成编辑。");
+    if (productTitle) {
+      const titleInput = page.locator('input[placeholder="请输入商品短标题"]').first();
+      if (await titleInput.isVisible().catch(() => false)) {
+        await titleInput.fill(productTitle);
+        console.log("已填写商品短标题");
+      }
+    }
+    if (approvalNumber) {
+      const approvalInput = page.locator('input[placeholder*="广审"]').first();
+      if (await approvalInput.isVisible().catch(() => false)) {
+        await approvalInput.fill(approvalNumber);
+        console.log("已填写广审批文号");
+      }
+    }
+    const finishBtn = editModal.locator('button:has-text("完成编辑")').first();
+    if (await finishBtn.isVisible().catch(() => false)) {
+      await finishBtn.click();
+      console.log("已点击完成编辑，商品编辑弹窗已关闭");
+      await page.waitForTimeout(3000);
+    } else {
+      console.log("未找到完成编辑按钮，请人工确认");
+    }
   } else {
     const confirmBtn = page.locator('button:has-text("确定")').first();
     if (await confirmBtn.isVisible().catch(() => false)) {
@@ -238,6 +259,62 @@ async function setScheduleIfNeeded(page, scheduleAt) {
   await setTextLikeInput(input, text);
   await input.press("Enter").catch(() => {});
   console.log(`已设置定时发布时间: ${text}`);
+}
+
+async function selectMusic(page) {
+  console.log("选择音乐...");
+  const musicAction = page.locator('span:has-text("选择音乐")').last();
+  if (!(await musicAction.isVisible().catch(() => false))) {
+    console.log("未找到选择音乐按钮，跳过");
+    return;
+  }
+
+  await musicAction.click();
+  await page.waitForTimeout(2000);
+
+  // 切换到热门榜
+  const hotTab = page.locator('div[role="tab"]:has-text("热门榜")').first();
+  if (!(await hotTab.isVisible({ timeout: 5000 }).catch(() => false))) {
+    console.log("未找到热门榜标签，跳过");
+    return;
+  }
+  await hotTab.click();
+  await page.waitForTimeout(2000);
+
+  // 查找所有歌曲
+  const songNames = page.locator('.semi-tabs-pane-active .song-name-oRge4d');
+  const count = await songNames.count().catch(() => 0);
+  if (count === 0) {
+    console.log("热门榜无歌曲，跳过");
+    return;
+  }
+
+  const randomIdx = Math.floor(Math.random() * count);
+  const selectedName = await songNames.nth(randomIdx).textContent();
+  console.log(`随机选择音乐: [${randomIdx}] ${selectedName}`);
+
+  // hover 卡片触发 "使用" 按钮
+  const targetCard = songNames.nth(randomIdx).locator('xpath=./ancestor::div[contains(@class, "card-wrapper")]');
+  await targetCard.hover().catch(() => {});
+  await page.waitForTimeout(1500);
+
+  // 点击"使用"
+  const useBtn = targetCard.locator('button:has-text("使用")').first();
+  if (await useBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await useBtn.click();
+    await page.waitForTimeout(2000);
+    console.log("已选择音乐并关闭面板");
+  } else {
+    // 后备：点击卡片 + 面板确定
+    await targetCard.click();
+    await page.waitForTimeout(1000);
+    const confirmBtn = page.locator('button:has-text("确定")').last();
+    if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await confirmBtn.click();
+      await page.waitForTimeout(2000);
+      console.log("已选择音乐（后备方案）");
+    }
+  }
 }
 
 async function runPublishArticle(options) {
@@ -290,7 +367,8 @@ async function runPublishArticle(options) {
       String(options.title || ""),
       String(options.desc || "")
     );
-    await selectShoppingCartAndPasteLink(page, String(options.productLink || ""));
+    await selectShoppingCartAndPasteLink(page, String(options.productLink || ""), String(options.productTitle || ""), String(options.approvalNumber || ""));
+    await selectMusic(page);
     await selectCoverIfNeeded(page, String(options.coverImageKey || ""));
     await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
 
