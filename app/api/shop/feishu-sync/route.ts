@@ -3,7 +3,13 @@ import { spawnTask, isTaskRunning } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
-export async function POST(_request: NextRequest) {
+function parseShopNames(body: any) {
+  return Array.isArray(body?.shopNames)
+    ? body.shopNames.map((s: any) => String(s || "").trim()).filter(Boolean)
+    : [];
+}
+
+export async function POST(request: NextRequest) {
   try {
     if (isTaskRunning()) {
       return NextResponse.json(
@@ -14,17 +20,15 @@ export async function POST(_request: NextRequest) {
 
     require("dotenv").config();
 
+    const body = await request.json().catch(() => ({} as any));
+    const shopNames = parseShopNames(body);
+
     const taskId = `shop-feishu-sync-${Date.now()}`;
-    spawnTask(taskId, "node", [
-      "scripts/run.js",
-      "feishu:backup",
-      "--profiles",
-      "shop",
-      "&&",
-      "node",
-      "scripts/run.js",
-      "shop:feishu-sync",
-    ]);
+    spawnTask(taskId, "npm", ["run", "feishu:sync-data-xlsx-shop"], {
+      env: {
+        SHOP_SELECTED_NAMES: shopNames.join(","),
+      },
+    });
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

@@ -10,6 +10,7 @@ const { Text } = Typography;
 interface Props {
   logs: LogEntry[];
   onClear?: () => void;
+  height?: number | string;
 }
 
 const levelColors: Record<string, string> = {
@@ -18,7 +19,7 @@ const levelColors: Record<string, string> = {
   error: "#ff6b68",
 };
 
-export default function LogTerminal({ logs, onClear }: Props) {
+export default function LogTerminal({ logs, onClear, height }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,6 +41,9 @@ export default function LogTerminal({ logs, onClear }: Props) {
         background: "#2b2b2b",
         borderRadius: 6,
         overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        height: typeof height === "number" ? height : height ?? 240,
       }}
     >
       <div
@@ -79,9 +83,10 @@ export default function LogTerminal({ logs, onClear }: Props) {
       <div
         ref={containerRef}
         style={{
-          height: 240,
+          flex: 1,
+          minHeight: 0,
           overflow: "auto",
-          padding: "6px 10px",
+          padding: "8px 12px",
           fontFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
           fontSize: 12,
           lineHeight: "1.4",

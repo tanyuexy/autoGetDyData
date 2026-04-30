@@ -1,18 +1,46 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Space, Divider, App } from "antd";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Space, Divider, App, Button, Select, Typography } from "antd";
 import AccountTable from "@/components/AccountTable";
-import TaskPanel from "@/components/TaskPanel";
 import { useTaskContext } from "@/contexts/TaskContext";
 import type { ShopAccount } from "@/types";
+
+const { Text } = Typography;
+const SHOP_SELECTION_CACHE_KEY = "shop:selectedShopNames";
+
+function readCachedShopSelection() {
+  try {
+    const cached = JSON.parse(
+      window.localStorage.getItem(SHOP_SELECTION_CACHE_KEY) || "[]"
+    );
+    return Array.isArray(cached) ? cached.map((name) => String(name)) : [];
+  } catch {
+    return [];
+  }
+}
 
 export default function ShopPage() {
   const { message } = App.useApp();
   const [accounts, setAccounts] = useState<ShopAccount[]>([]);
+  const [shopNames, setShopNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedShopNames, setSelectedShopNamesState] = useState<string[]>([]);
+  const hasHydratedSelectionRef = useRef(false);
+  const isApplyingInitialSelectionRef = useRef(false);
 
-  const { taskId, isRunning, startTask, resetTask, logs, progress, done, exitCode, summary, clearLogs } = useTaskContext();
+  const setSelectedShopNames = useCallback((value: string[]) => {
+    setSelectedShopNamesState(value);
+    if (isApplyingInitialSelectionRef.current) return;
+    try {
+      window.localStorage.setItem(
+        SHOP_SELECTION_CACHE_KEY,
+        JSON.stringify(value)
+      );
+    } catch {}
+  }, []);
+
+  const { startTask, resetTask, done } = useTaskContext();
 
   const fetchAccounts = useCallback(async () => {
     setLoading(true);
@@ -21,6 +49,7 @@ export default function ShopPage() {
       if (res.ok) {
         const data = await res.json();
         setAccounts(data.accounts || []);
+        setShopNames(data.shopNames || []);
       }
     } catch {
       message.error("获取账号列表失败");
@@ -39,14 +68,50 @@ export default function ShopPage() {
     }
   }, [done]);
 
+  useEffect(() => {
+    if (!shopNames.length) return;
+
+    isApplyingInitialSelectionRef.current = true;
+    setSelectedShopNamesState((prev) => {
+      const cached = readCachedShopSelection().filter((name) =>
+        shopNames.includes(name)
+      );
+
+      if (!hasHydratedSelectionRef.current) {
+        hasHydratedSelectionRef.current = true;
+        if (cached.length > 0) return cached;
+      }
+
+      if (cached.length > 0) return cached;
+
+      if (prev.length > 0) {
+        return prev.filter((name) => shopNames.includes(name));
+      }
+      return shopNames;
+    });
+    isApplyingInitialSelectionRef.current = false;
+  }, [shopNames]);
+
   async function handleAction(action: "export" | "feishu-sync" | "sync-feishu") {
+    if (!selectedShopNames.length) {
+      message.warning("请先选择店铺");
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        SHOP_SELECTION_CACHE_KEY,
+        JSON.stringify(selectedShopNames)
+      );
+    } catch {}
+
     const endpoints: Record<string, string> = {
       export: "/api/shop/export",
       "feishu-sync": "/api/shop/feishu-sync",
       "sync-feishu": "/api/shop/sync-feishu",
     };
     try {
-      await startTask(endpoints[action]);
+      await startTask(endpoints[action], { shopNames: selectedShopNames });
       message.info("任务已启动");
     } catch (e: any) {
       message.error(e.message || "启动任务失败");
@@ -72,35 +137,50 @@ export default function ShopPage() {
           已登录 {loggedInCount}/{accounts.length} 个邮箱
         </div>
 
-        <TaskPanel
-          taskId={taskId}
-          isRunning={isRunning}
-          taskButtons={[
-            {
-              key: "export",
-              label: "导出数据",
-              onClick: () => handleAction("export"),
-              disabled: accounts.length === 0,
-            },
-            {
-              key: "feishu-sync",
-              label: "同步多维表格",
-              onClick: () => handleAction("feishu-sync"),
-            },
-            {
-              key: "sync-feishu",
-              label: "导出并推送",
-              onClick: () => handleAction("sync-feishu"),
-              danger: true,
-            },
-          ]}
-          logs={logs}
-          progress={progress}
-          done={done}
-          exitCode={exitCode}
-          summary={summary}
-          onClearLogs={clearLogs}
-        />
+        <Space wrap style={{ marginBottom: 8 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            选择店铺：
+          </Text>
+          <Select
+            mode="multiple"
+            allowClear
+            placeholder="请选择店铺（默认选中全部配置店铺）"
+            style={{ minWidth: 360 }}
+            value={selectedShopNames}
+            onChange={(v) => setSelectedShopNames(v)}
+            options={shopNames.map((name) => ({
+              label: name,
+              value: name,
+            }))}
+          />
+        </Space>
+
+        <div>
+        <Space wrap>
+          <Button
+            type="primary"
+            onClick={() => handleAction("export")}
+            disabled={shopNames.length === 0}
+          >
+            导出数据
+          </Button>
+          <Button
+            type="primary"
+            onClick={() => handleAction("feishu-sync")}
+            disabled={shopNames.length === 0}
+          >
+            同步多维表格
+          </Button>
+          <Button
+            danger
+            type="primary"
+            onClick={() => handleAction("sync-feishu")}
+            disabled={shopNames.length === 0}
+          >
+            导出并推送
+          </Button>
+        </Space>
+        </div>
       </div>
     </Space>
   );

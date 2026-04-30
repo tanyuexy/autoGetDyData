@@ -3,11 +3,7 @@ import { spawnTask, isTaskRunning } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
-function parseShopNames(body: any) {
-  return Array.isArray(body?.shopNames)
-    ? body.shopNames.map((s: any) => String(s || "").trim()).filter(Boolean)
-    : [];
-}
+type LoginMode = "email_qr" | "local_manual";
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,13 +17,18 @@ export async function POST(request: NextRequest) {
     require("dotenv").config();
 
     const body = await request.json().catch(() => ({} as any));
-    const shopNames = parseShopNames(body);
+    const accountName = String(body?.accountName || "").trim();
+    const mode = String(body?.mode || "email_qr") as LoginMode;
 
-    const taskId = `shop-export-${Date.now()}`;
-    spawnTask(taskId, "node", ["scripts/run.js", "shop:export"], {
-      env: {
-        SHOP_SELECTED_NAMES: shopNames.join(","),
-      },
+    if (!accountName) {
+      return NextResponse.json({ error: "缺少 accountName" }, { status: 400 });
+    }
+
+    const headless = mode === "local_manual" ? "false" : "true";
+
+    const taskId = `creator-login-${Date.now()}`;
+    spawnTask(taskId, "node", ["scripts/run.js", "creator:login", accountName], {
+      env: { HEADLESS: headless },
     });
 
     return NextResponse.json({ taskId });

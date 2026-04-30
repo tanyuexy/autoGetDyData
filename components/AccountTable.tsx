@@ -1,7 +1,7 @@
 "use client";
 
-import { Table, Tag, Button } from "antd";
-import { CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Table, Tag, Button, Dropdown, Space } from "antd";
+import { CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined, DownOutlined } from "@ant-design/icons";
 import type { CreatorAccount, ShopAccount } from "@/types";
 
 interface CreatorProps {
@@ -9,6 +9,7 @@ interface CreatorProps {
   accounts: CreatorAccount[];
   loading: boolean;
   onRefresh: () => void;
+  onLogin?: (accountName: string, mode: "email_qr" | "local_manual") => void;
 }
 
 interface ShopProps {
@@ -41,6 +42,52 @@ export default function AccountTable(props: Props) {
             </Tag>
           ),
       },
+      ...(props.onLogin
+        ? [
+            {
+              title: "操作",
+              key: "actions",
+              width: 160,
+              render: (_: any, row: CreatorAccount) => {
+                const disabled = row.hasStorageState;
+
+                const items = [
+                  {
+                    key: "email_qr",
+                    label: "邮箱二维码登录",
+                    onClick: () => props.onLogin?.(row.name, "email_qr"),
+                  },
+                  {
+                    key: "local_manual",
+                    label: "本机人工登录",
+                    onClick: () => props.onLogin?.(row.name, "local_manual"),
+                  },
+                ];
+
+                return (
+                  <Dropdown
+                    trigger={["hover"]}
+                    placement="bottomRight"
+                    menu={{ items: items as any }}
+                    disabled={disabled}
+                  >
+                    <Button
+                      size="small"
+                      type="primary"
+                      disabled={disabled}
+                      onClick={() => props.onLogin?.(row.name, "email_qr")}
+                    >
+                      <Space size={4}>
+                        登录
+                        <DownOutlined style={{ fontSize: 10 }} />
+                      </Space>
+                    </Button>
+                  </Dropdown>
+                );
+              },
+            },
+          ]
+        : []),
     ];
 
     const dataSource = (accounts as CreatorAccount[]).map((a, i) => ({
@@ -57,7 +104,7 @@ export default function AccountTable(props: Props) {
           </Button>
         </div>
         <Table
-          columns={columns}
+          columns={columns as any}
           dataSource={dataSource}
           pagination={false}
           loading={loading}

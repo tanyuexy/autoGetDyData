@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs/promises");
 const { execSync } = require("child_process");
 const { chromium } = require("playwright");
+const { getProjectConfigPath } = require("../project-config-path");
 
 const {
   BROWSER_VIEWPORT,
@@ -50,6 +51,20 @@ function parseArgs(argv) {
   return { command, accounts: getDefaultAccounts() };
 }
 
+function parseSelectedShopNamesFromEnv() {
+  const raw = process.env.SHOP_SELECTED_NAMES || "";
+  return raw
+    .split(",")
+    .map((s) => String(s || "").trim())
+    .filter(Boolean);
+}
+
+async function resolveTargetShopNames() {
+  const selected = parseSelectedShopNamesFromEnv();
+  if (selected.length > 0) return selected;
+  return await loadPreferredShopNames();
+}
+
 async function runOne(browser, account, options = {}) {
   if (!account?.email || !account?.password) {
     throw new Error("账号 email/password 缺失");
@@ -83,8 +98,10 @@ async function runOne(browser, account, options = {}) {
   }
 }
 
-async function runShopSyncFeishu(accounts) {
-  const preferredList = await loadPreferredShopNames();
+async function runShopSyncFeishu(accounts, targetShopNames = []) {
+  const preferredList = targetShopNames.length > 0
+    ? targetShopNames
+    : await loadPreferredShopNames();
   console.log("抖店同步飞书：开始登录拉取 → 校验 → 合并 → 同步飞书");
 
   const browser = await chromium.launch({
@@ -183,6 +200,7 @@ async function runShopSyncFeishu(accounts) {
 
 async function main() {
   const { command, accounts } = parseArgs(process.argv);
+  const targetShopNames = await resolveTargetShopNames();
 
   if (command === "merge") {
     let daysToExport = 1;
@@ -205,11 +223,11 @@ async function main() {
   }
 
   if (command === "sync-feishu") {
-    await runShopSyncFeishu(accounts);
+    await runShopSyncFeishu(accounts, targetShopNames);
     return;
   }
 
-  const preferredList = await loadPreferredShopNames();
+  const preferredList = targetShopNames;
   console.log(
     `抖店登录：候选邮箱 ${accounts.length} 个: ${accounts
       .map((a) => a.email)

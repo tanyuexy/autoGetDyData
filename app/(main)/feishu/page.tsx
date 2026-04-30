@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { App, Button, Divider, Space, Typography, Table, Tag } from "antd";
 import FeishuAuthPanel from "@/components/FeishuAuthPanel";
-import TaskPanel from "@/components/TaskPanel";
 import { useTaskContext } from "@/contexts/TaskContext";
 
 const { Text } = Typography;
@@ -21,17 +20,7 @@ type BackupFileInfo = {
 export default function FeishuPage() {
   const { message } = App.useApp();
 
-  const {
-    taskId,
-    isRunning,
-    startTask,
-    logs,
-    progress,
-    done,
-    exitCode,
-    summary,
-    clearLogs,
-  } = useTaskContext();
+  const { startTask, done, isRunning } = useTaskContext();
 
   const [files, setFiles] = useState<BackupFileInfo[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
@@ -157,18 +146,6 @@ export default function FeishuPage() {
         />
 
         <Divider />
-
-        <TaskPanel
-          taskId={taskId}
-          isRunning={isRunning}
-          taskButtons={[]}
-          logs={logs}
-          progress={progress}
-          done={done}
-          exitCode={exitCode}
-          summary={summary}
-          onClearLogs={clearLogs}
-        />
       </div>
     </Space>
   );

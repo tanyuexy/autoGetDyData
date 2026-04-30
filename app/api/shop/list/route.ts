@@ -12,10 +12,14 @@ export async function GET() {
       getProjectConfigPath();
 
     let emails: { email: string; password: string }[] = [];
+    let shopNames: string[] = [];
     try {
       const raw = fs.readFileSync(configPath, "utf-8");
       const config = JSON.parse(raw);
       emails = config.emails || [];
+      shopNames = Array.isArray(config.accounts)
+        ? config.accounts.map((s: any) => String(s || "").trim()).filter(Boolean)
+        : [];
     } catch {}
 
     const ACCOUNTS_DIR = (() => {
@@ -48,7 +52,7 @@ export async function GET() {
       })
     );
 
-    return NextResponse.json({ accounts: result });
+    return NextResponse.json({ accounts: result, shopNames });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

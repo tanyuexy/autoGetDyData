@@ -3,12 +3,6 @@ import { spawnTask, isTaskRunning } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
-function parseShopNames(body: any) {
-  return Array.isArray(body?.shopNames)
-    ? body.shopNames.map((s: any) => String(s || "").trim()).filter(Boolean)
-    : [];
-}
-
 export async function POST(request: NextRequest) {
   try {
     if (isTaskRunning()) {
@@ -21,14 +15,14 @@ export async function POST(request: NextRequest) {
     require("dotenv").config();
 
     const body = await request.json().catch(() => ({} as any));
-    const shopNames = parseShopNames(body);
+    const email = String(body?.email || "").trim();
+    if (!email) {
+      return NextResponse.json({ error: "缺少 email" }, { status: 400 });
+    }
 
-    const taskId = `shop-export-${Date.now()}`;
-    spawnTask(taskId, "node", ["scripts/run.js", "shop:export"], {
-      env: {
-        SHOP_SELECTED_NAMES: shopNames.join(","),
-      },
-    });
+    const taskId = `shop-login-one-${Date.now()}`;
+    // 传入邮箱即可：scripts/douyin-shop/index.js 会自动使用默认密码
+    spawnTask(taskId, "node", ["scripts/run.js", "shop:login", email]);
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

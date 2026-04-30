@@ -1,19 +1,25 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Tabs, Button, Spin, App, Switch, Space, Typography, Alert } from "antd";
+import { Tabs, Button, Spin, App, Switch, Space, Typography, Alert, Divider } from "antd";
 import { SaveOutlined } from "@ant-design/icons";
 import ConfigAccountTab from "@/components/ConfigAccountTab";
 import ConfigEmailTab from "@/components/ConfigEmailTab";
 import ConfigFeishuTab from "@/components/ConfigFeishuTab";
 import ConfigCreatorDatesSection from "@/components/ConfigCreatorDatesSection";
-import type { ConfigData } from "@/types";
+import AccountTable from "@/components/AccountTable";
+import { useTaskContext } from "@/contexts/TaskContext";
+import type { ConfigData, CreatorAccount } from "@/types";
 
 export default function ConfigPage() {
   const { message } = App.useApp();
+  const { startTask } = useTaskContext();
   const [config, setConfig] = useState<ConfigData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const [creatorAccounts, setCreatorAccounts] = useState<CreatorAccount[]>([]);
+  const [loadingCreatorAccounts, setLoadingCreatorAccounts] = useState(false);
 
   // Track dirty changes per tab
   const [dirty, setDirty] = useState<Partial<Record<string, any>>>({});
@@ -32,9 +38,24 @@ export default function ConfigPage() {
     }
   }, []);
 
+  const fetchCreatorAccounts = useCallback(async () => {
+    setLoadingCreatorAccounts(true);
+    try {
+      const res = await fetch("/api/creator/list", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        setCreatorAccounts(data.accounts || []);
+      }
+    } catch {
+      message.error("获取抖创账号状态失败");
+    }
+    setLoadingCreatorAccounts(false);
+  }, []);
+
   useEffect(() => {
     fetchConfig();
-  }, [fetchConfig]);
+    fetchCreatorAccounts();
+  }, [fetchConfig, fetchCreatorAccounts]);
 
   async function handleSave() {
     if (!config || !Object.keys(dirty).length) return;
@@ -50,6 +71,7 @@ export default function ConfigPage() {
         message.success("保存成功");
         setConfig(merged);
         setDirty({});
+        await fetchCreatorAccounts();
       } else {
         message.error("保存失败");
       }
@@ -81,6 +103,45 @@ export default function ConfigPage() {
       label: "设置",
       children: (
         <Space orientation="vertical" size="small" style={{ width: "100%" }}>
+            <div style={{ marginTop: 8 }}>
+              <AccountTable
+                type="creator"
+                accounts={creatorAccounts}
+                loading={loadingCreatorAccounts}
+                onRefresh={fetchCreatorAccounts}
+                onLogin={async (name, mode) => {
+                  try {
+                    await startTask("/api/creator/login", { accountName: name, mode });
+                    message.info(`登录任务已启动: ${name}`);
+                  } catch (e: any) {
+                    message.error(e.message || "启动登录失败");
+                  }
+                }}
+              />
+            </div>
+
+          <Divider style={{ margin: "8px 0" }} />
+
+          <div>
+            <Typography.Text strong>店铺账号设置</Typography.Text>
+            <div style={{ marginTop: 8 }}>
+              <ConfigAccountTab
+                accounts={config.accounts || []}
+                loginVerifyMethod={config.douyinCreator?.loginVerifyMethod || "qr"}
+                onChange={(data) =>
+                  mergeChange({
+                    accounts: data.accounts,
+                    douyinCreator: {
+                      loginVerifyMethod: data.loginVerifyMethod,
+                    },
+                  })
+                }
+              />
+            </div>
+          </div>
+
+          <Divider style={{ margin: "8px 0" }} />
+
           <Space>
             <Switch
               checked={config.headless ?? false}
@@ -109,19 +170,6 @@ export default function ConfigPage() {
       label: "抖创设置",
       children: (
         <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-          <ConfigAccountTab
-            accounts={config.accounts || []}
-            loginVerifyMethod={config.douyinCreator?.loginVerifyMethod || "qr"}
-            onChange={(data) =>
-              mergeChange({
-                accounts: data.accounts,
-                douyinCreator: {
-                  loginVerifyMethod: data.loginVerifyMethod,
-                },
-              })
-            }
-          />
-
           <ConfigCreatorDatesSection
             accounts={config.accounts || []}
             dateMap={config.creatorExportDateStartByAccount || {}}
@@ -143,6 +191,14 @@ export default function ConfigPage() {
         <ConfigEmailTab
           emails={config.emails || []}
           onChange={(emails) => mergeChange({ emails })}
+          onLogin={async (email) => {
+            try {
+              await startTask("/api/shop/login-one", { email });
+              message.info(`登录任务已启动: ${email}`);
+            } catch (e: any) {
+              message.error(e.message || "启动登录失败");
+            }
+          }}
         />
       ),
     },

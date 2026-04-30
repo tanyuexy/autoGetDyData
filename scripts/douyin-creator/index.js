@@ -15,6 +15,7 @@ const { attachQrDataUrlSniffer } = require("./lib/qr");
 const { openTargetAndEnsureLogin } = require("./lib/login");
 const { saveAuth, exportPostListData } = require("./lib/exporter");
 const { mergeExportFiles } = require("./lib/merge-exports");
+const { parseArgs, runPublishArticle } = require("./publish");
 
 async function runOneAccount(browser, accountName, command, options = {}) {
   const paths = getAccountPaths(accountName);
@@ -52,6 +53,12 @@ async function runOneAccount(browser, accountName, command, options = {}) {
     });
 
     await saveAuth(context, paths, accountName);
+
+    if (command === "login") {
+      console.log(`========== 登录完成: ${accountName} ==========\n`);
+      return { accountName, ok: true };
+    }
+
     const exportFilePath = await exportPostListData(page, paths, accountName);
     console.log(`========== 账号完成: ${accountName} ==========\n`);
     return { accountName, ok: true, exportFilePath };
@@ -90,6 +97,16 @@ function runFeishuSyncDataXlsxCreator() {
 }
 
 async function main() {
+  const directCommand = (process.argv[2] || "").toLowerCase();
+  if (directCommand === "publish-article") {
+    const options = parseArgs(process.argv.slice(3));
+    await runPublishArticle(options);
+    return;
+  }
+  if (directCommand === "publish-video") {
+    throw new Error("publish-video 尚未实现");
+  }
+
   const parsed = parseCliCommand();
   const { command, accountName, exportAccountFilters } = parsed;
   const accounts = await resolveAccountsToRun(
@@ -107,6 +124,28 @@ async function main() {
     headless: HEADLESS,
     args: ["--start-maximized"]
   });
+
+  if (command === "login") {
+    const results = await runAccountQueue(browser, accounts, "login", {
+      useStoredAuth: false,
+      forceManualLogin: true,
+      manualLoginReason: "手动触发账号登录"
+    });
+    await browser.close();
+
+    const successCount = results.filter((item) => item.ok).length;
+    const failed = results.filter((item) => !item.ok);
+
+    console.log(`\n全部执行完成: 成功 ${successCount} / ${results.length}`);
+    if (failed.length > 0) {
+      console.log("失败账号:");
+      for (const item of failed) {
+        console.log(`- ${item.accountName}: ${item.error}`);
+      }
+      process.exitCode = 1;
+    }
+    return;
+  }
 
   const { withAuth, withoutAuth } = await splitAccountsByStorageState(accounts);
   console.log(`导出通道A(已有登录态): ${withAuth.length} 个账号`);

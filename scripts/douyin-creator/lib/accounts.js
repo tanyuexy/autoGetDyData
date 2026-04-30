@@ -30,13 +30,13 @@ async function listAccountDirs() {
 function parseCliCommand() {
   const args = process.argv.slice(2);
   const command = (args[0] || "export").toLowerCase();
-  if (!["export", "export:feishu"].includes(command)) {
+  if (!["export", "export:feishu", "login"].includes(command)) {
     throw new Error(
-      "只支持: export / export:feishu。示例: npm run export / npm run export -- 账号A [账号B] / npm run export:feishu / npm run export:feishu -- 账号A [账号B]"
+      "只支持: export / export:feishu / login。示例: npm run export / npm run export -- 账号A [账号B] / npm run export:feishu / npm run export:feishu -- 账号A [账号B] / node scripts/run.js creator:login 账号A"
     );
   }
   const tail = args.slice(1);
-  if (command === "export" || command === "export:feishu") {
+  if (command === "export" || command === "export:feishu" || command === "login") {
     const exportAccountFilters = tail
       .map((s) => normalizeAccountName(s))
       .filter(Boolean);
@@ -55,7 +55,7 @@ async function resolveAccountsToRun(
 
   if (existingAccounts.length === 0) {
     throw new Error(
-      "export 模式未发现账号目录。请先执行 add 命令完成扫码登录。"
+      "export 模式未发现账号目录。请先完成扫码登录创建账号目录。"
     );
   }
   if (!exportAccountFilters || exportAccountFilters.length === 0) {

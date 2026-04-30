@@ -34,7 +34,24 @@
       "Bash(g *)",
       "Bash(curl -s http://localhost:3999/api/shop/list)",
       "Bash(kill %1)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(npx playwright *)",
+      "Read(//Users/xy/.cache/**)",
+      "Bash(npm info *)",
+      "Bash(pkill -f \"test-publish-flow\")",
+      "Bash(echo \"PID: $!\")",
+      "Bash(python3 *)",
+      "Bash(pkill -f \"run.js creator:publish-article\")",
+      "Bash(pkill -f \"run.js creator:publish\")"
     ]
+  },
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp"
+      ]
+    }
   }
 }

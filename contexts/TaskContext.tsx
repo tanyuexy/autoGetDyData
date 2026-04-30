@@ -11,10 +11,11 @@ interface TaskContextValue {
   done: boolean;
   exitCode: number | null;
   summary: string;
-  startTask: (url: string, body?: any) => Promise<void>;
+  setTaskId: (id: string | null) => void;
   cancelTask: () => void;
   resetTask: () => void;
   clearLogs: () => void;
+  startTask: (url: string, body?: any) => Promise<void>;
 }
 
 const TaskContext = createContext<TaskContextValue>({
@@ -25,10 +26,11 @@ const TaskContext = createContext<TaskContextValue>({
   done: false,
   exitCode: null,
   summary: "",
-  startTask: async () => {},
+  setTaskId: () => {},
   cancelTask: () => {},
   resetTask: () => {},
   clearLogs: () => {},
+  startTask: async () => {},
 });
 
 export function useTaskContext() {
@@ -78,11 +80,34 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       } catch {}
       es.close();
       esRef.current = null;
+      setIsRunning(false);
     });
 
     es.onerror = () => {
       // Auto-reconnect handled by EventSource
     };
+  }
+
+  function setTaskIdAndConnect(id: string | null) {
+    if (!id) {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+      setTaskId(null);
+      setIsRunning(false);
+      return;
+    }
+
+    setTaskId(id);
+    setIsRunning(true);
+    setDone(false);
+    setExitCode(null);
+    setSummary("");
+    setLogs([]);
+    logsRef.current = [];
+    setProgress(null);
+    connectSSE(id);
   }
 
   async function startTask(url: string, body?: any) {
@@ -102,8 +127,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       });
       if (res.ok) {
         const data = await res.json();
-        setTaskId(data.taskId);
-        connectSSE(data.taskId);
+        setTaskIdAndConnect(data.taskId);
       } else {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || `HTTP ${res.status}`);
@@ -150,6 +174,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         cancelTask,
         resetTask,
         clearLogs,
+        setTaskId: setTaskIdAndConnect,
       }}
     >
       {children}

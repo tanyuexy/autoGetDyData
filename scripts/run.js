@@ -22,6 +22,18 @@ const ROUTES = {
     script: "scripts/douyin-creator/index.js",
     argv: ["list"]
   },
+  "creator:publish-video": {
+    script: "scripts/douyin-creator/index.js",
+    argv: ["publish-video"]
+  },
+  "creator:publish-article": {
+    script: "scripts/douyin-creator/index.js",
+    argv: ["publish-article"]
+  },
+  "creator:login": {
+    script: "scripts/douyin-creator/index.js",
+    argv: ["login"]
+  },
 
   export: { script: "scripts/douyin-creator/index.js", argv: ["export"] },
   "export:feishu": {

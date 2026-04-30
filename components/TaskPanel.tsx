@@ -3,7 +3,6 @@
 import { Button, Space, Progress, Alert, Tag, Typography } from "antd";
 import {
   PlayCircleOutlined,
-  StopOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
 } from "@ant-design/icons";
@@ -28,6 +27,7 @@ interface Props {
   done: ReturnType<typeof useSSE>["done"];
   exitCode: ReturnType<typeof useSSE>["exitCode"];
   summary: ReturnType<typeof useSSE>["summary"];
+  terminalHeight?: number;
 }
 
 export default function TaskPanel({
@@ -40,61 +40,48 @@ export default function TaskPanel({
   done,
   exitCode,
   summary,
+  terminalHeight,
 }: Props) {
+  const showHeader = taskButtons.length > 0;
+
   return (
-    <Space orientation="vertical" size="small" style={{ width: "100%" }}>
-      <Space wrap>
-        {taskButtons.map((btn) => (
-          <Button
-            key={btn.key}
-            type="primary"
-            danger={btn.danger}
-            icon={<PlayCircleOutlined />}
-            onClick={btn.onClick}
-            loading={isRunning && !done}
-            disabled={btn.disabled || (isRunning && !done)}
-          >
-            {btn.label}
-          </Button>
-        ))}
-        {isRunning && !done && (
-          <Button
-            danger
-            icon={<StopOutlined />}
-            onClick={() => {
-              fetch(`/api/progress/${taskId}`, { method: "DELETE" }).catch(() => {});
-            }}
-          >
-            终止任务
-          </Button>
-        )}
-      </Space>
+    <div style={{ width: "100%" }}>
+      {showHeader && (
+        <Space wrap style={{ marginBottom: 8 }}>
+          {taskButtons.map((btn) => (
+            <Button
+              key={btn.key}
+              type="primary"
+              danger={btn.danger}
+              icon={<PlayCircleOutlined />}
+              onClick={btn.onClick}
+              loading={isRunning && !done}
+              disabled={btn.disabled || (isRunning && !done)}
+            >
+              {btn.label}
+            </Button>
+          ))}
+        </Space>
+      )}
 
       {done && (
         <Alert
           type={exitCode === 0 ? "success" : "error"}
           title={
             <Space>
-              {exitCode === 0 ? (
-                <CheckCircleOutlined />
-              ) : (
-                <CloseCircleOutlined />
-              )}
+              {exitCode === 0 ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
               <Text>{summary || `任务完成，退出码: ${exitCode}`}</Text>
-              {exitCode === 0 && (
-                <Tag color="success">成功</Tag>
-              )}
-              {exitCode !== 0 && exitCode !== null && (
-                <Tag color="error">失败</Tag>
-              )}
+              {exitCode === 0 && <Tag color="success">成功</Tag>}
+              {exitCode !== 0 && exitCode !== null && <Tag color="error">失败</Tag>}
             </Space>
           }
           showIcon={false}
+          style={{ marginBottom: 8 }}
         />
       )}
 
       {isRunning && !done && (
-        <div>
+        <div style={{ marginBottom: 8 }}>
           <Text type="secondary" style={{ marginRight: 8 }}>
             任务运行中...
           </Text>
@@ -111,10 +98,11 @@ export default function TaskPanel({
           percent={Math.round((progress.current / progress.total) * 100)}
           format={() => `${progress.current}/${progress.total}`}
           status={done ? (exitCode === 0 ? "success" : "exception") : "active"}
+          style={{ marginBottom: 8 }}
         />
       )}
 
-      <LogTerminal logs={logs} onClear={onClearLogs} />
-    </Space>
+      <LogTerminal logs={logs} onClear={onClearLogs} height={terminalHeight ?? "100%"} />
+    </div>
   );
 }
