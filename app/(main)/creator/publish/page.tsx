@@ -8,9 +8,11 @@ import {
   DatePicker,
   Form,
   Input,
+  Popconfirm,
   Radio,
   Select,
   Space,
+  Switch,
   Table,
   Tag,
   Upload,
@@ -77,6 +79,7 @@ export default function CreatorPublishPage() {
   const [productLink, setProductLink] = useState<string>("");
   const [productTitle, setProductTitle] = useState<string>("");
   const [approvalNumber, setApprovalNumber] = useState<string>("不包含广审内容");
+  const [isAiContent, setIsAiContent] = useState<boolean>(false);
   const [scheduleAt, setScheduleAt] = useState<string | null>(null);
 
   const accountOptions = useMemo(
@@ -200,6 +203,7 @@ export default function CreatorPublishPage() {
         description: description.trim(),
         productTitle: productTitle.trim(),
         approvalNumber: approvalNumber.trim(),
+        isAiContent,
         scheduleAt,
       };
 
@@ -230,6 +234,7 @@ export default function CreatorPublishPage() {
       setProductLink("");
       setProductTitle("");
       setApprovalNumber("不包含广审内容");
+      setIsAiContent(false);
       setScheduleAt(null);
       await fetchTasks();
     } catch (e: any) {
@@ -239,8 +244,8 @@ export default function CreatorPublishPage() {
   }
 
   async function handleRetryTask(task: PublishTask) {
-    if (task.status !== "failed" && task.status !== "cancelled") {
-      message.warning("仅失败/已取消的任务可重试");
+    if (task.status !== "failed" && task.status !== "cancelled" && task.status !== "success") {
+      message.warning("仅失败/已取消/成功的任务可重试");
       return;
     }
     try {
@@ -258,19 +263,49 @@ export default function CreatorPublishPage() {
     }
   }
 
+  async function handleDeleteTask(task: PublishTask) {
+    if (task.status === "running") {
+      message.warning("执行中的任务不可删除");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/creator/publish/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", id: task.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "删除失败");
+
+      if (selectedRuntimeTaskId && selectedRuntimeTaskId === task.taskId) {
+        setSelectedRuntimeTaskId(null);
+      }
+
+      message.success("已删除");
+      await fetchTasks();
+    } catch (e: any) {
+      message.error(e.message || "删除失败");
+    }
+  }
+
   const columns = [
-    { title: "账号", dataIndex: "accountName" },
+    { title: "账号", dataIndex: "accountName", align: "center" as const },
     {
       title: "类型",
+      align: "center" as const,
       render: (_: any, r: PublishTask) => (r.payload.type === "video" ? "视频" : "图文"),
     },
     {
       title: "定时",
-      render: (_: any, r: PublishTask) => r.payload.scheduleAt ? dayjs(r.payload.scheduleAt).format("YYYY-MM-DD HH:mm") : "立即",
+      align: "center" as const,
+      render: (_: any, r: PublishTask) =>
+        r.payload.scheduleAt ? dayjs(r.payload.scheduleAt).format("YYYY-MM-DD HH:mm") : "立即",
     },
     {
       title: "状态",
       dataIndex: "status",
+      align: "center" as const,
       render: (s: TaskStatus) => {
         const map: Record<TaskStatus, { color: string; text: string }> = {
           pending: { color: "default", text: "待执行" },
@@ -285,15 +320,18 @@ export default function CreatorPublishPage() {
     },
     {
       title: "错误",
-      render: (_: any, r: PublishTask) => r.lastError ? <Text type="danger">{r.lastError}</Text> : "",
+      align: "center" as const,
+      render: (_: any, r: PublishTask) => (r.lastError ? <Text type="danger">{r.lastError}</Text> : ""),
     },
     {
       title: "更新时间",
       dataIndex: "updatedAt",
+      align: "center" as const,
       render: (v: string) => dayjs(v).format("MM-DD HH:mm:ss"),
     },
     {
       title: "操作",
+      align: "center" as const,
       render: (_: any, r: PublishTask) => (
         <Space size="small">
           <Button
@@ -307,11 +345,30 @@ export default function CreatorPublishPage() {
           <Button
             size="small"
             type="link"
-            disabled={r.status !== "failed" && r.status !== "cancelled"}
+            disabled={r.status !== "failed" && r.status !== "cancelled" && r.status !== "success"}
             onClick={() => handleRetryTask(r)}
           >
             重试
           </Button>
+          <Popconfirm
+            title="确认删除任务？"
+            description={
+              <div style={{ color: "rgba(15,23,42,.72)" }}>
+                将删除任务：<Text code>{r.id}</Text>
+                <br />
+                <Text type="secondary">账号：{r.accountName}</Text>
+              </div>
+            }
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            placement="top"
+            onConfirm={() => handleDeleteTask(r)}
+          >
+            <Button size="small" type="link" danger disabled={r.status === "running"}>
+              删除
+            </Button>
+          </Popconfirm>
         </Space>
       ),
     },
@@ -429,6 +486,23 @@ export default function CreatorPublishPage() {
                 value={approvalNumber}
                 onChange={(e) => setApprovalNumber(e.target.value)}
                 placeholder="不包含广审内容"
+              />
+            </Form.Item>
+
+            <Form.Item
+              label="AI内容"
+              style={{ marginBottom: 8 }}
+              help={
+                <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>
+                  开启后自主声明选"内容由AI生成"，关闭则选"无需添加自主声明"
+                </span>
+              }
+            >
+              <Switch
+                checked={isAiContent}
+                onChange={setIsAiContent}
+                checkedChildren="是"
+                unCheckedChildren="否"
               />
             </Form.Item>
 

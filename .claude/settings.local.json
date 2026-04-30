@@ -55,7 +55,8 @@
       "Bash(grep -oP '.{0,300}semi-tabs-pane.{0,300}' storage/creator-publish-debug/2026-04-30T03-55-54-700Z-06-hot-list-loaded.html)",
       "Bash(grep -oP 'card-wrapper.{0,500}' storage/creator-publish-debug/2026-04-30T03-55-54-700Z-06-hot-list-loaded.html、)",
       "Bash(grep -oP 'card-container-right.{0,300}' storage/creator-publish-debug/2026-04-30T03-55-54-700Z-06-hot-list-loaded.html)",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(grep *)"
     ]
   },
   "mcpServers": {

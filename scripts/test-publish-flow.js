@@ -16,6 +16,7 @@ const IMAGE_KEYS = task.payload.imagesFileKeys;
 const TITLE = task.payload.title;
 const DESC = task.payload.description;
 const LINK = task.payload.productLink;
+const IS_AI_CONTENT = task.payload.isAiContent === true;
 
 console.log("=== 任务配置 ===");
 console.log("账号:", ACCOUNT);
@@ -23,6 +24,7 @@ console.log("图片:", IMAGE_KEYS.join(", "));
 console.log("标题:", TITLE);
 console.log("描述:", DESC);
 console.log("链接:", LINK);
+console.log("AI内容:", IS_AI_CONTENT);
 
 async function report(page, tag) {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -178,6 +180,37 @@ async function main() {
     }
 
     await report(page, "05-final");
+
+    // 6.5 自主声明
+    console.log("\n=== 6.5 自主声明 ===");
+    const targetLabel = IS_AI_CONTENT ? "内容由AI生成" : "无需添加自主声明";
+    const declarationSection = page.locator('section:has(.title-cnbkZe:has-text("自主声明"))').first();
+    const selectBox = declarationSection.locator('[class*="selectBox"]').first();
+    if (await selectBox.isVisible().catch(() => false)) {
+      const curText = await selectBox.locator('[class*="selectText"]').first().textContent().catch(() => "");
+      console.log(`  当前自主声明: ${curText.trim()}`);
+      if (curText.includes(targetLabel)) {
+        console.log(`  ✓ 已是: ${targetLabel}`);
+      } else {
+        await selectBox.click();
+        await page.waitForTimeout(1500);
+        const targetOption = page.locator(`label:has-text("${targetLabel}")`).first();
+        if (await targetOption.isVisible().catch(() => false)) {
+          await targetOption.click();
+          await page.waitForTimeout(500);
+          console.log(`  ✓ 已选择: ${targetLabel}`);
+        }
+        const confirmBtn = page.locator('.semi-modal-content button:has-text("确定")').first();
+        if (await confirmBtn.isVisible().catch(() => false)) {
+          await confirmBtn.click();
+          await page.waitForTimeout(1000);
+          console.log("  ✓ 已确定关闭自主声明弹窗");
+        }
+      }
+    } else {
+      console.log("  ⚠️ 未找到自主声明下拉框");
+    }
+    await report(page, "05b-self-declaration");
 
     // 7. 选择音乐
     console.log("\n=== 7. 选择音乐 ===");

@@ -42,9 +42,15 @@
     "creator": {
       "baseUrl": "https://a5bgloffd0.feishu.cn/base/SjmubvbmCazk27sqcTucsSAmnPb?table=tblYnPxQjhaI4sWc&view=vewJjxCUVz",
       "appToken": "SjmubvbmCazk27sqcTucsSAmnPb",
-      "tableId": "tblYnPxQjhaI4sWc"
+      "tableId": "tblYnPxQjhaI4sWc",
+      "keepRows": 4
+    },
+    "task": {
+      "baseUrl": "https://a5bgloffd0.feishu.cn/base/T64RbXS6wak6QqsaSqzcx0F8n4f?table=tblVym8chEalMZgl&view=vew11jDYDk",
+      "appToken": "T64RbXS6wak6QqsaSqzcx0F8n4f",
+      "tableId": "tblVym8chEalMZgl"
     }
   },
   "creatorExportDateStart": null,
-  "headless": true
+  "headless": false
 }

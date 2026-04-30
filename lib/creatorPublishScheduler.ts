@@ -36,6 +36,7 @@ function buildRunArgs(task: CreatorPublishTask): string[] {
   if (task.payload.description) args.push("--desc", task.payload.description);
   if (task.payload.productTitle) args.push("--productTitle", task.payload.productTitle);
   if (task.payload.approvalNumber) args.push("--approvalNumber", task.payload.approvalNumber);
+  if (task.payload.isAiContent) args.push("--isAiContent");
   if (task.payload.scheduleAt) args.push("--scheduleAt", task.payload.scheduleAt);
 
   return [...base, ...args];

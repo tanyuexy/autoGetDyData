@@ -6,6 +6,10 @@ export const CREATOR_PUBLISH_TASKS_PATH = path.resolve(
     path.join(process.cwd(), "storage/creator-publish/tasks.json")
 );
 
+const TASK_LOGS_DIR = path.resolve(
+  process.env.TASK_LOGS_DIR || path.join(process.cwd(), "storage/task-logs")
+);
+
 export type CreatorPublishTaskType = "video" | "article";
 
 export type CreatorPublishTaskStatus =
@@ -22,6 +26,7 @@ export interface CreatorPublishPayloadBase {
   scheduleAt?: string | null; // ISO string
   productTitle: string; // 商品短标题（必填）
   approvalNumber: string; // 广审批文号（必填，默认：不包含广审内容）
+  isAiContent?: boolean; // 是否为AI内容，影响自主声明选项
 }
 
 export interface CreatorPublishVideoPayload extends CreatorPublishPayloadBase {
@@ -100,6 +105,28 @@ export function patchCreatorPublishTask(
   return next;
 }
 
+function readLastTaskError(taskId: string): string | undefined {
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    const safeName = String(taskId || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 180);
+    const logPath = path.join(TASK_LOGS_DIR, day, `${safeName}.log`);
+    if (!fs.existsSync(logPath)) return undefined;
+    const content = fs.readFileSync(logPath, "utf-8");
+    const lines = content.trim().split("\n");
+    // 从后往前找第一个有意义的错误行（跳过堆栈行）
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const match = lines[i].match(/\[ERROR\] (.*)/);
+      if (!match) continue;
+      const text = match[1].trim();
+      if (/^\s*at\s/.test(text)) continue; // skip stack trace lines
+      return text;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function attachCreatorPublishTaskRuntime(
   runtimeTaskId: string,
   hooks: {
@@ -113,9 +140,13 @@ export function attachCreatorPublishTaskRuntime(
 
   return {
     onClose(code: number | null) {
+      let lastError: string | undefined;
+      if (code !== 0) {
+        lastError = readLastTaskError(runtimeTaskId) || `退出码 ${code ?? -1}`;
+      }
       patchCreatorPublishTask(target.id, {
         status: code === 0 ? "success" : "failed",
-        lastError: code === 0 ? undefined : `退出码 ${code ?? -1}`,
+        lastError,
       });
       hooks.onClose?.(code);
     },

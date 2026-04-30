@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Tabs, Button, Spin, App, Switch, Space, Typography, Alert, Divider } from "antd";
 import { SaveOutlined } from "@ant-design/icons";
-import ConfigAccountTab from "@/components/ConfigAccountTab";
 import ConfigEmailTab from "@/components/ConfigEmailTab";
 import ConfigFeishuTab from "@/components/ConfigFeishuTab";
 import ConfigCreatorDatesSection from "@/components/ConfigCreatorDatesSection";
@@ -109,6 +108,40 @@ export default function ConfigPage() {
                 accounts={creatorAccounts}
                 loading={loadingCreatorAccounts}
                 onRefresh={fetchCreatorAccounts}
+                onAddAccount={async (name) => {
+                  if ((config.accounts || []).includes(name)) {
+                    message.warning("账号已存在");
+                    return;
+                  }
+                  const nextAccounts = [...(config.accounts || []), name];
+                  const res = await fetch("/api/config", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ...config, accounts: nextAccounts }),
+                  });
+                  if (res.ok) {
+                    message.success(`已添加账号: ${name}`);
+                    setConfig((prev) => prev ? { ...prev, accounts: nextAccounts } : prev);
+                    await fetchCreatorAccounts();
+                  } else {
+                    message.error("添加失败");
+                  }
+                }}
+                onDeleteAccount={async (name) => {
+                  const nextAccounts = (config.accounts || []).filter((a) => a !== name);
+                  const res = await fetch("/api/config", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ...config, accounts: nextAccounts }),
+                  });
+                  if (res.ok) {
+                    message.success(`已删除账号: ${name}`);
+                    setConfig((prev) => prev ? { ...prev, accounts: nextAccounts } : prev);
+                    await fetchCreatorAccounts();
+                  } else {
+                    message.error("删除失败");
+                  }
+                }}
                 onLogin={async (name, mode) => {
                   try {
                     await startTask("/api/creator/login", { accountName: name, mode });
@@ -119,26 +152,6 @@ export default function ConfigPage() {
                 }}
               />
             </div>
-
-          <Divider style={{ margin: "8px 0" }} />
-
-          <div>
-            <Typography.Text strong>店铺账号设置</Typography.Text>
-            <div style={{ marginTop: 8 }}>
-              <ConfigAccountTab
-                accounts={config.accounts || []}
-                loginVerifyMethod={config.douyinCreator?.loginVerifyMethod || "qr"}
-                onChange={(data) =>
-                  mergeChange({
-                    accounts: data.accounts,
-                    douyinCreator: {
-                      loginVerifyMethod: data.loginVerifyMethod,
-                    },
-                  })
-                }
-              />
-            </div>
-          </div>
 
           <Divider style={{ margin: "8px 0" }} />
 
@@ -209,6 +222,7 @@ export default function ConfigPage() {
         <ConfigFeishuTab
           shop={config.feishu.shop}
           creator={config.feishu.creator}
+          task={config.feishu.task}
           onChange={(data) => mergeChange({ feishu: data })}
         />
       ),

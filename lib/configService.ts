@@ -28,8 +28,13 @@ export function getConfig(): ConfigData {
     douyinCreator: data?.douyinCreator || { loginVerifyMethod: "qr" },
     headless: data?.headless ?? false,
     feishu: {
-      shop: data?.feishu?.shop || { appToken: "", tableId: "", keepRows: 0 },
-      creator: data?.feishu?.creator || { appToken: "", tableId: "" },
+      shop: data?.feishu?.shop || { appToken: "", tableId: "" },
+      creator: data?.feishu?.creator || { appToken: "", tableId: "", keepRows: 0 },
+      task: data?.feishu?.task || {
+        baseUrl: "https://a5bgloffd0.feishu.cn/base/T64RbXS6wak6QqsaSqzcx0F8n4f?table=tblVym8chEalMZgl&view=vew11jDYDk",
+        appToken: "T64RbXS6wak6QqsaSqzcx0F8n4f",
+        tableId: "tblVym8chEalMZgl",
+      },
     },
   };
 }

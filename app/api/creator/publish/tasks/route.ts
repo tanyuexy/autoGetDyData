@@ -72,20 +72,36 @@ export async function PATCH(req: NextRequest) {
 
     if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
 
-    if (action !== "retry") {
-      return NextResponse.json({ error: "invalid action" }, { status: 400 });
+    if (action === "retry") {
+      const existing = readCreatorPublishTasks().find((t) => t.id === id);
+      if (!existing) return NextResponse.json({ error: "task not found" }, { status: 404 });
+
+      const next = patchCreatorPublishTask(id, {
+        status: "pending",
+        lastError: undefined,
+        taskId: undefined,
+      });
+
+      return NextResponse.json({ ok: true, task: next });
     }
 
-    const existing = readCreatorPublishTasks().find((t) => t.id === id);
-    if (!existing) return NextResponse.json({ error: "task not found" }, { status: 404 });
+    if (action === "delete") {
+      const tasks = readCreatorPublishTasks();
+      const idx = tasks.findIndex((t) => t.id === id);
+      if (idx < 0) return NextResponse.json({ error: "task not found" }, { status: 404 });
 
-    const next = patchCreatorPublishTask(id, {
-      status: "pending",
-      lastError: undefined,
-      taskId: undefined,
-    });
+      const task = tasks[idx];
+      if (task.status === "running") {
+        return NextResponse.json({ error: "running task cannot be deleted" }, { status: 400 });
+      }
 
-    return NextResponse.json({ ok: true, task: next });
+      tasks.splice(idx, 1);
+      writeCreatorPublishTasks(tasks);
+
+      return NextResponse.json({ ok: true });
+    }
+
+    return NextResponse.json({ error: "invalid action" }, { status: 400 });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || String(e) }, { status: 500 });
   }

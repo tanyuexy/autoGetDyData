@@ -13,7 +13,7 @@
     "feishu:insert-xlsx": "node scripts/run.js feishu:insert-xlsx",
     "feishu:backup-bitable": "node scripts/run.js feishu:backup-bitable",
     "feishu:sync-data-xlsx-shop": "node scripts/run.js feishu:backup-bitable --profiles shop && node scripts/run.js feishu:sync-data-xlsx-shop",
-    "feishu:sync-data-xlsx-creator": "node scripts/run.js feishu:backup-bitable --profiles creator && node scripts/run.js feishu:sync-data-xlsx-creator --keep-rows 4",
+    "feishu:sync-data-xlsx-creator": "node scripts/run.js feishu:backup-bitable --profiles creator && node scripts/run.js feishu:sync-data-xlsx-creator",
     "shop": "node scripts/run.js shop:login && npm run shop:merge",
     "shop:merge": "node scripts/run.js shop:merge",
     "shop:feishu": "node scripts/run.js shop:sync-feishu"

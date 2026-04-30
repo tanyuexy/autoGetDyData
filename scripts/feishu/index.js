@@ -44,6 +44,7 @@ const SHOP_XLSX_FIELD_ALIASES = {
 };
 
 const { existsSync } = require("fs");
+const { getProjectConfigPath } = require("../project-config-path");
 
 function getDefaultExportsDir() {
   const envVal = process.env.EXPORTS_DIR;
@@ -204,6 +205,21 @@ function toNonNegativeInteger(value, fallback = 0) {
   const num = Number(value);
   if (!Number.isFinite(num) || num < 0) return fallback;
   return Math.floor(num);
+}
+
+function readProfileKeepRowsFromProjectConfig(profile) {
+  try {
+    const cfgPath = getProjectConfigPath();
+    if (!existsSync(cfgPath)) return undefined;
+    const raw = require("fs").readFileSync(cfgPath, "utf8");
+    const data = JSON.parse(raw);
+    const key = String(profile || "shop").trim() || "shop";
+    const value = data && data.feishu && data.feishu[key] && data.feishu[key].keepRows;
+    if (value === undefined || value === null || value === "") return undefined;
+    return toNonNegativeInteger(value, 0);
+  } catch {
+    return undefined;
+  }
 }
 
 function toNumberOrNull(value) {
@@ -1051,10 +1067,14 @@ async function run() {
     const sheet = String(readOption(args, "sheet") || "").trim();
     const dryRun = Boolean(readOption(args, "dry-run", "dryRun"));
     const limit = toPositiveInteger(readOption(args, "limit"), 0);
-    const keepLeadingRows = toNonNegativeInteger(
-      readOption(args, "keep-rows", "keepRows"),
-      0
+    const keepRowsArg = readOption(args, "keep-rows", "keepRows");
+    const defaultKeepRows = readProfileKeepRowsFromProjectConfig(
+      optionalEnv("FEISHU_BITABLE_PROFILE", "shop")
     );
+    const keepLeadingRows =
+      keepRowsArg !== undefined
+        ? toNonNegativeInteger(keepRowsArg, 0)
+        : toNonNegativeInteger(defaultKeepRows, 0);
     const fieldAliases = readXlsxFieldAliases(args);
 
     const defaultNamePrefix = defaultXlsxNamePrefixForSync();
