@@ -10,7 +10,7 @@ const DEBUG_DIR = path.resolve(process.cwd(), "storage/creator-publish-debug");
 const URL = "https://creator.douyin.com/creator-micro/content/post/image?default-tab=3&enter_from=publish_page&media_type=image&type=new";
 
 const tasks = JSON.parse(fs.readFileSync(path.join(process.cwd(), "storage/creator-publish/tasks.json"), "utf-8"));
-const task = tasks[0];
+const task = tasks.find(t => t.payload.type === "article") || tasks[0];
 const ACCOUNT = task.accountName;
 const IMAGE_KEYS = task.payload.imagesFileKeys;
 const TITLE = task.payload.title;
@@ -279,8 +279,9 @@ async function main() {
     }
 
     await report(page, "07-final");
-    console.log("\n✅ 浏览器保持打开 (600s)。");
-    await page.waitForTimeout(600000);
+    console.log("\n✅ 表单填写完成，停留5s确认。");
+    await page.waitForTimeout(5000);
+    console.log("✅ 测试完成");
   } catch(e) {
     console.error("❌", e.message);
     await report(page, "error").catch(() => {});

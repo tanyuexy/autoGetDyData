@@ -27,6 +27,7 @@ export interface CreatorPublishPayloadBase {
   productTitle: string; // 商品短标题（必填）
   approvalNumber: string; // 广审批文号（必填，默认：不包含广审内容）
   isAiContent?: boolean; // 是否为AI内容，影响自主声明选项
+  productLink?: string; // 商品链接
 }
 
 export interface CreatorPublishVideoPayload extends CreatorPublishPayloadBase {
@@ -38,7 +39,6 @@ export interface CreatorPublishArticlePayload extends CreatorPublishPayloadBase 
   type: "article";
   imagesFileKeys: string[]; // points to storage/creator-materials/<key>
   coverImageKey?: string;
-  productLink?: string;
 }
 
 export type CreatorPublishPayload =

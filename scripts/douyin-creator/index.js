@@ -15,7 +15,9 @@ const { attachQrDataUrlSniffer } = require("./lib/qr");
 const { openTargetAndEnsureLogin } = require("./lib/login");
 const { saveAuth, exportPostListData } = require("./lib/exporter");
 const { mergeExportFiles } = require("./lib/merge-exports");
-const { parseArgs, runPublishArticle } = require("./publish");
+const { parseArgs } = require("./publish/utils");
+const { runPublishArticle } = require("./publish/article");
+const { runPublishVideo } = require("./publish/video");
 
 async function runOneAccount(browser, accountName, command, options = {}) {
   const paths = getAccountPaths(accountName);
@@ -104,7 +106,9 @@ async function main() {
     return;
   }
   if (directCommand === "publish-video") {
-    throw new Error("publish-video 尚未实现");
+    const options = parseArgs(process.argv.slice(3));
+    await runPublishVideo(options);
+    return;
   }
 
   const parsed = parseCliCommand();

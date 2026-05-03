@@ -69,7 +69,7 @@ function AddAccountModal({
       onCancel={onCancel}
       okText="添加"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <Input
         placeholder="输入账号名称"

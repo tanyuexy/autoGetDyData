@@ -190,7 +190,7 @@ export default function CreatorPublishPage() {
       message.error("请填写广审批文号");
       return;
     }
-    if (type === "article" && !productLink.trim()) {
+    if (!productLink.trim()) {
       message.error("请填写商品链接");
       return;
     }
@@ -204,6 +204,7 @@ export default function CreatorPublishPage() {
         productTitle: productTitle.trim(),
         approvalNumber: approvalNumber.trim(),
         isAiContent,
+        productLink: productLink.trim() || undefined,
         scheduleAt,
       };
 
@@ -214,7 +215,6 @@ export default function CreatorPublishPage() {
               ...payloadBase,
               imagesFileKeys: imageKeys,
               coverImageKey: coverImageKey || undefined,
-              productLink: productLink.trim() || undefined,
             };
 
       for (const accountName of accountNames) {
@@ -449,16 +449,16 @@ export default function CreatorPublishPage() {
                     disabled={imageKeys.length === 0}
                   />
                 </Form.Item>
-
-                <Form.Item label="商品链接" style={{ marginBottom: 8 }}>
-                  <Input
-                    value={productLink}
-                    onChange={(e) => setProductLink(e.target.value)}
-                    placeholder="用于自动切换为购物车并粘贴商品链接"
-                  />
-                </Form.Item>
               </>
             )}
+
+            <Form.Item label="商品链接" style={{ marginBottom: 8 }}>
+              <Input
+                value={productLink}
+                onChange={(e) => setProductLink(e.target.value)}
+                placeholder="用于自动切换为购物车并粘贴商品链接"
+              />
+            </Form.Item>
 
             <Form.Item label="标题" style={{ marginBottom: 8 }}>
               <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="标题" />

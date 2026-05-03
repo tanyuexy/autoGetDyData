@@ -1,0 +1,149 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - img [ref=e5]
+    - generic [ref=e6]:
+      - generic [ref=e7] [cursor=pointer]:
+        - img "app_center" [ref=e9]:
+          - img [ref=e10]
+        - generic [ref=e12]: 网址
+      - generic [ref=e13] [cursor=pointer]:
+        - img "tiktok_logo" [ref=e15]:
+          - img [ref=e16]
+        - generic [ref=e18]: 抖音
+  - generic [ref=e19]:
+    - generic [ref=e20]:
+      - generic [ref=e21]: 抖音创作者中心·创作者
+      - generic [ref=e22]: 抖音创作者中心是抖音创作者的一站式服务平台 · 致力于助力创作者高效运营
+    - generic [ref=e25]:
+      - img [ref=e26]
+      - generic [ref=e27]:
+        - generic [ref=e29] [cursor=pointer]:
+          - img [ref=e31]:
+            - img [ref=e32]
+          - text: 我是创作者
+        - generic [ref=e35] [cursor=pointer]:
+          - img [ref=e37]
+          - generic [ref=e38]:
+            - text: 我是MCN机构
+            - img [ref=e39]:
+              - img [ref=e40]
+      - article [ref=e46]:
+        - generic [ref=e50]:
+          - generic [ref=e53]:
+            - generic [ref=e55] [cursor=pointer]: 扫码登录
+            - generic [ref=e59]:
+              - generic [ref=e60]:
+                - generic [ref=e61] [cursor=pointer]: 如何扫码
+                - img [ref=e64]
+                - img [ref=e76]
+              - paragraph [ref=e80]:
+                - text: 打开「抖音APP」点击左上角
+                - img [ref=e81]
+                - text: 进行扫一扫
+          - generic [ref=e89]:
+            - generic [ref=e90] [cursor=pointer]:
+              - generic [ref=e91]: 验证码登录
+              - img [ref=e93]
+              - generic [ref=e94]: 密码登录
+            - generic [ref=e98]:
+              - generic [ref=e100]:
+                - combobox "国家/地区" [ref=e103]: "+86"
+                - img [ref=e106]
+                - textbox "请输入手机号" [ref=e107]
+              - generic [ref=e109]:
+                - textbox "请输入验证码" [ref=e111]
+                - generic [ref=e112]: 获取验证码
+              - generic [ref=e115]: 登录/注册
+              - generic "登录或注册即代表同意用户协议和隐私政策" [ref=e117]:
+                - text: 登录或注册即代表同意
+                - link "用户协议" [ref=e118] [cursor=pointer]:
+                  - /url: https://www.douyin.com/agreements/?id=6773906068725565448
+                - text: 和
+                - link "隐私政策" [ref=e119] [cursor=pointer]:
+                  - /url: https://www.douyin.com/agreements/?id=6773901168964798477
+  - generic [ref=e120]:
+    - generic [ref=e121]: 助力创作者高效运营
+    - generic [ref=e122]:
+      - generic [ref=e123]:
+        - generic [ref=e125]: 作品发布及管理
+        - generic [ref=e126]: 包括视频、图文、全景视频等体裁
+      - generic [ref=e127]:
+        - generic [ref=e129]: 作品数据分析
+        - generic [ref=e130]: 数据多维度与深度分析，精准化经营
+      - generic [ref=e131]:
+        - generic [ref=e133]: 商单任务变现
+        - generic [ref=e134]: 服务全渠道变现，丰富的变现方式
+      - generic [ref=e135]:
+        - generic [ref=e137]: 创作灵感洞察
+        - generic [ref=e138]: 更多灵感方式及曝光，为创作助力
+    - tabpanel [ref=e142]:
+      - generic [ref=e144]:
+        - img [ref=e145] [cursor=pointer]
+        - img [ref=e146] [cursor=pointer]
+        - img [ref=e147] [cursor=pointer]
+  - generic [ref=e148]:
+    - generic [ref=e149]: 机构服务权益
+    - generic [ref=e150]:
+      - img [ref=e151] [cursor=pointer]
+      - img [ref=e152] [cursor=pointer]
+      - img [ref=e153] [cursor=pointer]
+      - img [ref=e154] [cursor=pointer]
+  - generic [ref=e155]:
+    - generic [ref=e156]:
+      - img [ref=e157] [cursor=pointer]
+      - img [ref=e158] [cursor=pointer]
+      - img [ref=e159] [cursor=pointer]
+      - img [ref=e160] [cursor=pointer]
+      - img [ref=e161] [cursor=pointer]
+      - img [ref=e162] [cursor=pointer]
+      - img [ref=e163] [cursor=pointer]
+      - img [ref=e164] [cursor=pointer]
+      - img [ref=e165] [cursor=pointer]
+      - img [ref=e166] [cursor=pointer]
+      - img [ref=e167] [cursor=pointer]
+      - img [ref=e168] [cursor=pointer]
+    - generic [ref=e174]: 千万创作者邀你同行
+    - generic [ref=e175]:
+      - generic [ref=e176] [cursor=pointer]:
+        - img "user_circle" [ref=e177]:
+          - img [ref=e178]
+        - text: 创作者登录
+      - generic [ref=e180] [cursor=pointer]:
+        - img "briefcase" [ref=e181]:
+          - img [ref=e182]
+        - text: MCN机构登录
+  - generic [ref=e185]:
+    - generic [ref=e186]:
+      - link "抖音社区自律公约" [ref=e187] [cursor=pointer]:
+        - /url: //lf3-cdn-tos.draftstatic.com/obj/ies-hotsoon-draft/douyin_creator/40db1b96-0eb0-4754-a052-16e8325af350.html
+      - link "账号授权协议" [ref=e188] [cursor=pointer]:
+        - /url: //lf3-beecdn.bytetos.com/obj/ies-fe-bee/bee_prod/biz_181/bee_prod_181_bee_publish_1095.html
+      - link "用户服务协议" [ref=e189] [cursor=pointer]:
+        - /url: " //www.douyin.com/agreement/"
+      - link "隐私政策" [ref=e190] [cursor=pointer]:
+        - /url: " //www.douyin.com/privacy/"
+      - link "账号找回" [ref=e191] [cursor=pointer]:
+        - /url: " //www.douyin.com/recovery_account/"
+      - link "联系我们" [ref=e192] [cursor=pointer]:
+        - /url: " //www.douyin.com/aboutus/"
+    - generic [ref=e193]:
+      - generic [ref=e194]:
+        - generic [ref=e195]: 2025 © 抖音
+        - link "京ICP备16016397号-3" [ref=e196] [cursor=pointer]:
+          - /url: https://beian.miit.gov.cn/
+        - link "北京抖音科技有限公司" [ref=e197] [cursor=pointer]:
+          - /url: https://lf3-static.bytednsdoc.com/obj/eden-cn/lm-yvahlyj-upfbvk/ljhwZthlaukjlkulzlp/营业执照.jpg
+        - link "京B2-20170846" [ref=e198] [cursor=pointer]:
+          - /url: https://lf3-static.bytednsdoc.com/obj/eden-cn/lm-yvahlyj-upfbvk/ljhwZthlaukjlkulzlp/增值电信业务经营许可证.jpg
+      - generic [ref=e199]:
+        - link "中国互联网举报中心" [ref=e200] [cursor=pointer]:
+          - /url: http://www.12377.cn/
+        - link "网络文化经营许可证-京网文〔2025〕0181-061号" [ref=e201] [cursor=pointer]:
+          - /url: https://lf3-static.bytednsdoc.com/obj/eden-cn/lm-yvahlyj-upfbvk/ljhwZthlaukjlkulzlp/网络经营许可证.jpg
+        - generic [ref=e202]: 违法和不良信息举报：400-140-2108
+        - generic [ref=e203]: 举报邮箱：feedback@douyin.com
+      - generic [ref=e204]:
+        - img "pic" [ref=e205]
+        - link "京公网安备11000002002046号" [ref=e206] [cursor=pointer]:
+          - /url: http://www.beian.gov.cn/portal/registerSystemInfo?recordcode=11000002002046
+        - generic [ref=e207]: 地址：北京市海淀区北三环西路甲18号院4号楼2层2022
