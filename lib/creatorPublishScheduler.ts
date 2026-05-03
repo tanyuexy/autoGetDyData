@@ -29,9 +29,9 @@ function buildRunArgs(task: CreatorPublishTask): string[] {
   } else {
     args.push("--imageKeys", task.payload.imagesFileKeys.join(","));
     if (task.payload.coverImageKey) args.push("--coverImageKey", task.payload.coverImageKey);
-    if (task.payload.productLink) args.push("--productLink", task.payload.productLink);
   }
 
+  if (task.payload.productLink) args.push("--productLink", task.payload.productLink);
   if (task.payload.title) args.push("--title", task.payload.title);
   if (task.payload.description) args.push("--desc", task.payload.description);
   if (task.payload.productTitle) args.push("--productTitle", task.payload.productTitle);
