@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, isTaskRunning } from "@/lib/taskManager";
+import { spawnTask } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       "feishu:backup",
       "--profiles",
       profiles,
-    ]);
+    ], { namespace: "system" });
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

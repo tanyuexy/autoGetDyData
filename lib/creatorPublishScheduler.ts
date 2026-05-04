@@ -1,5 +1,5 @@
 import path from "path";
-import { spawnTask } from "./taskManager";
+import { spawnTask, canStartTask } from "./taskManager";
 import {
   attachCreatorPublishTaskRuntime,
   patchCreatorPublishTask,
@@ -19,10 +19,12 @@ function shouldRun(task: CreatorPublishTask, now: Date): boolean {
 }
 
 function buildRunArgs(task: CreatorPublishTask): string[] {
-  const base = ["scripts/run.js"];
-  const cmd = task.payload.type === "video" ? "creator:publish-video" : "creator:publish-article";
+  // Run index.js directly to avoid spawnSync layer in scripts/run.js
+  // This way killTask can terminate the process tree cleanly
+  const scriptPath = "scripts/douyin-creator/index.js";
+  const cmd = task.payload.type === "video" ? "publish-video" : "publish-article";
 
-  const args: string[] = [cmd, "--account", task.accountName, "--task", task.id];
+  const args: string[] = [scriptPath, cmd, "--account", task.accountName, "--task", task.id];
 
   if (task.payload.type === "video") {
     args.push("--videoKey", task.payload.videoFileKey);
@@ -39,7 +41,7 @@ function buildRunArgs(task: CreatorPublishTask): string[] {
   if (task.payload.isAiContent) args.push("--isAiContent");
   if (task.payload.scheduleAt) args.push("--scheduleAt", task.payload.scheduleAt);
 
-  return [...base, ...args];
+  return args;
 }
 
 export function startCreatorPublishScheduler() {
@@ -53,12 +55,19 @@ export function startCreatorPublishScheduler() {
     for (const t of tasks) {
       if (!shouldRun(t, now)) continue;
 
-      const runtimeTaskId = `creator-publish-${t.id}-${Date.now()}`;
+      if (!canStartTask("creator-publish")) break;
+
+      const startedAt = new Date();
+      const hh = String(startedAt.getHours()).padStart(2, '0');
+      const mm = String(startedAt.getMinutes()).padStart(2, '0');
+      const ss = String(startedAt.getSeconds()).padStart(2, '0');
+      const runtimeTaskId = `creator-publish-${t.id}-${hh}-${mm}-${ss}`;
       patchCreatorPublishTask(t.id, { status: "running", taskId: runtimeTaskId, lastError: undefined });
 
       try {
         const runtimeHooks = attachCreatorPublishTaskRuntime(runtimeTaskId, {});
         spawnTask(runtimeTaskId, "node", buildRunArgs(t), {
+          namespace: "creator-publish",
           cwd: path.resolve(process.cwd()),
           onClose: runtimeHooks.onClose,
           onError: runtimeHooks.onError,

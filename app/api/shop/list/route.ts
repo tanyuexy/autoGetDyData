@@ -28,7 +28,6 @@ export async function GET() {
       const newPath = path.resolve(process.cwd(), "storage/shop-accounts");
       const oldPath = path.resolve(process.cwd(), "accounts-shop");
       if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
-        console.warn("[migration] 正在使用旧目录 \"accounts-shop/\"，建议移动到 \"storage/shop-accounts/\" 或设置 SHOP_ACCOUNTS_DIR");
         return oldPath;
       }
       return newPath;

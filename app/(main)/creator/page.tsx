@@ -40,7 +40,7 @@ export default function CreatorPage() {
     } catch {}
   }, []);
 
-  const { startTask, resetTask, done } = useTaskContext();
+  const { startTask, done, isNamespaceBusy } = useTaskContext();
 
   const fetchAccounts = useCallback(async () => {
     setLoading(true);
@@ -63,7 +63,6 @@ export default function CreatorPage() {
   useEffect(() => {
     if (done) {
       fetchAccounts();
-      resetTask();
     }
   }, [done]);
 
@@ -116,7 +115,7 @@ export default function CreatorPage() {
     };
 
     try {
-      await startTask(endpoints[action], { accounts: selectedAccounts });
+      await startTask(endpoints[action], { accounts: selectedAccounts }, "creator-export");
       message.info("任务已启动");
     } catch (e: any) {
       message.error(e.message || "启动任务失败");
@@ -160,14 +159,23 @@ export default function CreatorPage() {
           <Button
             type="primary"
             onClick={() => handleAction("export")}
-            disabled={accounts.length === 0}
+            disabled={accounts.length === 0 || isNamespaceBusy("creator-export")}
           >
             导出数据
           </Button>
-          <Button type="primary" onClick={() => handleAction("feishu-sync")}>
+          <Button
+            type="primary"
+            onClick={() => handleAction("feishu-sync")}
+            disabled={isNamespaceBusy("creator-export")}
+          >
             同步多维表格
           </Button>
-          <Button danger type="primary" onClick={() => handleAction("sync-feishu")}>
+          <Button
+            danger
+            type="primary"
+            onClick={() => handleAction("sync-feishu")}
+            disabled={isNamespaceBusy("creator-export")}
+          >
             导出并推送
           </Button>
         </Space>

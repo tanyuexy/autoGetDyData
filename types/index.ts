@@ -48,3 +48,9 @@ export interface SSEDoneEvent {
   code: number;
   summary: string;
 }
+
+export interface RunningTaskInfo {
+  taskId: string;
+  namespace: string;
+  startedAt: number;
+}

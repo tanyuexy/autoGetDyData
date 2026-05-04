@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, isTaskRunning } from "@/lib/taskManager";
+import { spawnTask, canStartTask } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -11,9 +11,9 @@ function parseShopNames(body: any) {
 
 export async function POST(request: NextRequest) {
   try {
-    if (isTaskRunning()) {
+    if (!canStartTask("shop-export")) {
       return NextResponse.json(
-        { error: "已有任务正在运行，请等待完成后再执行" },
+        { error: "已有抖店同步任务在运行，请等待完成后再执行" },
         { status: 409 }
       );
     }
@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
 
     const taskId = `shop-sync-feishu-${Date.now()}`;
     spawnTask(taskId, "node", ["scripts/run.js", "shop:sync-feishu"], {
+      namespace: "shop-export",
       env: {
         SHOP_SELECTED_NAMES: shopNames.join(","),
       },

@@ -1,9 +1,11 @@
 import fs from "fs";
 import path from "path";
+import { getTaskList } from "./taskManager";
+import { loadTaskSnapshotFromDisk } from "./sseManager";
 
 export const CREATOR_PUBLISH_TASKS_PATH = path.resolve(
   process.env.CREATOR_PUBLISH_TASKS_PATH ||
-    path.join(process.cwd(), "storage/creator-publish/tasks.json")
+  path.join(process.cwd(), "storage/creator-publish/tasks.json")
 );
 
 const TASK_LOGS_DIR = path.resolve(
@@ -103,6 +105,39 @@ export function patchCreatorPublishTask(
   tasks[idx] = next;
   writeCreatorPublishTasks(tasks);
   return next;
+}
+
+/**
+ * 子进程已不在 taskManager 中，但 tasks.json 仍为 running 时（进程崩溃、onClose 未执行、热重载丢内存等），
+ * 根据磁盘日志把状态补成 success / failed，与命令行/日志文件一致。
+ */
+export function reconcileStaleRunningCreatorPublishTasks(): void {
+  const liveIds = new Set(getTaskList());
+  const now = Date.now();
+  const MIN_RUNNING_MS = 15_000; // skip tasks running <15s to avoid racing with process spawn
+
+  for (const task of readCreatorPublishTasks()) {
+    if (task.status !== "running" || !task.taskId) continue;
+    if (liveIds.has(task.taskId)) continue;
+
+    // Grace period: don't reconcile tasks that just started running
+    const updatedAt = new Date(task.updatedAt).getTime();
+    if (Number.isFinite(updatedAt) && now - updatedAt < MIN_RUNNING_MS) continue;
+
+    const snap = loadTaskSnapshotFromDisk(task.taskId);
+
+    // 只有日志里明确包含 DONE 才做状态修复。
+    // 如果日志存在但还没有 DONE，说明可能只是进程仍在执行或 taskManager 运行列表短暂不同步，不能提前标记失败。
+    if (!snap.found || !snap.done) continue;
+
+    const ok = snap.exitCode === 0;
+    patchCreatorPublishTask(task.id, {
+      status: ok ? "success" : "failed",
+      lastError: ok
+        ? undefined
+        : snap.summary || readLastTaskError(task.taskId) || `退出码 ${snap.exitCode}`,
+    });
+  }
 }
 
 function readLastTaskError(taskId: string): string | undefined {

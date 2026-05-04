@@ -256,8 +256,8 @@ async function runPublishVideo(options) {
     await selectSelfDeclaration(page, options.isAiContent === true || options.isAiContent === "true");
     await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
 
-    console.log("视频发布已完成自动填写，当前停留在最终发布前，请人工确认后手动点击发布。");
-    await page.waitForTimeout(600000);
+    console.log("视频发布表单填写完成，停留5s后视为成功。");
+    await page.waitForTimeout(5000);
   } catch (error) {
     await saveDebugArtifacts(page, accountName, "run-failed").catch(() => {});
     throw error;

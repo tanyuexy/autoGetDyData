@@ -19,7 +19,6 @@ import {
   Typography,
 } from "antd";
 import dayjs from "dayjs";
-import type { CreatorAccount } from "@/types";
 import { useTaskContext } from "@/contexts/TaskContext";
 
 const { Text } = Typography;
@@ -59,9 +58,7 @@ type PublishTask = {
 
 export default function CreatorPublishPage() {
   const { message } = App.useApp();
-  const { clearLogs, setTaskId } = useTaskContext();
-  const [selectedRuntimeTaskId, setSelectedRuntimeTaskId] = useState<string | null>(null);
-  const [accounts, setAccounts] = useState<CreatorAccount[]>([]);
+  const { isNamespaceBusy, selectTaskLog, runningTasks } = useTaskContext();
   const [tasks, setTasks] = useState<PublishTask[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(true);
@@ -81,6 +78,7 @@ export default function CreatorPublishPage() {
   const [approvalNumber, setApprovalNumber] = useState<string>("不包含广审内容");
   const [isAiContent, setIsAiContent] = useState<boolean>(false);
   const [scheduleAt, setScheduleAt] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<{ name: string }[]>([]);
 
   const accountOptions = useMemo(
     () => accounts.map((a) => ({ label: a.name, value: a.name })),
@@ -278,10 +276,6 @@ export default function CreatorPublishPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "删除失败");
 
-      if (selectedRuntimeTaskId && selectedRuntimeTaskId === task.taskId) {
-        setSelectedRuntimeTaskId(null);
-      }
-
       message.success("已删除");
       await fetchTasks();
     } catch (e: any) {
@@ -338,14 +332,19 @@ export default function CreatorPublishPage() {
             size="small"
             type="link"
             disabled={!r.taskId}
-            onClick={() => setSelectedRuntimeTaskId(r.taskId || null)}
+            onClick={() => {
+              if (r.taskId) {
+                const stillRunning = runningTasks.some((t) => t.taskId === r.taskId);
+                selectTaskLog(r.taskId, !stillRunning && (r.status === "success" || r.status === "failed"));
+              }
+            }}
           >
             查看日志
           </Button>
           <Button
             size="small"
             type="link"
-            disabled={r.status !== "failed" && r.status !== "cancelled" && r.status !== "success"}
+            disabled={r.status !== "failed" && r.status !== "cancelled" && r.status !== "success" || isNamespaceBusy("creator-publish")}
             onClick={() => handleRetryTask(r)}
           >
             重试
@@ -544,37 +543,6 @@ export default function CreatorPublishPage() {
           columns={columns as any}
           pagination={{ pageSize: 20 }}
         />
-      </Card>
-
-      <Card title="执行日志" size="small" styles={{ body: { padding: 8 } }}>
-        <Space wrap style={{ marginBottom: 8 }}>
-          <Select
-            style={{ minWidth: 320 }}
-            placeholder="选择任务以查看日志"
-            allowClear
-            value={selectedRuntimeTaskId}
-            onChange={(v) => setSelectedRuntimeTaskId(v)}
-            options={tasks
-              .filter((t) => !!t.taskId)
-              .map((t) => ({
-                label: `${t.accountName} / ${t.payload.type === "video" ? "视频" : "图文"} / ${t.status}`,
-                value: t.taskId as string,
-              }))}
-          />
-          <Button
-            onClick={() => {
-              if (!selectedRuntimeTaskId) return;
-              clearLogs();
-              setTaskId(selectedRuntimeTaskId);
-            }}
-            disabled={!selectedRuntimeTaskId}
-          >
-            在侧边栏连接日志
-          </Button>
-        </Space>
-        <div style={{ color: "rgba(15,23,42,.55)", fontSize: 12 }}>
-          已在悬浮命令行面板连接日志
-        </div>
       </Card>
     </Space>
   );

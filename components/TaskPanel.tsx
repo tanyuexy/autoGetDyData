@@ -1,19 +1,37 @@
 "use client";
 
-import { Button, Space, Progress, Alert, Tag, Typography } from "antd";
+import { useEffect, useState, useRef } from "react";
+import { Button, Space, Progress, Alert, Tag, Typography, Select } from "antd";
 import {
   PlayCircleOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import LogTerminal from "./LogTerminal";
-import { useSSE } from "@/hooks/useSSE";
+import { useTaskContext } from "@/contexts/TaskContext";
 
 const { Text } = Typography;
 
+const NAMESPACE_LABELS: Record<string, string> = {
+  "creator-export": "抖创导出",
+  "shop-export": "抖店导出",
+  "creator-publish": "发布",
+  login: "登录",
+  system: "系统",
+};
+
+interface RecentLogFile {
+  taskId: string;
+  date: string;
+  firstLine: string;
+  hasDone: boolean;
+  exitCode: number | null;
+  namespace: string;
+  mtime: number;
+}
+
 interface Props {
-  taskId: string | null;
-  isRunning: boolean;
   taskButtons: {
     key: string;
     label: string;
@@ -21,28 +39,67 @@ interface Props {
     danger?: boolean;
     disabled?: boolean;
   }[];
-  onClearLogs?: () => void;
-  logs: ReturnType<typeof useSSE>["logs"];
-  progress: ReturnType<typeof useSSE>["progress"];
-  done: ReturnType<typeof useSSE>["done"];
-  exitCode: ReturnType<typeof useSSE>["exitCode"];
-  summary: ReturnType<typeof useSSE>["summary"];
   terminalHeight?: number;
 }
 
-export default function TaskPanel({
-  taskId,
-  isRunning,
-  taskButtons,
-  onClearLogs,
-  logs,
-  progress,
-  done,
-  exitCode,
-  summary,
-  terminalHeight,
-}: Props) {
+export default function TaskPanel({ taskButtons, terminalHeight }: Props) {
+  const {
+    activeViewId,
+    logs,
+    progress,
+    done,
+    exitCode,
+    summary,
+    isRunning,
+    clearLogs,
+    selectTaskLog,
+  } = useTaskContext();
+
+  const [recentFiles, setRecentFiles] = useState<RecentLogFile[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const loadedRef = useRef(false);
   const showHeader = taskButtons.length > 0;
+
+  async function fetchRecentLogs() {
+    setLoadingFiles(true);
+    try {
+      const res = await fetch("/api/progress/recent-logs");
+      const data = await res.json();
+      setRecentFiles((data.files || []) as RecentLogFile[]);
+    } catch {
+      /* ignore */
+    }
+    setLoadingFiles(false);
+  }
+
+  useEffect(() => {
+    if (!loadedRef.current) {
+      loadedRef.current = true;
+      fetchRecentLogs();
+    }
+    const interval = setInterval(fetchRecentLogs, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  function formatRecentLogOptionText(f: RecentLogFile) {
+    const doneIcon = f.hasDone
+      ? f.exitCode === 0
+        ? "✓"
+        : "✗"
+      : "";
+    const nsLabel = NAMESPACE_LABELS[f.namespace] || f.namespace;
+    const timeStr = new Date(f.mtime)
+      .toLocaleString("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+      .replace(/\//g, "-")
+      .replace(/\s/g, " ");
+    return `${nsLabel} ${doneIcon} ${f.taskId.slice(0, 32)} (${timeStr})`.trim();
+  }
 
   return (
     <div
@@ -64,13 +121,60 @@ export default function TaskPanel({
               icon={<PlayCircleOutlined />}
               onClick={btn.onClick}
               loading={isRunning && !done}
-              disabled={btn.disabled || (isRunning && !done)}
+              disabled={btn.disabled}
             >
               {btn.label}
             </Button>
           ))}
+          {isRunning && (
+            <Tag color="processing" icon={<ReloadOutlined spin />}>
+              任务运行中
+            </Tag>
+          )}
         </Space>
       )}
+
+      {/* Task log selector — replaces old Tabs + running-tasks list */}
+      <div style={{ marginBottom: 8, flexShrink: 0 }}>
+        <Select
+          showSearch
+          allowClear
+          placeholder={loadingFiles ? "加载日志列表..." : "选择历史日志查看"}
+          value={activeViewId || undefined}
+          onChange={async (val) => {
+            if (!val) return;
+            const found = recentFiles.find((f) => f.taskId === val);
+            if (found?.hasDone) {
+              await selectTaskLog(val, true);
+            } else {
+              await selectTaskLog(val, false);
+            }
+          }}
+          onOpenChange={(open) => {
+            if (open) fetchRecentLogs();
+          }}
+          loading={loadingFiles}
+          style={{ width: "100%" }}
+          size="small"
+          filterOption={(input, option) => {
+            if (!option?.value) return false;
+            const value = String(option.value);
+            const meta = recentFiles.find((f) => f.taskId === value);
+            const searchText = [
+              value,
+              meta?.firstLine,
+              NAMESPACE_LABELS[meta?.namespace || ""],
+            ]
+              .join(" ")
+              .toLowerCase();
+            return searchText.includes(input.toLowerCase());
+          }}
+          options={recentFiles.map((f) => ({
+            value: f.taskId,
+            label: formatRecentLogOptionText(f),
+          }))}
+        />
+      </div>
 
       {done && (
         <Alert
@@ -84,20 +188,18 @@ export default function TaskPanel({
             </Space>
           }
           showIcon={false}
-          style={{ marginBottom: 8 }}
+          style={{ marginBottom: 8, flexShrink: 0 }}
         />
       )}
 
-      {isRunning && !done && (
-        <div style={{ marginBottom: 8 }}>
+      {isRunning && !done && activeViewId && (
+        <div style={{ marginBottom: 8, flexShrink: 0 }}>
           <Text type="secondary" style={{ marginRight: 8 }}>
             任务运行中...
           </Text>
-          {taskId && (
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              ID: {taskId}
-            </Text>
-          )}
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            ID: {activeViewId}
+          </Text>
         </div>
       )}
 
@@ -106,11 +208,11 @@ export default function TaskPanel({
           percent={Math.round((progress.current / progress.total) * 100)}
           format={() => `${progress.current}/${progress.total}`}
           status={done ? (exitCode === 0 ? "success" : "exception") : "active"}
-          style={{ marginBottom: 8 }}
+          style={{ marginBottom: 8, flexShrink: 0 }}
         />
       )}
 
-      <LogTerminal logs={logs} onClear={onClearLogs} height="100%" />
+      <LogTerminal logs={logs} onClear={clearLogs} height="100%" />
     </div>
   );
 }

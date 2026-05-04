@@ -19,6 +19,7 @@ import {
 } from "@ant-design/icons";
 import type { CreatorAccount, ShopAccount } from "@/types";
 import { useState } from "react";
+import { useTaskContext } from "@/contexts/TaskContext";
 
 interface CreatorProps {
   type: "creator";
@@ -86,6 +87,8 @@ export default function AccountTable(props: Props) {
 
   if (type === "creator") {
     const { onLogin, onAddAccount, onDeleteAccount } = props as CreatorProps;
+    const { isNamespaceBusy } = useTaskContext();
+    const loginBusy = isNamespaceBusy("login");
     const [modalOpen, setModalOpen] = useState(false);
 
     const columns = [
@@ -131,12 +134,12 @@ export default function AccountTable(props: Props) {
                 trigger={["hover"]}
                 placement="bottomRight"
                 menu={{ items: items as any }}
-                disabled={disabled}
+                disabled={disabled || loginBusy}
               >
                 <Button
                   size="small"
                   type="primary"
-                  disabled={disabled}
+                  disabled={disabled || loginBusy}
                   onClick={() => onLogin?.(row.name, "email_qr")}
                 >
                   <Space size={4}>

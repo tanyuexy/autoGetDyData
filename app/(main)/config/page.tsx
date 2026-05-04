@@ -144,7 +144,7 @@ export default function ConfigPage() {
                 }}
                 onLogin={async (name, mode) => {
                   try {
-                    await startTask("/api/creator/login", { accountName: name, mode });
+                    await startTask("/api/creator/login", { accountName: name, mode }, "login");
                     message.info(`登录任务已启动: ${name}`);
                   } catch (e: any) {
                     message.error(e.message || "启动登录失败");
@@ -206,7 +206,7 @@ export default function ConfigPage() {
           onChange={(emails) => mergeChange({ emails })}
           onLogin={async (email) => {
             try {
-              await startTask("/api/shop/login-one", { email });
+              await startTask("/api/shop/login-one", { email }, "login");
               message.info(`登录任务已启动: ${email}`);
             } catch (e: any) {
               message.error(e.message || "启动登录失败");

@@ -40,7 +40,7 @@ export default function ShopPage() {
     } catch {}
   }, []);
 
-  const { startTask, resetTask, done } = useTaskContext();
+  const { startTask, done, isNamespaceBusy } = useTaskContext();
 
   const fetchAccounts = useCallback(async () => {
     setLoading(true);
@@ -64,7 +64,6 @@ export default function ShopPage() {
   useEffect(() => {
     if (done) {
       fetchAccounts();
-      resetTask();
     }
   }, [done]);
 
@@ -111,7 +110,7 @@ export default function ShopPage() {
       "sync-feishu": "/api/shop/sync-feishu",
     };
     try {
-      await startTask(endpoints[action], { shopNames: selectedShopNames });
+      await startTask(endpoints[action], { shopNames: selectedShopNames }, "shop-export");
       message.info("任务已启动");
     } catch (e: any) {
       message.error(e.message || "启动任务失败");
@@ -160,14 +159,14 @@ export default function ShopPage() {
           <Button
             type="primary"
             onClick={() => handleAction("export")}
-            disabled={shopNames.length === 0}
+            disabled={shopNames.length === 0 || isNamespaceBusy("shop-export")}
           >
             导出数据
           </Button>
           <Button
             type="primary"
             onClick={() => handleAction("feishu-sync")}
-            disabled={shopNames.length === 0}
+            disabled={shopNames.length === 0 || isNamespaceBusy("shop-export")}
           >
             同步多维表格
           </Button>
@@ -175,7 +174,7 @@ export default function ShopPage() {
             danger
             type="primary"
             onClick={() => handleAction("sync-feishu")}
-            disabled={shopNames.length === 0}
+            disabled={shopNames.length === 0 || isNamespaceBusy("shop-export")}
           >
             导出并推送
           </Button>

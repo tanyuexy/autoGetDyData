@@ -1,5 +1,10 @@
 import { NextRequest } from "next/server";
-import { registerClient, unregisterClient } from "@/lib/sseManager";
+import {
+  drainSsePending,
+  registerClient,
+  unregisterClient,
+  writeSseBootstrap,
+} from "@/lib/sseManager";
 import { killTask } from "@/lib/taskManager";
 
 export const maxDuration = 0;
@@ -14,8 +19,10 @@ export async function GET(
   const stream = new ReadableStream({
     start(controller) {
       registerClient(taskId, controller, encoder);
-      const payload = `event: connected\ndata: {}\n\n`;
-      controller.enqueue(encoder.encode(payload));
+      writeSseBootstrap(taskId, `retry: 2000\nevent: connected\ndata: {}\n\n`);
+    },
+    pull() {
+      drainSsePending(taskId);
     },
     cancel() {
       unregisterClient(taskId);
@@ -25,8 +32,9 @@ export async function GET(
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }

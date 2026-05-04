@@ -61,8 +61,18 @@ const TERMINAL_SIZE = { w: 720, h: 460 };
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
 
-  const [terminalOpen, setTerminalOpen] = useState(false);
-  const [terminalMinimized, setTerminalMinimized] = useState(false);
+  const {
+    terminalOpen,
+    terminalMinimized,
+    openTerminal,
+    minimizeTerminal,
+    closeTerminal,
+    restoreTerminal,
+    activeViewId,
+    isRunning,
+    done,
+    cancelTask,
+  } = useTaskContext();
   const dragRef = useRef<DragState | null>(null);
   const [pos, setPos] = useState<Pos>({ x: 0, y: 0 });
 
@@ -73,23 +83,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   } = theme.useToken();
 
   const selectedKey = pathname || "/creator";
-
-  const {
-    taskId,
-    isRunning,
-    logs,
-    progress,
-    done,
-    exitCode,
-    summary,
-    clearLogs,
-    cancelTask,
-  } = useTaskContext();
-
-  function openTerminal() {
-    setTerminalOpen(true);
-    setTerminalMinimized(false);
-  }
 
   function onMouseDownDrag(e: React.MouseEvent) {
     if (terminalMinimized) return;
@@ -212,7 +205,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <button
           type="button"
           className="terminal-float-launch"
-          onClick={openTerminal}
+          onClick={() => openTerminal()}
           aria-label="打开命令行"
           title="打开命令行"
         >
@@ -237,7 +230,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               className="terminal-float-minibtn"
-              onClick={() => setTerminalMinimized(false)}
+              onClick={() => restoreTerminal()}
               aria-label="展开命令行"
               title="展开命令行"
             >
@@ -258,28 +251,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   <span style={{ fontSize: 12, color: "rgba(15,23,42,.82)", fontWeight: 650 }}>
                     命令行 / 任务日志
                   </span>
-                  {taskId ? (
-                    <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>ID: {taskId}</span>
+                  {activeViewId ? (
+                    <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>ID: {activeViewId}</span>
                   ) : null}
                 </div>
 
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   {isRunning && !done ? (
-                    <Button danger size="small" onClick={cancelTask}>
+                    <Button danger size="small" onClick={() => activeViewId && cancelTask(activeViewId)}>
                       终止
                     </Button>
                   ) : null}
                   <Button
                     size="small"
                     icon={<MinusOutlined />}
-                    onClick={() => setTerminalMinimized(true)}
+                    onClick={() => minimizeTerminal()}
                   />
                   <Button
                     size="small"
                     icon={<CloseOutlined />}
                     onClick={() => {
-                      setTerminalOpen(false);
-                      setTerminalMinimized(false);
+                      closeTerminal();
                     }}
                   />
                 </div>
@@ -290,15 +282,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 style={{ flex: 1, minHeight: 0 }}
               >
                 <TaskPanel
-                  taskId={taskId}
-                  isRunning={isRunning}
                   taskButtons={[]}
-                  logs={logs}
-                  progress={progress}
-                  done={done}
-                  exitCode={exitCode}
-                  summary={summary}
-                  onClearLogs={clearLogs}
                   terminalHeight={Math.max(160, TERMINAL_SIZE.h - 54 - 12)}
                 />
               </div>

@@ -3,6 +3,7 @@ import crypto from "crypto";
 import {
   patchCreatorPublishTask,
   readCreatorPublishTasks,
+  reconcileStaleRunningCreatorPublishTasks,
   writeCreatorPublishTasks,
   type CreatorPublishPayload,
   type CreatorPublishTask,
@@ -11,6 +12,7 @@ import {
 export const maxDuration = 0;
 
 export async function GET() {
+  reconcileStaleRunningCreatorPublishTasks();
   const tasks = readCreatorPublishTasks();
   return NextResponse.json({ tasks });
 }

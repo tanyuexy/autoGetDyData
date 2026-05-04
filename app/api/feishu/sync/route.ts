@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, isTaskRunning } from "@/lib/taskManager";
+import { spawnTask } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       const { getConfig } = require("@/lib/configService");
       const cfg = getConfig();
       defaultKeepRows = Number(cfg?.feishu?.shop?.keepRows ?? 0) || 0;
-    } catch {}
+    } catch { }
 
     const taskId = `feishu-sync-${Date.now()}`;
     const args = [
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
       args.push("--keep-rows", String(Math.floor(effectiveKeepRows)));
     }
 
-    spawnTask(taskId, "node", args);
+    spawnTask(taskId, "node", args, { namespace: "system" });
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

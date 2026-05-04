@@ -51,7 +51,7 @@ export default function FeishuPage() {
 
   async function handleBackupBoth() {
     try {
-      await startTask("/api/feishu/backup", { profiles: "creator,shop" });
+      await startTask("/api/feishu/backup", { profiles: "creator,shop" }, "system");
       message.info("备份任务已启动");
     } catch (e: any) {
       message.error(e.message || "启动失败");

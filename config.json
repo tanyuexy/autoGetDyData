@@ -52,5 +52,5 @@
     }
   },
   "creatorExportDateStart": null,
-  "headless": false
+  "headless": true
 }

@@ -1,4 +1,13 @@
 require("dotenv").config();
+// stdout 接到管道时默认会块缓冲，父进程难以及时收到逐行日志
+try {
+  if (process.stdout._handle && typeof process.stdout._handle.setBlocking === "function") {
+    process.stdout._handle.setBlocking(true);
+  }
+  if (process.stderr._handle && typeof process.stderr._handle.setBlocking === "function") {
+    process.stderr._handle.setBlocking(true);
+  }
+} catch (_) {}
 const path = require("path");
 const { spawnSync } = require("child_process");
 const { chromium } = require("playwright");

@@ -27,7 +27,6 @@ export async function GET() {
       const newPath = path.resolve(process.cwd(), "storage/creator-accounts");
       const oldPath = path.resolve(process.cwd(), "accounts");
       if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
-        console.warn("[migration] 正在使用旧目录 \"accounts/\"，建议移动到 \"storage/creator-accounts/\" 或设置 CREATOR_ACCOUNTS_DIR");
         return oldPath;
       }
       return newPath;
