@@ -6,6 +6,18 @@ import { getConfig } from "./configService";
 
 export type TaskNamespace = "creator-export" | "shop-export" | "creator-publish" | "login" | "system";
 
+/**
+ * 生成带时间后缀的 taskId，格式：{prefix}-HH.mm.ss
+ * 例如：creator-export-23.45.12
+ */
+export function generateTaskIdWithTime(prefix: string): string {
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  return `${prefix}-${hh}.${mm}.${ss}`;
+}
+
 interface NamespaceState {
   tasks: Map<string, ChildProcess>;
   stoppingTasks: Set<string>;

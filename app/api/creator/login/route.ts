@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, canStartTask } from "@/lib/taskManager";
+import { spawnTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
     const headless = mode === "local_manual" ? "false" : "true";
 
-    const taskId = `creator-login-${Date.now()}`;
+    const taskId = generateTaskIdWithTime("creator-login");
     spawnTask(taskId, "node", ["scripts/run.js", "creator:login", accountName], {
       namespace: "login",
       env: { HEADLESS: headless },

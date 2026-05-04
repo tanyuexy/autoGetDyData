@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, canStartTask } from "@/lib/taskManager";
+import { spawnTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -14,7 +14,7 @@ export async function POST(_request: NextRequest) {
 
     require("dotenv").config();
 
-    const taskId = `shop-login-${Date.now()}`;
+    const taskId = generateTaskIdWithTime("shop-login");
     spawnTask(taskId, "node", ["scripts/run.js", "shop:login"], { namespace: "login" });
 
     return NextResponse.json({ taskId });

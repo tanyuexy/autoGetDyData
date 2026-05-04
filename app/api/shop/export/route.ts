@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, canStartTask } from "@/lib/taskManager";
+import { spawnTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({} as any));
     const shopNames = parseShopNames(body);
 
-    const taskId = `shop-export-${Date.now()}`;
+    const taskId = generateTaskIdWithTime("shop-export");
     spawnTask(taskId, "node", ["scripts/run.js", "shop:export"], {
       namespace: "shop-export",
       env: {

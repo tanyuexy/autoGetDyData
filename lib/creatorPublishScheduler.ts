@@ -1,5 +1,5 @@
 import path from "path";
-import { spawnTask, canStartTask } from "./taskManager";
+import { spawnTask, canStartTask, generateTaskIdWithTime } from "./taskManager";
 import {
   attachCreatorPublishTaskRuntime,
   patchCreatorPublishTask,
@@ -57,11 +57,7 @@ export function startCreatorPublishScheduler() {
 
       if (!canStartTask("creator-publish")) break;
 
-      const startedAt = new Date();
-      const hh = String(startedAt.getHours()).padStart(2, '0');
-      const mm = String(startedAt.getMinutes()).padStart(2, '0');
-      const ss = String(startedAt.getSeconds()).padStart(2, '0');
-      const runtimeTaskId = `creator-publish-${t.id}-${hh}-${mm}-${ss}`;
+      const runtimeTaskId = generateTaskIdWithTime(`creator-publish-${t.id}`);
       patchCreatorPublishTask(t.id, { status: "running", taskId: runtimeTaskId, lastError: undefined });
 
       try {

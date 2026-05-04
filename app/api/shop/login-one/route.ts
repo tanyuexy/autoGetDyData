@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, canStartTask } from "@/lib/taskManager";
+import { spawnTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "缺少 email" }, { status: 400 });
     }
 
-    const taskId = `shop-login-one-${Date.now()}`;
+    const taskId = generateTaskIdWithTime("shop-login-one");
     // 传入邮箱即可：scripts/douyin-shop/index.js 会自动使用默认密码
     spawnTask(taskId, "node", ["scripts/run.js", "shop:login", email], { namespace: "login" });
 

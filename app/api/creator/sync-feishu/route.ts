@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, canStartTask } from "@/lib/taskManager";
+import { spawnTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       ? body.accounts.map((s: any) => String(s || "").trim()).filter(Boolean)
       : [];
 
-    const taskId = `creator-sync-feishu-${Date.now()}`;
+    const taskId = generateTaskIdWithTime("creator-sync-feishu");
     const args = ["scripts/run.js", "creator:export-feishu", ...accounts];
 
     spawnTask(taskId, "node", args, { namespace: "creator-export" });

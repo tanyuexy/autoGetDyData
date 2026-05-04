@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask } from "@/lib/taskManager";
+import { spawnTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       defaultKeepRows = Number(cfg?.feishu?.shop?.keepRows ?? 0) || 0;
     } catch { }
 
-    const taskId = `feishu-sync-${Date.now()}`;
+    const taskId = generateTaskIdWithTime("feishu-sync");
     const args = [
       "scripts/run.js",
       profile === "shop" ? "feishu:sync-shop" : "feishu:sync-creator",
