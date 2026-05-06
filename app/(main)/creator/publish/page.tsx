@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   App,
+  Badge,
   Button,
   Card,
   DatePicker,
@@ -14,6 +15,7 @@ import {
   Space,
   Switch,
   Table,
+  Tabs,
   Tag,
   Upload,
   Typography,
@@ -58,11 +60,12 @@ type PublishTask = {
 
 export default function CreatorPublishPage() {
   const { message } = App.useApp();
-  const { isNamespaceBusy, selectTaskLog, runningTasks } = useTaskContext();
+  const { isNamespaceBusy, selectTaskLog, runningTasks, startTask } = useTaskContext();
   const [tasks, setTasks] = useState<PublishTask[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const [type, setType] = useState<TaskType>("video");
   const [accountNames, setAccountNames] = useState<string[]>([]);
@@ -261,6 +264,22 @@ export default function CreatorPublishPage() {
     }
   }
 
+  async function handleRunNow(task: PublishTask) {
+    try {
+      const res = await fetch("/api/creator/publish/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run-now", id: task.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "立即执行失败");
+      message.success("已设为立即执行");
+      await fetchTasks();
+    } catch (e: any) {
+      message.error(e.message || "立即执行失败");
+    }
+  }
+
   async function handleDeleteTask(task: PublishTask) {
     if (task.status === "running") {
       message.warning("执行中的任务不可删除");
@@ -283,6 +302,17 @@ export default function CreatorPublishPage() {
     }
   }
 
+  async function handleImportFromFeishu() {
+    setImporting(true);
+    try {
+      const taskId = await startTask("/api/creator/publish/import-from-feishu", {}, "creator-publish");
+      message.info(`导入任务已启动: ${taskId}`);
+    } catch (e: any) {
+      message.error(e.message || "启动导入失败");
+    }
+    setImporting(false);
+  }
+
   const columns = [
     { title: "账号", dataIndex: "accountName", align: "center" as const },
     {
@@ -294,7 +324,7 @@ export default function CreatorPublishPage() {
       title: "定时",
       align: "center" as const,
       render: (_: any, r: PublishTask) =>
-        r.payload.scheduleAt ? dayjs(r.payload.scheduleAt).format("YYYY-MM-DD HH:mm") : "立即",
+        r.payload.scheduleAt ? dayjs(r.payload.scheduleAt).format("MM-DD HH:mm") : "立即",
     },
     {
       title: "状态",
@@ -349,6 +379,15 @@ export default function CreatorPublishPage() {
           >
             重试
           </Button>
+          {r.status === "pending" && (
+            <Button
+              size="small"
+              type="link"
+              onClick={() => handleRunNow(r)}
+            >
+              立即执行
+            </Button>
+          )}
           <Popconfirm
             title="确认删除任务？"
             description={
@@ -373,9 +412,20 @@ export default function CreatorPublishPage() {
     },
   ];
 
-  return (
-    <Space orientation="vertical" size={10} style={{ width: "100%" }}>
-      <Card title="创建发布任务" size="small" styles={{ body: { paddingTop: 8 } }}>
+  const runningCount = tasks.filter((t) => t.status === "running").length;
+
+  const formContent = (
+    <Space orientation="vertical" size={6} style={{ width: "100%" }}>
+      <Button
+        type="primary"
+        onClick={handleImportFromFeishu}
+        loading={importing}
+        disabled={isNamespaceBusy("creator-publish")}
+        block
+      >
+        从飞书导入任务
+      </Button>
+      <Card size="small" styles={{ body: { paddingTop: 8 } }}>
         <Space orientation="vertical" size={6} style={{ width: "100%" }}>
           <Form layout="vertical" colon={false} requiredMark={false}>
             <Form.Item label="发布类型" style={{ marginBottom: 8 }}>
@@ -510,14 +560,36 @@ export default function CreatorPublishPage() {
               style={{ marginBottom: 8 }}
               help={
                 <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>
-                  不填则任务创建后会尽快执行（由调度器扫描触发）
+                  不填则立即发布 | 不可选择过去时间
                 </span>
               }
             >
               <DatePicker
-                showTime
+                showTime={{ format: "HH:mm", minuteStep: 5 }}
+                format="YYYY-MM-DD HH:mm"
+                allowClear
+                placeholder="选择定时发布时间"
                 value={scheduleAt ? dayjs(scheduleAt) : null}
                 onChange={(v) => setScheduleAt(v ? v.toISOString() : null)}
+                disabledDate={(current) => current && current.isBefore(dayjs().startOf("day"))}
+                disabledTime={(current) => {
+                  if (!current || !current.isSame(dayjs(), "day")) return {};
+                  const now = dayjs();
+                  return {
+                    disabledHours: () => Array.from({ length: now.hour() }, (_, i) => i),
+                    disabledMinutes: (h) =>
+                      h === now.hour()
+                        ? Array.from({ length: now.minute() + 1 }, (_, i) => i)
+                        : [],
+                  };
+                }}
+                presets={[
+                  { label: "1小时后", value: dayjs().add(1, "hour").startOf("hour") },
+                  { label: "2小时后", value: dayjs().add(2, "hour").startOf("hour") },
+                  { label: "明天 09:00", value: dayjs().add(1, "day").hour(9).minute(0).second(0) },
+                  { label: "明天 12:00", value: dayjs().add(1, "day").hour(12).minute(0).second(0) },
+                  { label: "后天 09:00", value: dayjs().add(2, "day").hour(9).minute(0).second(0) },
+                ]}
                 style={{ width: "100%" }}
               />
             </Form.Item>
@@ -526,24 +598,59 @@ export default function CreatorPublishPage() {
               <Button type="primary" onClick={handleCreateTasks} loading={creating}>
                 创建任务
               </Button>
-              <Button onClick={fetchTasks} loading={loadingTasks}>
-                刷新任务
-              </Button>
             </Space>
           </Form>
         </Space>
       </Card>
-
-      <Card title="任务列表" size="small" styles={{ body: { padding: 8 } }}>
-        <Table
-          rowKey="id"
-          size="small"
-          loading={loadingTasks}
-          dataSource={tasks}
-          columns={columns as any}
-          pagination={{ pageSize: 20 }}
-        />
-      </Card>
     </Space>
   );
-}
+
+    const taskListContent = (
+      <>
+        <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
+          <Button onClick={fetchTasks} loading={loadingTasks}>
+            刷新任务
+          </Button>
+        </div>
+        <Table
+        rowKey="id"
+        size="small"
+        loading={loadingTasks}
+        dataSource={tasks}
+        columns={columns as any}
+        pagination={{ pageSize: 20 }}
+        style={{ maxHeight: "calc(100vh - 160px)", overflow: "auto" }}
+      />
+      </>
+    );
+
+    const tabItems = [
+      {
+        key: "create",
+        label: "创建任务",
+        children: formContent,
+      },
+      {
+        key: "tasks",
+        label: (
+          <Badge count={runningCount} size="small" offset={[6, 0]}>
+            <span style={{ paddingRight: 4 }}>任务列表</span>
+          </Badge>
+        ),
+        children: taskListContent,
+      },
+    ];
+
+    return (
+      <Tabs
+        defaultActiveKey="create"
+        items={tabItems}
+        size="small"
+        style={{ width: "100%" }}
+        onChange={(key) => {
+          if (key === "tasks") fetchTasks();
+        }}
+      />
+    );
+  }
+

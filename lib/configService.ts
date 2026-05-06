@@ -27,6 +27,10 @@ export function getConfig(): ConfigData {
       data?.creatorExportDateStartByAccount || {},
     douyinCreator: data?.douyinCreator || { loginVerifyMethod: "qr" },
     headless: data?.headless ?? false,
+    creatorPublish: {
+      publishEnabled: data?.creatorPublish?.publishEnabled ?? true,
+      publishWaitSec: data?.creatorPublish?.publishWaitSec ?? 3,
+    },
     feishu: {
       shop: data?.feishu?.shop || { appToken: "", tableId: "" },
       creator: data?.feishu?.creator || { appToken: "", tableId: "", keepRows: 0 },

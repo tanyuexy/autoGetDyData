@@ -1,5 +1,6 @@
 import path from "path";
 import { spawnTask, canStartTask, generateTaskIdWithTime } from "./taskManager";
+import { getConfig } from "./configService";
 import {
   attachCreatorPublishTaskRuntime,
   patchCreatorPublishTask,
@@ -40,6 +41,13 @@ function buildRunArgs(task: CreatorPublishTask): string[] {
   if (task.payload.approvalNumber) args.push("--approvalNumber", task.payload.approvalNumber);
   if (task.payload.isAiContent) args.push("--isAiContent");
   if (task.payload.scheduleAt) args.push("--scheduleAt", task.payload.scheduleAt);
+
+  // 发布设置：task payload 可覆盖全局 config
+  const publishCfg = getConfig().creatorPublish || {};
+  const publishEnabled = task.payload.publishEnabled ?? publishCfg.publishEnabled ?? true;
+  const publishWaitSec = task.payload.publishWaitSec ?? publishCfg.publishWaitSec ?? 3;
+  args.push("--publishEnabled", String(publishEnabled));
+  args.push("--publishWaitSec", String(publishWaitSec));
 
   return args;
 }

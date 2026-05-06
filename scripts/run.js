@@ -79,6 +79,10 @@ const ROUTES = {
     script: "scripts/feishu/index.js",
     argv: ["backup-bitable"]
   },
+  "feishu:import-publish-tasks": {
+    script: "scripts/feishu/import-publish-tasks.js",
+    argv: []
+  },
 
   "shop:login": { script: "scripts/douyin-shop/index.js", argv: ["login"] },
   "shop:export": { script: "scripts/douyin-shop/index.js", argv: ["export"] },

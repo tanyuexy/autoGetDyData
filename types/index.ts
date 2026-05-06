@@ -25,6 +25,10 @@ export interface ConfigData {
   creatorExportDateStartByAccount: Record<string, string>;
   douyinCreator: { loginVerifyMethod: string };
   headless: boolean;
+  creatorPublish?: {
+    publishEnabled?: boolean; // 是否点击发布按钮（默认 true）
+    publishWaitSec?: number;  // 发布后停留秒数（默认 3）
+  };
   feishu: {
     shop: { baseUrl?: string; appToken: string; tableId: string };
     creator: { baseUrl?: string; appToken: string; tableId: string; keepRows?: number };

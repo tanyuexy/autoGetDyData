@@ -52,5 +52,9 @@
     }
   },
   "creatorExportDateStart": null,
-  "headless": false
+  "headless": false,
+  "creatorPublish": {
+    "publishEnabled": false,
+    "publishWaitSec": 300
+  }
 }

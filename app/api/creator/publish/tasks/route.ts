@@ -87,6 +87,20 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ ok: true, task: next });
     }
 
+    if (action === "run-now") {
+      const existing = readCreatorPublishTasks().find((t) => t.id === id);
+      if (!existing) return NextResponse.json({ error: "task not found" }, { status: 404 });
+      if (existing.status !== "pending") {
+        return NextResponse.json({ error: "只能立即执行待执行的任务" }, { status: 400 });
+      }
+
+      const next = patchCreatorPublishTask(id, {
+        payload: { ...existing.payload, scheduleAt: null },
+      });
+
+      return NextResponse.json({ ok: true, task: next });
+    }
+
     if (action === "delete") {
       const tasks = readCreatorPublishTasks();
       const idx = tasks.findIndex((t) => t.id === id);

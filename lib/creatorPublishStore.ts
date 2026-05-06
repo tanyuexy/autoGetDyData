@@ -30,6 +30,8 @@ export interface CreatorPublishPayloadBase {
   approvalNumber: string; // 广审批文号（必填，默认：不包含广审内容）
   isAiContent?: boolean; // 是否为AI内容，影响自主声明选项
   productLink?: string; // 商品链接
+  publishEnabled?: boolean; // 是否点击发布按钮（默认 true）
+  publishWaitSec?: number; // 发布后停留秒数（默认 3）
 }
 
 export interface CreatorPublishVideoPayload extends CreatorPublishPayloadBase {

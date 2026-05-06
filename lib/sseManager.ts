@@ -263,18 +263,33 @@ export function listRecentTaskLogs(limit: number = 10): RecentTaskLogMeta[] {
   return results.slice(0, limit);
 }
 
+const PREFIX_MAP: Record<string, string> = {
+  "creator-publish-": "creator-publish",
+  "creator-feishu-sync-": "creator-feishu-sync",
+  "creator-export-push-": "creator-export-push",
+  "creator-login-": "creator-login",
+  "creator-export-": "creator-export",
+  "creator-": "creator-export",
+  "shop-feishu-sync-": "shop-feishu-sync",
+  "shop-export-push-": "shop-export-push",
+  "shop-login-": "shop-login",
+  "shop-export-": "shop-export",
+  "shop-": "shop-export",
+  "feishu-": "feishu",
+};
+
 function parseNamespace(taskId: string): string {
-  if (taskId.startsWith("creator-publish-")) return "creator-publish";
-  if (taskId.startsWith("creator-feishu-sync-")) return "creator-feishu-sync";
-  if (taskId.startsWith("creator-export-push-")) return "creator-export-push";
-  if (taskId.startsWith("creator-export-")) return "creator-export";
-  if (taskId.startsWith("creator-")) return "creator-export";
-  if (taskId.startsWith("shop-feishu-sync-")) return "shop-feishu-sync";
-  if (taskId.startsWith("shop-export-push-")) return "shop-export-push";
-  if (taskId.startsWith("shop-export-")) return "shop-export";
-  if (taskId.startsWith("shop-")) return "shop-export";
-  if (taskId.startsWith("feishu-")) return "feishu";
-  return "system";
+  let bestNs = "";
+  let bestLen = 0;
+  const entries = Object.entries(PREFIX_MAP);
+  for (let i = 0; i < entries.length; i++) {
+    const [prefix, ns] = entries[i];
+    if (taskId.startsWith(prefix) && prefix.length > bestLen) {
+      bestLen = prefix.length;
+      bestNs = ns;
+    }
+  }
+  return bestNs || "system";
 }
 
 // ---- Public API ----

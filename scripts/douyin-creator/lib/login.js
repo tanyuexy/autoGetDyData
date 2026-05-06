@@ -298,7 +298,10 @@ async function openTargetAndEnsureLogin(page, paths, accountName, options) {
 
 module.exports = {
   isLoggedInAtTarget,
+  isVerificationUiVisible,
   clickIfVisible,
-  openTargetAndEnsureLogin
+  openTargetAndEnsureLogin,
+  notifyLoginRequired,
+  waitForManualLoginFlow,
 };
 

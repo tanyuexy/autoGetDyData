@@ -21,6 +21,8 @@ const NAMESPACE_LABELS: Record<string, string> = {
   "shop-feishu-sync": "抖店同步",
   "shop-export-push": "抖店推送",
   "creator-publish": "发布",
+  "creator-login": "抖创登录",
+  "shop-login": "抖店登录",
   login: "登录",
   system: "系统",
   feishu: "飞书",

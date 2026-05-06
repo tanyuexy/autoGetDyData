@@ -12,6 +12,7 @@ const {
   selectSelfDeclaration,
   setScheduleIfNeeded,
   ensureLoggedIn,
+  clickPublishButton,
 } = require("./utils");
 
 async function uploadVideo(page, videoKey, accountName) {
@@ -234,11 +235,11 @@ async function runPublishVideo(options) {
     console.log(`开始视频发布准备: ${accountName}`);
     console.log(`  [选项] productLink=${JSON.stringify(String(options.productLink || ""))} isAiContent=${JSON.stringify(options.isAiContent)} title=${JSON.stringify(options.title)}`);
 
+    await ensureLoggedIn(page, accountName, paths);
+
     await page.goto(VIDEO_POST_URL, { waitUntil: "domcontentloaded" });
-    // 等待 SPA 渲染完成：标题输入框必须可见
     await page.waitForSelector('input[placeholder*="标题"]', { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(3000);
-    await ensureLoggedIn(page, accountName);
 
     await uploadVideo(page, videoKey, accountName);
     await selectFirstAiCover(page);
@@ -256,8 +257,18 @@ async function runPublishVideo(options) {
     await selectSelfDeclaration(page, options.isAiContent === true || options.isAiContent === "true");
     await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
 
-    console.log("视频发布表单填写完成，停留5s后视为成功。");
-    await page.waitForTimeout(5000);
+    const publishEnabled = options.publishEnabled !== "false" && options.publishEnabled !== false;
+    const publishWaitSec = Number(options.publishWaitSec) || 3;
+
+    if (publishEnabled) {
+      console.log("视频发布表单填写完成，点击发布...");
+      await clickPublishButton(page);
+    } else {
+      console.log("视频发布表单填写完成（未点击发布，publishEnabled=false）");
+    }
+
+    console.log(`停留 ${publishWaitSec}s 后完成。`);
+    await page.waitForTimeout(publishWaitSec * 1000);
   } catch (error) {
     await saveDebugArtifacts(page, accountName, "run-failed").catch(() => {});
     throw error;

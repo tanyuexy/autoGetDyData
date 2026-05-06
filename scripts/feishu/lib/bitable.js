@@ -313,11 +313,106 @@ async function batchCreateBitableRecords(
   return { records: items };
 }
 
+async function updateBitableRecord(config, accessToken, recordId, fields, tableIdOverride = "") {
+  if (!config.bitableAppToken) {
+    throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
+  }
+  if (!recordId) throw new Error("缺少 recordId");
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
+    throw new Error("fields 必须是对象");
+  }
+
+  const resolvedTableId = resolveBitableTableIdForMutation(config, tableIdOverride);
+
+  const url = `${config.apiBase}/open-apis/bitable/v1/apps/${encodeURIComponent(
+    config.bitableAppToken
+  )}/tables/${encodeURIComponent(resolvedTableId)}/records/${encodeURIComponent(recordId)}`;
+
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({ fields }),
+  });
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch (error) {
+    throw new Error(`多维表格更新接口返回非 JSON: ${text || "<empty>"}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `多维表格更新接口 HTTP ${response.status}: ${parsed.msg || text || "未知错误"}`
+    );
+  }
+  if (typeof parsed.code === "number" && parsed.code !== 0) {
+    throw new Error(
+      `更新记录失败 code=${parsed.code}, msg=${parsed.msg || "未知错误"}`
+    );
+  }
+
+  return parsed.data || parsed;
+}
+
+const fs = require("fs");
+const path = require("path");
+
+async function downloadAttachment(config, accessToken, fileToken, saveDir, fileName) {
+  if (!fileToken) throw new Error("缺少 fileToken");
+
+  const url = `${config.apiBase}/open-apis/drive/v1/medias/${encodeURIComponent(
+    fileToken
+  )}/download`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `下载附件失败 HTTP ${response.status}: ${text || "未知错误"}`
+    );
+  }
+
+  // 从 Content-Disposition 获取文件名（如果有）
+  let finalName = fileName;
+  if (!finalName) {
+    const disposition = response.headers.get("content-disposition");
+    if (disposition) {
+      const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+      if (match) {
+        finalName = match[1].replace(/['"]/g, "");
+      }
+    }
+  }
+  if (!finalName) finalName = fileToken;
+
+  if (saveDir && !fs.existsSync(saveDir)) {
+    fs.mkdirSync(saveDir, { recursive: true });
+  }
+
+  const savePath = saveDir ? path.join(saveDir, finalName) : finalName;
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(savePath, buffer);
+
+  return { filePath: savePath, fileName: finalName, size: buffer.length };
+}
+
 module.exports = {
   createBitableRecord,
+  updateBitableRecord,
   listBitableFields,
   listAllBitableRecords,
   listAllBitableRecordIds,
   batchDeleteBitableRecords,
-  batchCreateBitableRecords
+  batchCreateBitableRecords,
+  downloadAttachment,
 };

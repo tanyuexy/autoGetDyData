@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Tabs, Button, Spin, App, Switch, Space, Typography, Alert, Divider } from "antd";
+import { Tabs, Button, Spin, App, Switch, Space, Typography, Alert, Divider, InputNumber } from "antd";
 import { SaveOutlined } from "@ant-design/icons";
 import ConfigEmailTab from "@/components/ConfigEmailTab";
 import ConfigFeishuTab from "@/components/ConfigFeishuTab";
@@ -194,6 +194,46 @@ export default function ConfigPage() {
               })
             }
           />
+
+          <Divider style={{ margin: "4px 0" }} />
+
+          <Typography.Text strong>发布设置</Typography.Text>
+
+          <Space>
+            <Switch
+              checked={config.creatorPublish?.publishEnabled ?? true}
+              onChange={(v) =>
+                mergeChange({ creatorPublish: { ...config.creatorPublish, publishEnabled: v, publishWaitSec: config.creatorPublish?.publishWaitSec ?? 3 } })
+              }
+            />
+            <Space orientation="vertical" size={0}>
+              <Typography.Text>点击发布按钮</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                开启后发布流程会自动点击发布按钮；关闭后仅填写表单不发布
+              </Typography.Text>
+            </Space>
+          </Space>
+
+          <Space>
+            <Space orientation="vertical" size={0}>
+              <Typography.Text>停留秒数</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                发布（或不发布）后在页面停留的秒数
+              </Typography.Text>
+            </Space>
+            <Space.Compact>
+              <InputNumber
+                min={1}
+                max={Infinity}
+                value={config.creatorPublish?.publishWaitSec ?? 3}
+                onChange={(v) =>
+                  mergeChange({ creatorPublish: { ...config.creatorPublish, publishEnabled: config.creatorPublish?.publishEnabled ?? true, publishWaitSec: v || 3 } })
+                }
+                style={{ width: 80 }}
+              />
+              <Button disabled>秒</Button>
+            </Space.Compact>
+          </Space>
         </Space>
       ),
     },

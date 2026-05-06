@@ -1,0 +1,237 @@
+/**
+ * 从飞书 task 表读取数据 → 创建发布任务
+ *
+ * 用法:
+ *   node scripts/feishu/import-publish-tasks.js
+ *
+ * 筛选规则:
+ *   - 已创建任务 == "否"（未处理）
+ *   - 备注 != "示例"（跳过示例行）
+ *   - 必须有 所属店铺 + 视频/图文内容（核心字段）
+ */
+require("dotenv").config();
+
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const { readBitable } = require("./lib/readBitable");
+const { downloadAttachment, updateBitableRecord } = require("./lib/bitable");
+const { loadFeishuBitableConfigForProfile } = require("./lib/config");
+const { getValidAccessToken } = require("./lib/oauth");
+
+const MATERIALS_DIR = path.resolve(
+  process.cwd(),
+  process.env.CREATOR_MATERIALS_DIR || "storage/creator-materials"
+);
+const TASKS_PATH = path.resolve(
+  process.cwd(),
+  process.env.CREATOR_PUBLISH_TASKS_PATH || "storage/creator-publish/tasks.json"
+);
+
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function readTasks() {
+  try {
+    if (!fs.existsSync(TASKS_PATH)) return [];
+    return JSON.parse(fs.readFileSync(TASKS_PATH, "utf-8"));
+  } catch {
+    return [];
+  }
+}
+
+function writeTasks(tasks) {
+  ensureDir(path.dirname(TASKS_PATH));
+  const tmp = TASKS_PATH + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(tasks, null, 2) + "\n", "utf-8");
+  fs.renameSync(tmp, TASKS_PATH);
+}
+
+function generateTaskId() {
+  return crypto.randomBytes(8).toString("hex");
+}
+
+function makeUniqueFileName(originalName, dir) {
+  const ext = path.extname(originalName);
+  const base = path.basename(originalName, ext);
+  const candidates = new Set(
+    fs.existsSync(dir) ? fs.readdirSync(dir) : []
+  );
+  let name = originalName;
+  let i = 1;
+  while (candidates.has(name)) {
+    name = `${base}-${i}${ext}`;
+    i++;
+  }
+  return name;
+}
+
+/**
+ * 解析正文字段：第一行为描述，其余行为话题标签
+ * 话题以 # 开头，每个话题后加空格分隔
+ */
+function parseBodyAndHashtags(raw) {
+  if (!raw) return { description: "", hashtags: "" };
+  const lines = String(raw).split("\n").map((s) => s.trim()).filter(Boolean);
+  const description = lines[0] || "";
+  const hashtagLine = lines.slice(1).join(" ");
+  // 处理话题：确保每个 #标签 后面有空格
+  const hashtags = hashtagLine
+    .split("#")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => "#" + s)
+    .join(" ");
+  return { description, hashtags };
+}
+
+/**
+ * 推断发布类型：有视频附件 → video，纯图片 → article
+ */
+function inferType(attachments) {
+  const hasVideo = (attachments || []).some((att) => {
+    const t = (att.type || "").toLowerCase();
+    return t.startsWith("video/");
+  });
+  return hasVideo ? "video" : "article";
+}
+
+async function main() {
+  console.log("[import-publish-tasks] 开始从飞书读取任务表...");
+
+  const { records, fieldMapByName } = await readBitable("task");
+
+  // 筛选待处理的行
+  const pending = records.filter((r) => {
+    const f = r.fields;
+    const remark = String(f["备注"] || "").trim();
+    if (remark === "示例") return false;
+    // 排除已创建的行（status == "是"），空值和"否"都算待处理
+    const status = String(f["已创建任务"] || "").trim();
+    if (status === "是") return false;
+    const shop = f["所属店铺"];
+    if (!shop || !Array.isArray(shop) || !shop[0]?.text) return false;
+    const attachments = f["视频/图文内容"];
+    if (!attachments || !Array.isArray(attachments) || !attachments.length) return false;
+    return true;
+  });
+
+  console.log(`  找到 ${records.length} 条记录，其中 ${pending.length} 条待导入`);
+
+  if (pending.length === 0) {
+    console.log("[import-publish-tasks] 没有待导入的任务，退出。");
+    return;
+  }
+
+  // 获取 feishu task 表配置用于写入
+  const feishuCfg = loadFeishuBitableConfigForProfile("task");
+  const tokenCache = await getValidAccessToken(feishuCfg);
+  const accessToken = tokenCache.accessToken;
+
+  ensureDir(MATERIALS_DIR);
+
+  const tasks = readTasks();
+  let createdCount = 0;
+  let failedCount = 0;
+
+  for (const record of pending) {
+    const f = record.fields;
+    const accountName = f["所属店铺"]?.[0]?.text || "";
+    const attachments = f["视频/图文内容"] || [];
+    const linkField = f["挂车链接"];
+    const productLink = Array.isArray(linkField) ? (linkField[0]?.link || "") : "";
+    const productNameField = f["挂车产品名"];
+    const productTitle = Array.isArray(productNameField)
+      ? (productNameField[0]?.text || "还少胶囊")
+      : "还少胶囊";
+    // 标题：来自「标题（可为空）」字段，可为空
+    const title = String(f["标题（可为空）"] || "").trim();
+    // 正文：第一行为描述，其余行为话题标签
+    const { description, hashtags } = parseBodyAndHashtags(f["正文"]);
+    // 描述末尾拼接话题
+    const fullDescription = [description, hashtags].filter(Boolean).join("\n\n");
+    const isAiContent = String(f["ai内容"] || "").trim() === "是";
+    const scheduleTs = Number(f["计划发布时间"]) || 0;
+    const scheduleAt = scheduleTs > 0
+      ? (scheduleTs <= Date.now() ? null : new Date(scheduleTs).toISOString())
+      : null;
+    const type = inferType(attachments);
+
+    console.log(`\n  处理: ${accountName} | ${type} | "${title}"`);
+
+    try {
+      // 下载附件（处理同名冲突：自动加序号后缀）
+      const downloaded = [];
+      for (const att of attachments) {
+        if (!att.file_token) continue;
+        console.log(`    下载附件: ${att.name} (${(att.size / 1024).toFixed(0)} KB)`);
+        const uniqueName = makeUniqueFileName(att.name, MATERIALS_DIR);
+        const result = await downloadAttachment(
+          feishuCfg,
+          accessToken,
+          att.file_token,
+          MATERIALS_DIR,
+          uniqueName
+        );
+        downloaded.push(result.fileName);
+      }
+
+      if (downloaded.length === 0) {
+        console.log(`    ⚠️ 没有可下载的附件，跳过`);
+        failedCount++;
+        continue;
+      }
+
+      // 构建任务
+      const task = {
+        id: generateTaskId(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        accountName,
+        status: "pending",
+        payload: {
+          type,
+          title,
+          description: fullDescription,
+          productTitle,
+          approvalNumber: "不包含广审内容",
+          isAiContent,
+          productLink,
+          scheduleAt,
+          ...(type === "video"
+            ? { videoFileKey: downloaded[0] }
+            : { imagesFileKeys: downloaded }),
+        },
+      };
+
+      // 写入 tasks.json
+      tasks.unshift(task);
+      writeTasks(tasks);
+
+      // 更新飞书行状态
+      try {
+        await updateBitableRecord(feishuCfg, accessToken, record.record_id, {
+          已创建任务: "是",
+        });
+        console.log(`    ✓ 已创建任务 ${task.id}，飞书行已标记`);
+      } catch (e) {
+        console.log(`    ⚠️ 任务已创建但飞书行标记失败: ${e.message}`);
+      }
+
+      createdCount++;
+    } catch (e) {
+      console.log(`    ❌ 失败: ${e.message}`);
+      failedCount++;
+    }
+  }
+
+  console.log(
+    `\n[import-publish-tasks] 完成: 创建 ${createdCount}，失败 ${failedCount}`
+  );
+}
+
+main().catch((e) => {
+  console.error("[import-publish-tasks] 执行失败:", e.message);
+  process.exitCode = 1;
+});
