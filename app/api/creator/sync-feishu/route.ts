@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       ? body.accounts.map((s: any) => String(s || "").trim()).filter(Boolean)
       : [];
 
-    const taskId = generateTaskIdWithTime("creator-sync-feishu");
+    const taskId = generateTaskIdWithTime("creator-export-push");
     const args = ["scripts/run.js", "creator:export-feishu", ...accounts];
 
     spawnTask(taskId, "node", args, { namespace: "creator-export" });

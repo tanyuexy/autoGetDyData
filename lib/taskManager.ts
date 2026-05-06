@@ -4,7 +4,7 @@ import path from "path";
 import { createChannel } from "./sseManager";
 import { getConfig } from "./configService";
 
-export type TaskNamespace = "creator-export" | "shop-export" | "creator-publish" | "login" | "system";
+export type TaskNamespace = "creator-export" | "shop-export" | "creator-publish" | "login" | "system" | "feishu";
 
 /**
  * 生成带时间后缀的 taskId，格式：{prefix}-HH.mm.ss
@@ -31,6 +31,7 @@ const DEFAULT_MAX_CONCURRENT: Record<TaskNamespace, number> = {
   "creator-publish": 3,
   login: 1,
   system: 1,
+  feishu: 1,
 };
 
 const namespaces = new Map<TaskNamespace, NamespaceState>();

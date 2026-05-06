@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({} as any));
     const shopNames = parseShopNames(body);
 
-    const taskId = generateTaskIdWithTime("shop-sync-feishu");
+    const taskId = generateTaskIdWithTime("shop-export-push");
     spawnTask(taskId, "node", ["scripts/run.js", "shop:sync-feishu"], {
       namespace: "shop-export",
       env: {

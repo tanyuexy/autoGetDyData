@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       "feishu:backup",
       "--profiles",
       profiles,
-    ], { namespace: "system" });
+    ], { namespace: "feishu" });
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

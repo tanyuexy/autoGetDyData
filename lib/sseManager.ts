@@ -264,11 +264,16 @@ export function listRecentTaskLogs(limit: number = 10): RecentTaskLogMeta[] {
 }
 
 function parseNamespace(taskId: string): string {
-  if (taskId.startsWith("creator-publish-")) return "publish";
+  if (taskId.startsWith("creator-publish-")) return "creator-publish";
+  if (taskId.startsWith("creator-feishu-sync-")) return "creator-feishu-sync";
+  if (taskId.startsWith("creator-export-push-")) return "creator-export-push";
   if (taskId.startsWith("creator-export-")) return "creator-export";
+  if (taskId.startsWith("creator-")) return "creator-export";
+  if (taskId.startsWith("shop-feishu-sync-")) return "shop-feishu-sync";
+  if (taskId.startsWith("shop-export-push-")) return "shop-export-push";
   if (taskId.startsWith("shop-export-")) return "shop-export";
-  if (taskId.startsWith("creator-feishu-")) return "creator-feishu";
-  if (taskId.startsWith("shop-feishu-")) return "shop-feishu";
+  if (taskId.startsWith("shop-")) return "shop-export";
+  if (taskId.startsWith("feishu-")) return "feishu";
   return "system";
 }
 

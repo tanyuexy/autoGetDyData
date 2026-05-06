@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
       args.push("--keep-rows", String(Math.floor(effectiveKeepRows)));
     }
 
-    spawnTask(taskId, "node", args, { namespace: "system" });
+    spawnTask(taskId, "node", args, { namespace: "feishu" });
 
     return NextResponse.json({ taskId });
   } catch (e: any) {
