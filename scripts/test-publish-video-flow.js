@@ -63,6 +63,65 @@ async function report(page, tag) {
   return r;
 }
 
+/**
+ * 设置定时发布时间
+ */
+async function setScheduleTime(page, reportFn) {
+  const targetDate = new Date();
+  targetDate.setHours(targetDate.getHours() + 1);
+  const y = targetDate.getFullYear();
+  const mo = String(targetDate.getMonth() + 1).padStart(2, "0");
+  const d = String(targetDate.getDate()).padStart(2, "0");
+  const h = String(targetDate.getHours()).padStart(2, "0");
+  const mi = String(targetDate.getMinutes()).padStart(2, "0");
+  const scheduleStr = `${y}-${mo}-${d} ${h}:${mi}`;
+  console.log(`  目标时间: ${scheduleStr}`);
+
+  console.log("  切换为定时发布...");
+  const scheduleLabel = page.locator('label').filter({ hasText: '定时发布' }).first();
+  if (await scheduleLabel.isVisible({ timeout: 5000 }).catch(() => false)) {
+    const scheduleCheckbox = scheduleLabel.locator('input.radio-native-p6VBGt');
+    const isChecked = await scheduleCheckbox.isChecked().catch(() => false);
+    if (!isChecked) {
+      await scheduleLabel.click();
+      await page.waitForTimeout(2000);
+      console.log("  ✓ 已切换到定时发布");
+    } else {
+      console.log("  ✓ 已是定时发布模式");
+    }
+    await reportFn(page, "08a-schedule-on");
+  } else {
+    console.log("  ⚠️ 未找到定时发布标签");
+    return;
+  }
+
+  console.log("  填写定时时间...");
+  const dateInput = page.locator('.semi-datepicker input[placeholder="日期和时间"]').first();
+  if (await dateInput.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await dateInput.click();
+    await page.waitForTimeout(500);
+    await dateInput.fill("");
+    await page.waitForTimeout(200);
+    await dateInput.type(scheduleStr, { delay: 50 });
+    await page.waitForTimeout(500);
+    const confirmBtn = page.locator('.semi-datepicker .semi-button-primary, .semi-datepicker button:has-text("确定")').first();
+    if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await confirmBtn.click();
+      await page.waitForTimeout(500);
+      console.log("  ✓ 已点击确定");
+    } else {
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(500);
+      console.log("  ✓ 已按 Enter 确认");
+    }
+    const actualValue = await dateInput.inputValue().catch(() => "");
+    console.log(`  实际值: "${actualValue}"`);
+    await reportFn(page, "08b-schedule-set");
+  } else {
+    console.log("  ⚠️ 未找到日期时间输入框");
+  }
+}
+
 async function main() {
   const filePath = path.join(process.cwd(), "storage/creator-materials", VIDEO_KEY);
   if (!fs.existsSync(filePath)) { console.error(`❌ 视频不存在: ${filePath}`); process.exit(1); }
@@ -276,8 +335,12 @@ async function main() {
     }
     await report(page, "06-self-declaration");
 
-    // 7. 最终状态
-    await report(page, "07-final");
+    // 7. 定时发布设置
+    console.log("\n=== 7. 定时发布设置 ===");
+    await setScheduleTime(page, report);
+
+    // 8. 最终状态
+    await report(page, "08-final");
     console.log("\n✅ 视频发布准备完成，停留5s确认。");
     await page.waitForTimeout(5000);
     console.log("✅ 测试完成");
