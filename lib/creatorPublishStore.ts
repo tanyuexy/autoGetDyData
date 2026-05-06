@@ -58,6 +58,7 @@ export interface CreatorPublishTask {
   payload: CreatorPublishPayload;
   lastError?: string;
   taskId?: string; // runtime task id for SSE
+  pid?: number; // 子进程 PID，用于崩溃恢复时检测进程是否仍存活
 }
 
 function ensureDirForFile(filePath: string) {
@@ -112,6 +113,8 @@ export function patchCreatorPublishTask(
 /**
  * 子进程已不在 taskManager 中，但 tasks.json 仍为 running 时（进程崩溃、onClose 未执行、热重载丢内存等），
  * 根据磁盘日志把状态补成 success / failed，与命令行/日志文件一致。
+ *
+ * 热重载场景：如果 PID 仍存活说明进程还在运行，不处理；PID 已死且日志无DONE则标记失败。
  */
 export function reconcileStaleRunningCreatorPublishTasks(): void {
   const liveIds = new Set(getTaskList());
@@ -125,6 +128,22 @@ export function reconcileStaleRunningCreatorPublishTasks(): void {
     // Grace period: don't reconcile tasks that just started running
     const updatedAt = new Date(task.updatedAt).getTime();
     if (Number.isFinite(updatedAt) && now - updatedAt < MIN_RUNNING_MS) continue;
+
+    // PID 存活性检查：进程还在跑则不处理
+    if (task.pid != null) {
+      try {
+        process.kill(task.pid, 0);
+        // PID 存活，进程还在运行（热重载场景），保持 running 不处理
+        continue;
+      } catch {
+        // PID 已死，进程已退出但 onClose 未执行（崩溃/孤儿）
+        patchCreatorPublishTask(task.id, {
+          status: "failed",
+          lastError: "子进程异常退出（PID 已不存在）",
+        });
+        continue;
+      }
+    }
 
     const snap = loadTaskSnapshotFromDisk(task.taskId);
 

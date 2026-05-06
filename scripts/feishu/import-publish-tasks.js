@@ -23,29 +23,13 @@ const MATERIALS_DIR = path.resolve(
   process.cwd(),
   process.env.CREATOR_MATERIALS_DIR || "storage/creator-materials"
 );
-const TASKS_PATH = path.resolve(
+const IMPORTED_TASKS_PATH = path.resolve(
   process.cwd(),
-  process.env.CREATOR_PUBLISH_TASKS_PATH || "storage/creator-publish/tasks.json"
+  "storage/creator-publish/.imported-tasks.json"
 );
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
-function readTasks() {
-  try {
-    if (!fs.existsSync(TASKS_PATH)) return [];
-    return JSON.parse(fs.readFileSync(TASKS_PATH, "utf-8"));
-  } catch {
-    return [];
-  }
-}
-
-function writeTasks(tasks) {
-  ensureDir(path.dirname(TASKS_PATH));
-  const tmp = TASKS_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(tasks, null, 2) + "\n", "utf-8");
-  fs.renameSync(tmp, TASKS_PATH);
 }
 
 function generateTaskId() {
@@ -131,7 +115,7 @@ async function main() {
 
   ensureDir(MATERIALS_DIR);
 
-  const tasks = readTasks();
+  const newTasks = [];
   let createdCount = 0;
   let failedCount = 0;
 
@@ -205,9 +189,8 @@ async function main() {
         },
       };
 
-      // 写入 tasks.json
-      tasks.unshift(task);
-      writeTasks(tasks);
+      // 收集到待合并列表
+      newTasks.push(task);
 
       // 更新飞书行状态
       try {
@@ -224,6 +207,15 @@ async function main() {
       console.log(`    ❌ 失败: ${e.message}`);
       failedCount++;
     }
+  }
+
+  // 写入临时文件，由 API route 负责用共享库合并到 tasks.json（避免竞态条件）
+  if (newTasks.length > 0) {
+    ensureDir(path.dirname(IMPORTED_TASKS_PATH));
+    const tmp = IMPORTED_TASKS_PATH + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(newTasks, null, 2) + "\n", "utf-8");
+    fs.renameSync(tmp, IMPORTED_TASKS_PATH);
+    console.log(`\n[import-publish-tasks] 临时文件写入: ${IMPORTED_TASKS_PATH} (${newTasks.length} 个任务)`);
   }
 
   console.log(

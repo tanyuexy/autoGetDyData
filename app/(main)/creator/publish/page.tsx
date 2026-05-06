@@ -281,11 +281,6 @@ export default function CreatorPublishPage() {
   }
 
   async function handleDeleteTask(task: PublishTask) {
-    if (task.status === "running") {
-      message.warning("执行中的任务不可删除");
-      return;
-    }
-
     try {
       const res = await fetch("/api/creator/publish/tasks", {
         method: "PATCH",
@@ -403,7 +398,7 @@ export default function CreatorPublishPage() {
             placement="top"
             onConfirm={() => handleDeleteTask(r)}
           >
-            <Button size="small" type="link" danger disabled={r.status === "running"}>
+            <Button size="small" type="link" danger>
               删除
             </Button>
           </Popconfirm>

@@ -8,6 +8,7 @@ import {
   type CreatorPublishPayload,
   type CreatorPublishTask,
 } from "@/lib/creatorPublishStore";
+import { runPendingCreatorPublishTasks } from "@/lib/creatorPublishScheduler";
 
 export const maxDuration = 0;
 
@@ -59,6 +60,7 @@ export async function POST(req: NextRequest) {
     const tasks = readCreatorPublishTasks();
     tasks.unshift(task);
     writeCreatorPublishTasks(tasks);
+    runPendingCreatorPublishTasks();
 
     return NextResponse.json({ ok: true, task });
   } catch (e: any) {
@@ -83,6 +85,7 @@ export async function PATCH(req: NextRequest) {
         lastError: undefined,
         taskId: undefined,
       });
+      runPendingCreatorPublishTasks();
 
       return NextResponse.json({ ok: true, task: next });
     }
@@ -97,6 +100,7 @@ export async function PATCH(req: NextRequest) {
       const next = patchCreatorPublishTask(id, {
         payload: { ...existing.payload, scheduleAt: null },
       });
+      runPendingCreatorPublishTasks();
 
       return NextResponse.json({ ok: true, task: next });
     }
@@ -107,8 +111,9 @@ export async function PATCH(req: NextRequest) {
       if (idx < 0) return NextResponse.json({ error: "task not found" }, { status: 404 });
 
       const task = tasks[idx];
-      if (task.status === "running") {
-        return NextResponse.json({ error: "running task cannot be deleted" }, { status: 400 });
+      if (task.status === "running" && task.taskId) {
+        const { killTask } = require("@/lib/taskManager");
+        killTask(task.taskId);
       }
 
       tasks.splice(idx, 1);

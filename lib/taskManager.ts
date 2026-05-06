@@ -91,6 +91,11 @@ export function canStartTask(namespace: TaskNamespace): boolean {
   return running < ns.maxConcurrent;
 }
 
+/** Get the maxConcurrent limit for a namespace */
+export function getConcurrencyLimit(namespace: TaskNamespace): number {
+  return getOrCreateNamespace(namespace).maxConcurrent;
+}
+
 /** Legacy: check if any task is running (optionally scoped to namespace) */
 export function isTaskRunning(namespace?: TaskNamespace): boolean {
   if (namespace) return !canStartTask(namespace);
