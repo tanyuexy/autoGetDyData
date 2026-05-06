@@ -69,20 +69,20 @@ function makeUniqueFileName(originalName, dir) {
 
 /**
  * 解析正文字段：第一行为描述，其余行为话题标签
- * 话题以 # 开头，每个话题后加空格分隔
+ * 话题以 # 开头，直接拼接（话题添加时会逐个识别并点添加话题按钮转换）
  */
 function parseBodyAndHashtags(raw) {
   if (!raw) return { description: "", hashtags: "" };
   const lines = String(raw).split("\n").map((s) => s.trim()).filter(Boolean);
   const description = lines[0] || "";
   const hashtagLine = lines.slice(1).join(" ");
-  // 处理话题：确保每个 #标签 后面有空格
+  // 提取话题：每个 #标签 去除空格直接拼接
   const hashtags = hashtagLine
     .split("#")
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) => "#" + s)
-    .join(" ");
+    .join("");
   return { description, hashtags };
 }
 

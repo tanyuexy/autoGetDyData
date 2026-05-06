@@ -91,6 +91,107 @@ async function setTextLikeInput(locator, value) {
   });
 }
 
+function splitDescription(text) {
+  const parts = text.split(/\n{2,}/);
+  let body = text;
+  const hashtags = [];
+
+  if (parts.length > 1) {
+    body = parts.slice(0, -1).join("\n\n");
+    const tagLine = parts[parts.length - 1];
+    const matches = tagLine.match(/#([^\s#]+)/g);
+    if (matches) {
+      for (const m of matches) {
+        const tag = m.slice(1);
+        if (tag && !hashtags.includes(tag)) {
+          hashtags.push(tag);
+        }
+      }
+    }
+  }
+
+  return { body, hashtags };
+}
+
+async function getEditor(page) {
+  const editor = page.locator('.editor-kit-container[contenteditable="true"]').first();
+  if (await editor.isVisible({ timeout: 2000 }).catch(() => false)) return editor;
+
+  const fallback = page.locator('[contenteditable="true"]').first();
+  if (await fallback.isVisible({ timeout: 2000 }).catch(() => false)) return fallback;
+
+  throw new Error("找不到描述编辑器");
+}
+
+async function addHashtags(page, topics) {
+  const editor = await getEditor(page);
+  let successCount = 0;
+
+  for (let i = 0; i < topics.length; i++) {
+    const topic = topics[i];
+    console.log(`  [话题 ${i + 1}/${topics.length}] #${topic}`);
+
+    await editor.click();
+    await page.waitForTimeout(300);
+    await page.keyboard.type(`#${topic}`);
+    await page.waitForTimeout(1500);
+
+    // 在建议面板中精确匹配话题名称
+    const clicked = await clickMatchingTopic(page, topic);
+    if (clicked) {
+      console.log(`    ✓ 已添加话题: #${topic}`);
+      successCount++;
+      continue;
+    }
+
+    // 备用：点击 #添加话题 按钮打开话题面板
+    const addBtn = page.locator('.toolbar-button-spPS4r', { hasText: "添加话题" }).first();
+    if (await addBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await addBtn.click();
+      await page.waitForTimeout(1500);
+
+      if (await clickMatchingTopic(page, topic)) {
+        console.log(`    ✓ 已从面板添加话题: #${topic}`);
+        successCount++;
+        continue;
+      }
+
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(300);
+    }
+
+    console.log(`    ⚠ 话题 #${topic} 添加失败`);
+  }
+
+  console.log(`话题添加完成: ${successCount}/${topics.length}`);
+}
+
+/**
+ * 在可见的话题建议面板中点击精确匹配的话题项
+ * 返回 true 表示点击成功
+ */
+async function clickMatchingTopic(page, topic) {
+  // .mention-suggest 面板 > .tag-hash 容器 > .tag-hash-view-name (精确话题名)
+  return await page.evaluate((t) => {
+    const panel = document.querySelector('[class*="mention-suggest"]');
+    if (!panel || getComputedStyle(panel).display === 'none') return false;
+
+    // 找到所有 tag-hash 项
+    const hashItems = panel.querySelectorAll('[class*="tag-hash"]');
+    for (const item of hashItems) {
+      const nameEl = item.querySelector('[class*="tag-hash-view-name"]');
+      if (!nameEl) continue;
+      if (nameEl.textContent.trim() === t) {
+        // 精确匹配 → 滚动到可见再点
+        item.scrollIntoView({ block: 'nearest' });
+        try { item.click(); } catch {}
+        return true;
+      }
+    }
+    return false;
+  }, topic);
+}
+
 async function fillTitleAndDescription(page, title, description) {
   const titleInput = await waitVisible(page, [
     'input[placeholder*="标题"]',
@@ -98,14 +199,33 @@ async function fillTitleAndDescription(page, title, description) {
   ]);
   await setTextLikeInput(titleInput, title || "");
 
-  const descInput = await waitVisible(page, [
-    '[data-placeholder*="描述"]',
-    '[contenteditable="true"]',
-    'textarea[placeholder*="描述"]',
-  ]);
+  // 解析描述：分离正文和话题标签
+  const descText = description || "";
+  const { body, hashtags } = splitDescription(descText);
 
-  await setTextLikeInput(descInput, description || "");
-  console.log("已填写标题与作品描述");
+  // 找到编辑器
+  let editor;
+  const editorSel = page.locator('.editor-kit-container[contenteditable="true"]').first();
+  if (await editorSel.isVisible({ timeout: 2000 }).catch(() => false)) {
+    editor = editorSel;
+  } else {
+    editor = await waitVisible(page, [
+      '[data-placeholder*="描述"]',
+      '[contenteditable="true"]',
+      'textarea[placeholder*="描述"]',
+    ]);
+  }
+
+  // 填写正文
+  await setTextLikeInput(editor, body);
+  console.log("已填写标题与正文");
+  await page.waitForTimeout(500);
+
+  // 逐个添加话题标签（带 # 号）
+  if (hashtags.length > 0) {
+    console.log(`准备添加 ${hashtags.length} 个话题标签: ${hashtags.join(", ")}`);
+    await addHashtags(page, hashtags);
+  }
 }
 
 async function selectSelfDeclaration(page, isAiContent) {
