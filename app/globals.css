@@ -191,3 +191,74 @@ body::before {
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.18);
 }
+
+/* ========== Sidebar collapse transitions ========== */
+
+.ant-layout-sider {
+  transition: flex 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.sider-header-text {
+  overflow: hidden;
+  max-width: 160px;
+  opacity: 1;
+  margin-left: 10px;
+  transition: opacity 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    max-width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    margin-left 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+
+.sider-header-text.collapsed {
+  max-width: 0;
+  opacity: 0;
+  margin-left: 0;
+}
+
+.sider-date {
+  overflow: hidden;
+  max-width: 100px;
+  opacity: 1;
+  transition: opacity 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    max-width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.45);
+}
+
+.sider-date.collapsed {
+  max-width: 0;
+  opacity: 0;
+}
+
+/* Custom collapse trigger button */
+.sider-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  cursor: pointer;
+  background: transparent;
+  color: rgba(59, 130, 246, 0.75);
+  font-size: 16px;
+  transition: color 0.22s ease, transform 0.22s ease;
+  border: none;
+}
+
+.sider-trigger:hover {
+  color: rgba(59, 130, 246, 1);
+}
+
+/* 去掉 antd 侧边栏触发器的默认白色背景 */
+.ant-layout-sider-trigger {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.sider-trigger:active {
+  transform: scale(0.96);
+}

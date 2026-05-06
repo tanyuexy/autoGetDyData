@@ -230,9 +230,7 @@ export function spawnTask(
     sse.close();
     ns.stoppingTasks.delete(taskId);
     ns.tasks.delete(taskId);
-    const meta = ns.taskMeta.get(taskId);
     ns.taskMeta.delete(taskId);
-    recordTaskCompletion(taskId, nsName, meta?.startedAt ?? Date.now(), doneEvent.code, doneEvent.summary);
     options?.onClose?.(code);
   });
 
@@ -251,9 +249,7 @@ export function spawnTask(
     sse.close();
     ns.stoppingTasks.delete(taskId);
     ns.tasks.delete(taskId);
-    const eMeta = ns.taskMeta.get(taskId);
     ns.taskMeta.delete(taskId);
-    recordTaskCompletion(taskId, nsName, eMeta?.startedAt ?? Date.now(), -1, err.message);
     options?.onError?.(err);
   });
 
@@ -285,61 +281,4 @@ export function getTaskList(): string[] {
     for (const id of ns.tasks.keys()) ids.push(id);
   }
   return ids;
-}
-
-// ---- Task completion history ----
-
-const TASK_HISTORY_PATH = path.resolve(process.cwd(), "storage/task-history.json");
-const MAX_HISTORY = 50;
-
-export interface CompletedTaskInfo {
-  taskId: string;
-  namespace: TaskNamespace;
-  startedAt: number;
-  finishedAt: number;
-  exitCode: number | null;
-  summary: string;
-}
-
-function readTaskHistory(): CompletedTaskInfo[] {
-  try {
-    if (!fs.existsSync(TASK_HISTORY_PATH)) return [];
-    const raw = fs.readFileSync(TASK_HISTORY_PATH, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-function writeTaskHistory(tasks: CompletedTaskInfo[]) {
-  try {
-    const dir = path.dirname(TASK_HISTORY_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(TASK_HISTORY_PATH, JSON.stringify(tasks.slice(0, MAX_HISTORY), null, 2), "utf-8");
-  } catch { }
-}
-
-function recordTaskCompletion(taskId: string, nsName: TaskNamespace, startedAt: number, exitCode: number | null, summary: string) {
-  const history = readTaskHistory();
-  history.push({ taskId, namespace: nsName, startedAt, finishedAt: Date.now(), exitCode, summary });
-  writeTaskHistory(history);
-}
-
-export function getRecentCompletedTasks(): CompletedTaskInfo[] {
-  return readTaskHistory();
-}
-
-/** List running + recently completed tasks for frontend display */
-export function getTaskListWithHistory(): { running: RunningTaskInfo[]; recent: RunningTaskInfo[] } {
-  const running = getRunningTaskList();
-  const completed = readTaskHistory()
-    .filter((t) => Date.now() - t.finishedAt < 30 * 60 * 1000)
-    .map((t) => ({
-      taskId: t.taskId,
-      namespace: t.namespace,
-      startedAt: t.startedAt,
-    }));
-  const runningIds = new Set(running.map((r) => r.taskId));
-  const recent = completed.filter((c) => !runningIds.has(c.taskId));
-  return { running, recent };
 }

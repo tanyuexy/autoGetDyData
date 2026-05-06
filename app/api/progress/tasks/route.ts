@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getTaskListWithHistory } from "@/lib/taskManager";
+import { getRunningTaskList } from "@/lib/taskManager";
 
 export async function GET() {
-  const { running, recent } = getTaskListWithHistory();
-  return NextResponse.json({ running, recent });
+  const running = getRunningTaskList();
+  return NextResponse.json({ running });
 }

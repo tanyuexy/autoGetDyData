@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Layout, Menu, theme, Typography, Button } from "antd";
+import { Layout, Menu, theme, Button } from "antd";
 import {
   VideoCameraOutlined,
   ShoppingOutlined,
@@ -10,14 +10,14 @@ import {
   ConsoleSqlOutlined,
   MinusOutlined,
   CloseOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
 } from "@ant-design/icons";
 import { useRouter, usePathname } from "next/navigation";
 import TaskPanel from "@/components/TaskPanel";
 import { useTaskContext } from "@/contexts/TaskContext";
 
 const { Sider, Content } = Layout;
-const { Text } = Typography;
-
 const menuItems = [
   {
     key: "/creator",
@@ -25,14 +25,14 @@ const menuItems = [
     label: "抖创数据",
   },
   {
-    key: "/creator/publish",
-    icon: <VideoCameraOutlined />,
-    label: "定时发布",
-  },
-  {
     key: "/shop",
     icon: <ShoppingOutlined />,
     label: "抖店数据",
+  },
+  {
+    key: "/creator/publish",
+    icon: <VideoCameraOutlined />,
+    label: "定时发布",
   },
   {
     key: "/feishu",
@@ -120,6 +120,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         onCollapse={setCollapsed}
         theme="light"
         width={248}
+        trigger={
+          <div className="sider-trigger">
+            {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+          </div>
+        }
         style={{
           margin: 12,
           borderRadius: 14,
@@ -132,37 +137,35 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             margin: 12,
             display: "flex",
             alignItems: "center",
-            justifyContent: collapsed ? "center" : "space-between",
-            gap: 10,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center" }}>
             <div
               style={{
                 width: 28,
                 height: 28,
                 borderRadius: 10,
+                flexShrink: 0,
                 background:
                   "linear-gradient(135deg, rgba(59,130,246,.92), rgba(99,102,241,.75))",
                 boxShadow: "0 10px 22px rgba(15, 23, 42, .10)",
               }}
             />
-            {!collapsed && (
-              <div style={{ lineHeight: 1.1 }}>
-                <Text style={{ color: "rgba(15,23,42,.92)", fontSize: 13, fontWeight: 650 }}>
-                  抖店/抖创
-                </Text>
-                <div className="panel-title" style={{ marginTop: 2 }}>
-                  数据工具台
-                </div>
+            <div
+              className={`sider-header-text ${collapsed ? "collapsed" : ""}`}
+              style={{ lineHeight: 1.1 }}
+            >
+              <div style={{ color: "rgba(15,23,42,.92)", fontSize: 13, fontWeight: 650, whiteSpace: "nowrap" }}>
+                抖店/抖创
               </div>
-            )}
+              <div className="panel-title" style={{ marginTop: 2, whiteSpace: "nowrap" }}>
+                数据工具台
+              </div>
+            </div>
           </div>
-          {!collapsed && (
-            <Text style={{ color: "rgba(15,23,42,.45)", fontSize: 11 }} ellipsis>
-              {new Date().toLocaleDateString("zh-CN")}
-            </Text>
-          )}
+          <div className={`sider-date ${collapsed ? "collapsed" : ""}`} style={{ marginLeft: "auto" }}>
+            {new Date().toLocaleDateString("zh-CN")}
+          </div>
         </div>
 
         <Menu
@@ -174,15 +177,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           style={{ padding: 6, borderInlineEnd: 0 }}
         />
 
-        <div
-          style={{
-            padding: collapsed ? 8 : 12,
-            borderTop: "1px solid rgba(15, 23, 42, .08)",
-            marginTop: 8,
-          }}
-        >
-          <div style={{ height: 32 }} />
-        </div>
       </Sider>
 
       <Layout style={{ background: "transparent" }}>
