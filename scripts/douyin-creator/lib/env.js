@@ -38,7 +38,7 @@ const ACCOUNTS_DIR = (() => {
 const DEFAULT_ADD_ACCOUNTS_JSON = getProjectConfigPath();
 
 const DEFAULT_ALERT_TO = "2895845213@qq.com";
-const BROWSER_VIEWPORT = { width: 1600, height: 1000 };
+const BROWSER_VIEWPORT = { width: 1600, height: 1200 };
 
 const LOGIN_WAIT_TIMEOUT_MS = millisecondsFromEnvSecOrMs(
   "LOGIN_WAIT_TIMEOUT_SEC",

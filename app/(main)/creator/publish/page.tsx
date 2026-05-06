@@ -82,6 +82,7 @@ export default function CreatorPublishPage() {
   const [isAiContent, setIsAiContent] = useState<boolean>(false);
   const [scheduleAt, setScheduleAt] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<{ name: string }[]>([]);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
   const accountOptions = useMemo(
     () => accounts.map((a) => ({ label: a.name, value: a.name })),
@@ -106,6 +107,10 @@ export default function CreatorPublishPage() {
       const res = await fetch("/api/creator/publish/tasks");
       const data = await res.json();
       setTasks(data.tasks || []);
+      setSelectedRowKeys((prev) => {
+        const ids = new Set((data.tasks || []).map((t: PublishTask) => t.id));
+        return prev.filter((k) => ids.has(k));
+      });
     } catch {
       message.error("获取任务列表失败");
     }
@@ -297,6 +302,43 @@ export default function CreatorPublishPage() {
     }
   }
 
+  async function handleBatchDelete() {
+    if (!selectedRowKeys.length) return;
+    let deleted = 0;
+    let failed = 0;
+    for (const id of selectedRowKeys) {
+      try {
+        const res = await fetch("/api/creator/publish/tasks", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "delete", id }),
+        });
+        const data = await res.json();
+        if (!res.ok) { failed++; continue; }
+        deleted++;
+      } catch { failed++; }
+    }
+    setSelectedRowKeys([]);
+    message.success(`已删除 ${deleted} 个任务${failed > 0 ? `，${failed} 个失败` : ""}`);
+    await fetchTasks();
+  }
+
+  async function handleKillAll() {
+    try {
+      const res = await fetch("/api/creator/publish/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "kill-all" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "终止失败");
+      message.success(`已终止 ${data.killed} 个任务`);
+      await fetchTasks();
+    } catch (e: any) {
+      message.error(e.message || "终止失败");
+    }
+  }
+
   async function handleImportFromFeishu() {
     setImporting(true);
     try {
@@ -309,21 +351,24 @@ export default function CreatorPublishPage() {
   }
 
   const columns = [
-    { title: "账号", dataIndex: "accountName", align: "center" as const },
+    { title: "账号", dataIndex: "accountName", align: "center" as const, ellipsis: true },
     {
       title: "类型",
       align: "center" as const,
+      width: 48,
       render: (_: any, r: PublishTask) => (r.payload.type === "video" ? "视频" : "图文"),
     },
     {
       title: "定时",
       align: "center" as const,
+      width: 120,
       render: (_: any, r: PublishTask) =>
         r.payload.scheduleAt ? dayjs(r.payload.scheduleAt).format("MM-DD HH:mm") : "立即",
     },
     {
       title: "状态",
       dataIndex: "status",
+      width: 64,
       align: "center" as const,
       render: (s: TaskStatus) => {
         const map: Record<TaskStatus, { color: string; text: string }> = {
@@ -340,19 +385,26 @@ export default function CreatorPublishPage() {
     {
       title: "错误",
       align: "center" as const,
-      render: (_: any, r: PublishTask) => (r.lastError ? <Text type="danger">{r.lastError}</Text> : ""),
+      render: (_: any, r: PublishTask) =>
+        r.lastError ? (
+          <Typography.Text type="danger" ellipsis={{ tooltip: r.lastError }} style={{ maxWidth: 240 }}>
+            {r.lastError}
+          </Typography.Text>
+        ) : null,
     },
     {
       title: "更新时间",
       dataIndex: "updatedAt",
+      width: 100,
       align: "center" as const,
-      render: (v: string) => dayjs(v).format("MM-DD HH:mm:ss"),
+      render: (v: string) => dayjs(v).format("MM-DD HH:mm"),
     },
     {
       title: "操作",
+      width: 180,
       align: "center" as const,
       render: (_: any, r: PublishTask) => (
-        <Space size="small">
+        <Space size={0} >
           <Button
             size="small"
             type="link"
@@ -364,7 +416,7 @@ export default function CreatorPublishPage() {
               }
             }}
           >
-            查看日志
+            日志
           </Button>
           <Button
             size="small"
@@ -380,7 +432,7 @@ export default function CreatorPublishPage() {
               type="link"
               onClick={() => handleRunNow(r)}
             >
-              立即执行
+              执行
             </Button>
           )}
           <Popconfirm
@@ -602,19 +654,52 @@ export default function CreatorPublishPage() {
 
     const taskListContent = (
       <>
-        <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-          <Button onClick={fetchTasks} loading={loadingTasks}>
+        <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
+          {selectedRowKeys.length > 0 && (
+            <Popconfirm
+              title="确认批量删除？"
+              description={`将删除 ${selectedRowKeys.length} 个任务，此操作不可恢复`}
+              okText="删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={handleBatchDelete}
+            >
+              <Button danger size="small">
+                删除选中 ({selectedRowKeys.length})
+              </Button>
+            </Popconfirm>
+          )}
+          {runningCount > 0 && (
+            <Popconfirm
+              title="确认终止全部任务？"
+              description={`将强制终止 ${runningCount} 个正在运行的任务，不可恢复`}
+              okText="终止"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={handleKillAll}
+            >
+              <Button danger size="small">
+                终止全部 ({runningCount})
+              </Button>
+            </Popconfirm>
+          )}
+          <Button onClick={fetchTasks} loading={loadingTasks} size="small">
             刷新任务
           </Button>
         </div>
         <Table
         rowKey="id"
         size="small"
+        bordered
         loading={loadingTasks}
         dataSource={tasks}
         columns={columns as any}
-        pagination={{ pageSize: 20 }}
-        style={{ maxHeight: "calc(100vh - 160px)", overflow: "auto" }}
+        pagination={{ pageSize: 20, showSizeChanger: false }}
+        scroll={{ y: "calc(100vh - 220px)" }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: setSelectedRowKeys,
+        }}
       />
       </>
     );

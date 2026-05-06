@@ -66,7 +66,10 @@ async function waitVisible(page, selectors, timeout = 15000) {
   while (Date.now() - started < timeout) {
     for (const selector of list) {
       const loc = page.locator(selector).first();
-      if (await loc.isVisible().catch(() => false)) return loc;
+      if (await loc.isVisible().catch(() => false)) {
+        await loc.scrollIntoViewIfNeeded().catch(() => {});
+        return loc;
+      }
     }
     await page.waitForTimeout(250);
   }
@@ -269,6 +272,27 @@ async function selectSelfDeclaration(page, isAiContent) {
 async function setScheduleIfNeeded(page, scheduleAt) {
   if (!scheduleAt) return;
 
+  const now = new Date();
+  const MIN_OFFSET_MS = 2 * 60 * 60 * 1000; // 至少 2 小时后
+  const MAX_OFFSET_MS = 14 * 24 * 60 * 60 * 1000; // 至多 14 天内
+
+  const d = new Date(scheduleAt);
+  if (Number.isNaN(d.getTime())) {
+    throw new Error(`无效的定时发布时间: ${scheduleAt}`);
+  }
+
+  const minTime = new Date(now.getTime() + MIN_OFFSET_MS);
+  const maxTime = new Date(now.getTime() + MAX_OFFSET_MS);
+
+  if (d.getTime() < minTime.getTime()) {
+    console.log(`⚠️ 定时时间 ${fmtLocal(d)} 不满足最少2小时要求，改为立即发布`);
+    return;
+  }
+  if (d.getTime() > maxTime.getTime()) {
+    console.log(`⚠️ 定时时间 ${fmtLocal(d)} 超过14天上限，改为立即发布`);
+    return;
+  }
+
   const scheduleToggle = await waitVisible(page, [
     'label:has-text("定时发布")',
     'text=定时发布',
@@ -288,15 +312,16 @@ async function setScheduleIfNeeded(page, scheduleAt) {
     'input[placeholder*="时间"]',
   ]);
 
-  const d = new Date(scheduleAt);
-  if (Number.isNaN(d.getTime())) {
-    throw new Error(`无效的定时发布时间: ${scheduleAt}`);
-  }
   const pad = (n) => String(n).padStart(2, "0");
   const text = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   await setTextLikeInput(input, text);
   await input.press("Enter").catch(() => {});
   console.log(`已设置定时发布时间: ${text}`);
+}
+
+function fmtLocal(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 async function ensureLoggedIn(page, accountName, paths) {

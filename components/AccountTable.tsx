@@ -29,6 +29,7 @@ interface CreatorProps {
   onLogin?: (accountName: string, mode: "email_qr" | "local_manual") => void;
   onAddAccount?: (name: string) => void;
   onDeleteAccount?: (name: string) => void;
+  onOpenCreator?: (accountName: string) => void;
 }
 
 interface ShopProps {
@@ -86,7 +87,7 @@ export default function AccountTable(props: Props) {
   const { accounts, loading, onRefresh, type } = props;
 
   if (type === "creator") {
-    const { onLogin, onAddAccount, onDeleteAccount } = props as CreatorProps;
+    const { onLogin, onAddAccount, onDeleteAccount, onOpenCreator } = props as CreatorProps;
     const { isNamespaceBusy } = useTaskContext();
     const loginBusy = isNamespaceBusy("login");
     const [modalOpen, setModalOpen] = useState(false);
@@ -111,7 +112,7 @@ export default function AccountTable(props: Props) {
       {
         title: "操作",
         key: "actions",
-        width: 160,
+        width: 200,
         render: (_: any, row: CreatorAccount) => {
           const disabled = row.hasStorageState;
 
@@ -148,6 +149,16 @@ export default function AccountTable(props: Props) {
                   </Space>
                 </Button>
               </Dropdown>
+              {onOpenCreator && (
+                <Button
+                  size="small"
+                  type="primary"
+                  disabled={!row.hasStorageState}
+                  onClick={() => onOpenCreator(row.name)}
+                >
+                  抖创页面
+                </Button>
+              )}
               {onDeleteAccount && (
                 <Button
                   size="small"

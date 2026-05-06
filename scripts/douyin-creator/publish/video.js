@@ -240,6 +240,7 @@ async function runPublishVideo(options) {
     await page.goto(VIDEO_POST_URL, { waitUntil: "domcontentloaded" });
     await page.waitForSelector('input[placeholder*="标题"]', { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(3000);
+    await page.evaluate(() => { window.scrollTo(0, 0); document.body?.scrollIntoView?.(); }).catch(() => {});
 
     await uploadVideo(page, videoKey, accountName);
     await selectFirstAiCover(page);

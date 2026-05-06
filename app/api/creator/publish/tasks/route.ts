@@ -74,21 +74,25 @@ export async function PATCH(req: NextRequest) {
     const action = String(body.action || "").trim();
     const id = String(body.id || "").trim();
 
-    if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
-
-    if (action === "retry") {
-      const existing = readCreatorPublishTasks().find((t) => t.id === id);
-      if (!existing) return NextResponse.json({ error: "task not found" }, { status: 404 });
-
-      const next = patchCreatorPublishTask(id, {
-        status: "pending",
-        lastError: undefined,
-        taskId: undefined,
-      });
-      runPendingCreatorPublishTasks();
-
-      return NextResponse.json({ ok: true, task: next });
+    if (action === "kill-all") {
+      const tasks = readCreatorPublishTasks();
+      let killed = 0;
+      for (const task of tasks) {
+        if (task.status !== "running") continue;
+        if (task.taskId) {
+          const { killTask } = require("@/lib/taskManager");
+          killTask(task.taskId);
+        }
+        task.status = "cancelled";
+        task.updatedAt = new Date().toISOString();
+        task.lastError = "用户手动终止";
+        killed++;
+      }
+      writeCreatorPublishTasks(tasks);
+      return NextResponse.json({ ok: true, killed });
     }
+
+    if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
 
     if (action === "run-now") {
       const existing = readCreatorPublishTasks().find((t) => t.id === id);
@@ -99,6 +103,20 @@ export async function PATCH(req: NextRequest) {
 
       const next = patchCreatorPublishTask(id, {
         payload: { ...existing.payload, scheduleAt: null },
+      });
+      runPendingCreatorPublishTasks();
+
+      return NextResponse.json({ ok: true, task: next });
+    }
+
+    if (action === "retry") {
+      const existing = readCreatorPublishTasks().find((t) => t.id === id);
+      if (!existing) return NextResponse.json({ error: "task not found" }, { status: 404 });
+
+      const next = patchCreatorPublishTask(id, {
+        status: "pending",
+        lastError: undefined,
+        taskId: undefined,
       });
       runPendingCreatorPublishTasks();
 

@@ -54,7 +54,7 @@
   "creatorExportDateStart": null,
   "headless": false,
   "creatorPublish": {
-    "publishEnabled": false,
-    "publishWaitSec": 300
+    "publishEnabled": true,
+    "publishWaitSec": 5
   }
 }

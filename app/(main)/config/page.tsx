@@ -150,6 +150,14 @@ export default function ConfigPage() {
                     message.error(e.message || "启动登录失败");
                   }
                 }}
+                onOpenCreator={async (name) => {
+                  try {
+                    await startTask("/api/creator/open", { accountName: name }, "system");
+                    message.info(`已打开抖音创作者中心: ${name}`);
+                  } catch (e: any) {
+                    message.error(e.message || "打开失败");
+                  }
+                }}
               />
             </div>
 

@@ -271,6 +271,7 @@ async function runPublishArticle(options) {
 
     await page.goto(ARTICLE_POST_URL, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(3000);
+    await page.evaluate(() => { window.scrollTo(0, 0); document.body?.scrollIntoView?.(); }).catch(() => {});
 
     await uploadImages(page, imageKeys, accountName);
     await fillTitleAndDescription(
