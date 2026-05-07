@@ -91,6 +91,52 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ ok: true, killed });
     }
 
+    if (action === "kill-bulk") {
+      const ids: string[] = Array.isArray(body.ids) ? body.ids : [];
+      if (ids.length === 0) {
+        return NextResponse.json({ error: "missing ids" }, { status: 400 });
+      }
+
+      let killed = 0;
+      const tasks = readCreatorPublishTasks();
+      for (const task of tasks) {
+        if (!ids.includes(task.id)) continue;
+        if (task.status === "running" && task.taskId) {
+          const { killTask } = require("@/lib/taskManager");
+          killTask(task.taskId);
+        }
+        task.status = "cancelled";
+        task.updatedAt = new Date().toISOString();
+        task.lastError = "用户手动终止";
+        killed++;
+      }
+      writeCreatorPublishTasks(tasks);
+      return NextResponse.json({ ok: true, killed });
+    }
+
+    if (action === "start-bulk") {
+      const ids: string[] = Array.isArray(body.ids) ? body.ids : [];
+      if (ids.length === 0) {
+        return NextResponse.json({ error: "missing ids" }, { status: 400 });
+      }
+
+      let started = 0;
+      const tasks = readCreatorPublishTasks();
+      for (const t of tasks) {
+        if (!ids.includes(t.id)) continue;
+        t.status = "queued";
+        t.updatedAt = new Date().toISOString();
+        started++;
+      }
+      writeCreatorPublishTasks(tasks);
+
+      if (started > 0) {
+        runPendingCreatorPublishTasks();
+      }
+
+      return NextResponse.json({ ok: true, started });
+    }
+
     if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
 
     if (action === "run-now") {
@@ -107,30 +153,6 @@ export async function PATCH(req: NextRequest) {
       runPendingCreatorPublishTasks();
 
       return NextResponse.json({ ok: true, task: next });
-    }
-
-    if (action === "start-bulk") {
-      const ids: string[] = Array.isArray(body.ids) ? body.ids : [];
-      if (ids.length === 0) {
-        return NextResponse.json({ error: "missing ids" }, { status: 400 });
-      }
-
-      let started = 0;
-      const tasks = readCreatorPublishTasks();
-      for (const t of tasks) {
-        if (!ids.includes(t.id)) continue;
-        if (t.status !== "pending") continue;
-        t.status = "queued";
-        t.updatedAt = new Date().toISOString();
-        started++;
-      }
-      writeCreatorPublishTasks(tasks);
-
-      if (started > 0) {
-        runPendingCreatorPublishTasks();
-      }
-
-      return NextResponse.json({ ok: true, started });
     }
 
     if (action === "retry") {

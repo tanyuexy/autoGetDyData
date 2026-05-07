@@ -341,15 +341,17 @@ export default function CreatorPublishPage() {
     await fetchTasks();
   }
 
-  async function handleKillAll() {
+  async function handleKillSelected() {
+    if (!selectedRowKeys.length) return;
     try {
       const res = await fetch("/api/creator/publish/tasks", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "kill-all" }),
+        body: JSON.stringify({ action: "kill-bulk", ids: selectedRowKeys }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "终止失败");
+      setSelectedRowKeys([]);
       message.success(`已终止 ${data.killed} 个任务`);
       await fetchTasks();
     } catch (e: any) {
@@ -684,6 +686,18 @@ export default function CreatorPublishPage() {
                 启动任务 ({selectedRowKeys.length})
               </Button>
               <Popconfirm
+                title="确认终止选中任务？"
+                description={`将强制终止 ${selectedRowKeys.length} 个选中的运行中任务，不可恢复`}
+                okText="终止"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={handleKillSelected}
+              >
+                <Button danger size="small">
+                  终止选中 ({selectedRowKeys.length})
+                </Button>
+              </Popconfirm>
+              <Popconfirm
                 title="确认批量删除？"
                 description={`将删除 ${selectedRowKeys.length} 个任务，此操作不可恢复`}
                 okText="删除"
@@ -696,20 +710,6 @@ export default function CreatorPublishPage() {
                 </Button>
               </Popconfirm>
             </>
-          )}
-          {runningCount > 0 && (
-            <Popconfirm
-              title="确认终止全部任务？"
-              description={`将强制终止 ${runningCount} 个正在运行的任务，不可恢复`}
-              okText="终止"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              onConfirm={handleKillAll}
-            >
-              <Button danger size="small">
-                终止全部 ({runningCount})
-              </Button>
-            </Popconfirm>
           )}
           <Button onClick={fetchTasks} loading={loadingTasks} size="small">
             刷新任务
