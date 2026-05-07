@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * 项目脚本统一入口。请在仓库根目录执行：node scripts/run.js <命令> [参数...]
- * npm scripts 与 Next API 都应调用本文件，避免散落依赖具体脚本路径。
+ * 页面/API 使用的脚本统一入口。
+ * 这里只保留当前 Web 页面会触发的能力，命令行专用历史入口不再暴露。
  */
 const path = require("path");
 const { spawnSync } = require("child_process");
@@ -11,41 +11,60 @@ const projectRoot = path.resolve(__dirname, "..");
 /** @type {Record<string, { script: string, argv?: string[], env?: Record<string, string> }>} */
 const ROUTES = {
   "creator:export": {
-    script: "scripts/douyin-creator/index.js",
+    script: "scripts/douyin-creator/cli.js",
     argv: ["export"]
   },
   "creator:export-feishu": {
-    script: "scripts/douyin-creator/index.js",
+    script: "scripts/douyin-creator/cli.js",
     argv: ["export:feishu"]
   },
-  "creator:list": {
-    script: "scripts/douyin-creator/index.js",
-    argv: ["list"]
-  },
   "creator:publish-video": {
-    script: "scripts/douyin-creator/index.js",
+    script: "scripts/douyin-creator/cli.js",
     argv: ["publish-video"]
   },
   "creator:publish-article": {
-    script: "scripts/douyin-creator/index.js",
+    script: "scripts/douyin-creator/cli.js",
     argv: ["publish-article"]
   },
   "creator:login": {
-    script: "scripts/douyin-creator/index.js",
+    script: "scripts/douyin-creator/cli.js",
     argv: ["login"]
   },
-
-  export: { script: "scripts/douyin-creator/index.js", argv: ["export"] },
-  "export:feishu": {
-    script: "scripts/douyin-creator/index.js",
-    argv: ["export:feishu"]
+  "creator:open": {
+    script: "scripts/douyin-creator/open.js",
+    argv: []
   },
 
-  "feishu:auth": { script: "scripts/feishu/index.js", argv: ["auth-url"] },
-  "feishu:callback": { script: "scripts/feishu/callback-server.js", argv: [] },
-  "feishu:insert-xlsx": {
-    script: "scripts/feishu/index.js",
-    argv: ["insert-xlsx"]
+  "shop:login": {
+    script: "scripts/douyin-shop/cli.js",
+    argv: ["login"]
+  },
+  "shop:export": {
+    script: "scripts/douyin-shop/cli.js",
+    argv: ["export"]
+  },
+  "shop:sync-feishu": {
+    script: "scripts/douyin-shop/cli.js",
+    argv: ["sync-feishu"]
+  },
+
+  "feishu:auth": {
+    script: "scripts/feishu/cli.js",
+    argv: ["auth-url"]
+  },
+  "feishu:sync-creator": {
+    script: "scripts/feishu/cli.js",
+    argv: ["sync-data-xlsx"],
+    env: { FEISHU_BITABLE_PROFILE: "creator" }
+  },
+  "feishu:sync-shop": {
+    script: "scripts/feishu/cli.js",
+    argv: ["sync-data-xlsx-shop"],
+    env: { FEISHU_BITABLE_PROFILE: "shop" }
+  },
+  "feishu:backup": {
+    script: "scripts/feishu/cli.js",
+    argv: ["backup-bitable"]
   },
   "feishu:import-publish-tasks": {
     script: "scripts/feishu/import-publish-tasks.js",
@@ -54,50 +73,6 @@ const ROUTES = {
   "feishu:mark-task-published": {
     script: "scripts/feishu/mark-task-published.js",
     argv: []
-  },
-  "feishu:sync-data-xlsx": {
-    script: "scripts/feishu/index.js",
-    argv: ["sync-data-xlsx"]
-  },
-  "feishu:sync-data-xlsx-creator": {
-    script: "scripts/feishu/index.js",
-    argv: ["sync-data-xlsx"],
-    env: { FEISHU_BITABLE_PROFILE: "creator" }
-  },
-  "feishu:sync-data-xlsx-shop": {
-    script: "scripts/feishu/index.js",
-    argv: ["sync-data-xlsx-shop"],
-    env: { FEISHU_BITABLE_PROFILE: "shop" }
-  },
-  "feishu:sync-creator": {
-    script: "scripts/feishu/index.js",
-    argv: ["sync-data-xlsx"],
-    env: { FEISHU_BITABLE_PROFILE: "creator" }
-  },
-  "feishu:sync-shop": {
-    script: "scripts/feishu/index.js",
-    argv: ["sync-data-xlsx-shop"],
-    env: { FEISHU_BITABLE_PROFILE: "shop" }
-  },
-  "feishu:backup-bitable": {
-    script: "scripts/feishu/index.js",
-    argv: ["backup-bitable"]
-  },
-  "feishu:backup": {
-    script: "scripts/feishu/index.js",
-    argv: ["backup-bitable"]
-  },
-
-  "shop:login": { script: "scripts/douyin-shop/index.js", argv: ["login"] },
-  "shop:export": { script: "scripts/douyin-shop/index.js", argv: ["export"] },
-  "shop:merge": { script: "scripts/douyin-shop/index.js", argv: ["merge"] },
-  "shop:feishu-sync": {
-    script: "scripts/douyin-shop/index.js",
-    argv: ["feishu-sync"]
-  },
-  "shop:sync-feishu": {
-    script: "scripts/douyin-shop/index.js",
-    argv: ["sync-feishu"]
   }
 };
 
@@ -115,6 +90,7 @@ function main() {
     printHelp();
     process.exit(1);
   }
+
   const route = ROUTES[cmd];
   if (!route) {
     console.error(`未知命令: ${cmd}`);
@@ -124,19 +100,18 @@ function main() {
 
   const scriptPath = path.join(projectRoot, route.script);
   const childArgv = [scriptPath, ...(route.argv || []), ...rest];
-  const env =
-    route.env != null ? { ...process.env, ...route.env } : { ...process.env };
+  const env = route.env ? { ...process.env, ...route.env } : { ...process.env };
 
   const result = spawnSync(process.execPath, childArgv, {
     cwd: projectRoot,
     stdio: "inherit",
     env
   });
-  const code = result.status;
-  if (code == null) {
+
+  if (result.status == null) {
     process.exit(result.signal ? 1 : 0);
   }
-  process.exit(code);
+  process.exit(result.status);
 }
 
 main();

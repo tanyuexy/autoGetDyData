@@ -12,7 +12,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { chromium } = require("playwright");
 
-const { ensureDir, fileExists } = require("./lib/fs-utils");
+const { ensureDir, fileExists } = require("../common/fs");
 const {
   getAccountPaths,
   parseCliCommand,
@@ -114,11 +114,11 @@ async function runAccountQueue(browser, accounts, command, options = {}) {
 
 function runFeishuSyncDataXlsxCreator() {
   const projectRoot = path.resolve(__dirname, "../..");
-  const result = spawnSync("npm", ["run", "feishu:sync-data-xlsx-creator"], {
+  const result = spawnSync(process.execPath, ["scripts/run.js", "feishu:sync-creator"], {
     cwd: projectRoot,
     stdio: "inherit",
     env: { ...process.env },
-    shell: process.platform === "win32"
+    shell: false
   });
 
   if (result.status !== 0) {

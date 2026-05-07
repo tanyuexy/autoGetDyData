@@ -44,7 +44,7 @@ const SHOP_XLSX_FIELD_ALIASES = {
 };
 
 const { existsSync } = require("fs");
-const { getProjectConfigPath } = require("../project-config-path");
+const { getProjectConfigPath } = require("../common/config-path");
 
 function getDefaultExportsDir() {
   const envVal = process.env.EXPORTS_DIR;
@@ -75,16 +75,16 @@ function printHelp() {
 飞书多维表格 OAuth2 工具
 
 用法:
-  node scripts/feishu/index.js auth-url [--state xxx] [--no-open]
+  node scripts/feishu/cli.js auth-url [--state xxx] [--no-open]
   npm run feishu:callback
-  node scripts/feishu/index.js exchange --code <authorization_code>
-  node scripts/feishu/index.js refresh
-  node scripts/feishu/index.js insert --fields '{"姓名":"张三","金额":100}'
-  node scripts/feishu/index.js insert --fields-file ./data/record.json
-  node scripts/feishu/index.js insert-xlsx --file ./data/作品列表.xlsx [--sheet Sheet1] [--dry-run]
-  node scripts/feishu/index.js sync-data-xlsx [--dir ./data] [--file ./data/某.xlsx] [--sheet Sheet1] [--keep-rows N] [--dry-run]
-  node scripts/feishu/index.js sync-data-xlsx-shop [--file ./data/抖店-全部店铺-每日支付增量汇总.xlsx] [--sheet Sheet1] [--replace] [--dry-run]
-  node scripts/feishu/index.js backup-bitable [--dir ./data] [--profiles creator,shop] [--dry-run]
+  node scripts/feishu/cli.js exchange --code <authorization_code>
+  node scripts/feishu/cli.js refresh
+  node scripts/feishu/cli.js insert --fields '{"姓名":"张三","金额":100}'
+  node scripts/feishu/cli.js insert --fields-file ./data/record.json
+  node scripts/feishu/cli.js insert-xlsx --file ./data/作品列表.xlsx [--sheet Sheet1] [--dry-run]
+  node scripts/feishu/cli.js sync-data-xlsx [--dir ./data] [--file ./data/某.xlsx] [--sheet Sheet1] [--keep-rows N] [--dry-run]
+  node scripts/feishu/cli.js sync-data-xlsx-shop [--file ./data/抖店-全部店铺-每日支付增量汇总.xlsx] [--sheet Sheet1] [--replace] [--dry-run]
+  node scripts/feishu/cli.js backup-bitable [--dir ./data] [--profiles creator,shop] [--dry-run]
 
 说明:
   - 多维表格 appToken/tableId：优先读环境变量 FEISHU_BITABLE_*；未设置时读项目根目录 config.json 的 feishu.<profile>（默认 profile=shop，抖创同步可设 FEISHU_BITABLE_PROFILE=creator 并在 config 中配置 feishu.creator）

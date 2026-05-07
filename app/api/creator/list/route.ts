@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
-    const { getProjectConfigPath } = require("@/scripts/project-config-path");
+    const { getProjectConfigPath } = require("@/scripts/common/config-path");
     const path = require("path");
     const fs = require("fs");
     const { analyzeStorageState, CREATOR_KEY_COOKIE_PATTERNS, readLastVerified } = require("@/app/lib/cookie-checker");

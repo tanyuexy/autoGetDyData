@@ -20,16 +20,9 @@ export async function POST(request: NextRequest) {
       : [];
 
     const taskId = generateTaskIdWithTime("creator-feishu-sync");
-    const args = ["run", "feishu:sync-data-xlsx-creator"];
+    const args = ["scripts/run.js", "feishu:sync-creator"];
 
-    if (accounts.length > 0) {
-      args.push("--");
-      for (const name of accounts) {
-        args.push(name);
-      }
-    }
-
-    spawnTask(taskId, "npm", args, { namespace: "creator-export" });
+    spawnTask(taskId, "node", args, { namespace: "creator-export" });
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

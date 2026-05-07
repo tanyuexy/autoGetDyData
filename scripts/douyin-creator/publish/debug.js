@@ -1,5 +1,5 @@
 const path = require("path");
-const { ensureDir } = require("../lib/fs-utils");
+const { ensureDir } = require("../../common/fs");
 
 const PUBLISH_DEBUG_DIR = path.resolve(
   process.env.CREATOR_PUBLISH_DEBUG_DIR ||

@@ -1,6 +1,6 @@
 const path = require("path");
 const { chromium } = require("playwright");
-const { ensureDir, fileExists } = require("../lib/fs-utils");
+const { ensureDir, fileExists } = require("../../common/fs");
 const { getAccountPaths } = require("../lib/accounts");
 const { BROWSER_VIEWPORT, HEADLESS } = require("../lib/env");
 const { attachQrDataUrlSniffer } = require("../lib/qr");

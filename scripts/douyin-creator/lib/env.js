@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { getProjectConfigPath } = require("../../project-config-path");
+const { getProjectConfigPath } = require("../../common/config-path");
 
 /** 优先读 *_SEC（秒），否则读 *_MS（毫秒，兼容旧配置），最后 defaultSeconds（秒）→ 毫秒 */
 function millisecondsFromEnvSecOrMs(secName, msName, defaultSeconds) {

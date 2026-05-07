@@ -1,6 +1,6 @@
 const fs = require("fs/promises");
 const path = require("path");
-const { ensureDir, fileExists } = require("./fs-utils");
+const { ensureDir, fileExists } = require("../../common/fs");
 const { BROWSER_VIEWPORT } = require("./env");
 
 const qrDataUrlStateByPage = new WeakMap();

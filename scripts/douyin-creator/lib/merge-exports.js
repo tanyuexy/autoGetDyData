@@ -2,7 +2,7 @@ const fs = require("fs/promises");
 const { existsSync } = require("fs");
 const path = require("path");
 const XLSX = require("xlsx");
-const { ensureDir } = require("./fs-utils");
+const { ensureDir } = require("../../common/fs");
 
 const OUTPUT_DIR = (() => {
   const envVal = process.env.EXPORTS_DIR;

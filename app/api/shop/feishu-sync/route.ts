@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const shopNames = parseShopNames(body);
 
     const taskId = generateTaskIdWithTime("shop-feishu-sync");
-    spawnTask(taskId, "npm", ["run", "feishu:sync-data-xlsx-shop"], {
+    spawnTask(taskId, "node", ["scripts/run.js", "feishu:sync-shop"], {
       namespace: "shop-export",
       env: {
         SHOP_SELECTED_NAMES: shopNames.join(","),

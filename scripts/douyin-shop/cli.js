@@ -4,11 +4,7 @@ const fs = require("fs/promises");
 const { execSync } = require("child_process");
 const { chromium } = require("playwright");
 
-const {
-  BROWSER_VIEWPORT,
-  HEADLESS,
-  getDefaultAccounts
-} = require("./lib/env");
+const { BROWSER_VIEWPORT, HEADLESS, getDefaultAccounts } = require("./lib/env");
 const { runShopLogin, getAccountPaths } = require("./lib/login");
 const { loadPreferredShopNames } = require("./lib/shop-picker");
 const {
@@ -19,7 +15,7 @@ const { calcDaysToExport } = require("./lib/backup-dates");
 const {
   collectProcessedNamesIntoSet,
   buildRemainingTargetsResolver,
-  printResultSummary,
+  printResultSummary
 } = require("./lib/index-helpers");
 
 let activeBrowser = null;
@@ -45,9 +41,7 @@ function parseArgs(argv) {
   // 支持 "login"（默认）或 "login <email> <password>"
   const args = argv.slice(2);
   const command =
-    args[0] && !args[0].includes("@")
-      ? String(args[0]).toLowerCase()
-      : "login";
+    args[0] && !args[0].includes("@") ? String(args[0]).toLowerCase() : "login";
   const positional = args[0] && !args[0].includes("@") ? args.slice(1) : args;
 
   if (command === "merge" || command === "feishu-sync") {
@@ -120,9 +114,10 @@ async function runOne(browser, account, options = {}) {
 }
 
 async function runShopSyncFeishu(accounts, targetShopNames = []) {
-  const preferredList = targetShopNames.length > 0
-    ? targetShopNames
-    : await loadPreferredShopNames();
+  const preferredList =
+    targetShopNames.length > 0
+      ? targetShopNames
+      : await loadPreferredShopNames();
   console.log("抖店同步飞书：开始登录拉取 → 校验 → 合并 → 同步飞书");
 
   const browser = await chromium.launch({
@@ -141,7 +136,10 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
   const results = [];
   const processedNames = new Set();
   const totalTargets = preferredList.length;
-  const remainingTargets = buildRemainingTargetsResolver(preferredList, processedNames);
+  const remainingTargets = buildRemainingTargetsResolver(
+    preferredList,
+    processedNames
+  );
 
   try {
     for (let i = 0; i < accounts.length; i += 1) {
@@ -204,7 +202,7 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
   }
 
   console.log("抖店数据拉取、文件校验、汇总校验均通过，开始同步飞书表格…");
-  execSync("node scripts/run.js feishu:sync-data-xlsx-shop", {
+  execSync("node scripts/run.js feishu:sync-shop", {
     stdio: "inherit",
     cwd: process.cwd()
   });
@@ -269,7 +267,10 @@ async function main() {
   const results = [];
   const processedNames = new Set();
   const totalTargets = preferredList.length;
-  const remainingTargets = buildRemainingTargetsResolver(preferredList, processedNames);
+  const remainingTargets = buildRemainingTargetsResolver(
+    preferredList,
+    processedNames
+  );
 
   for (let i = 0; i < accounts.length; i += 1) {
     const account = accounts[i];

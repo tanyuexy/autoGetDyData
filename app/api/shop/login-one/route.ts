@@ -21,7 +21,6 @@ export async function POST(request: NextRequest) {
     }
 
     const taskId = generateTaskIdWithTime("shop-login-one");
-    // 传入邮箱即可：scripts/douyin-shop/index.js 会自动使用默认密码
     spawnTask(taskId, "node", ["scripts/run.js", "shop:login", email], { namespace: "login" });
 
     return NextResponse.json({ taskId });

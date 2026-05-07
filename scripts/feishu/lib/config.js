@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { getProjectConfigPath } = require("../../project-config-path");
+const { getProjectConfigPath } = require("../../common/config-path");
 
 const DEFAULT_API_BASE = "https://open.feishu.cn";
 const DEFAULT_AUTH_BASE = "https://accounts.feishu.cn";

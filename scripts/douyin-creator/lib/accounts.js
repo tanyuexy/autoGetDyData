@@ -1,6 +1,6 @@
 const fs = require("fs/promises");
 const path = require("path");
-const { ensureDir, fileExists } = require("./fs-utils");
+const { ensureDir, fileExists } = require("../../common/fs");
 const { ACCOUNTS_DIR } = require("./env");
 
 function normalizeAccountName(name) {
@@ -32,7 +32,7 @@ function parseCliCommand() {
   const command = (args[0] || "export").toLowerCase();
   if (!["export", "export:feishu", "login"].includes(command)) {
     throw new Error(
-      "只支持: export / export:feishu / login。示例: npm run export / npm run export -- 账号A [账号B] / npm run export:feishu / npm run export:feishu -- 账号A [账号B] / node scripts/run.js creator:login 账号A"
+      "只支持: export / export:feishu / login。页面任务请通过 Web 界面触发；脚本入口示例: node scripts/run.js creator:export / node scripts/run.js creator:export-feishu / node scripts/run.js creator:login 账号A"
     );
   }
   const tail = args.slice(1);

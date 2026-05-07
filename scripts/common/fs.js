@@ -13,5 +13,12 @@ async function fileExists(filePath) {
   }
 }
 
-module.exports = { ensureDir, fileExists };
+function normalizeFileName(name) {
+  return String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_");
+}
 
+module.exports = {
+  ensureDir,
+  fileExists,
+  normalizeFileName,
+};

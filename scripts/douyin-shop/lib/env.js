@@ -1,6 +1,6 @@
 const path = require("path");
 const fs = require("fs");
-const { getProjectConfigPath } = require("../../project-config-path");
+const { getProjectConfigPath } = require("../../common/config-path");
 
 function numberFromEnv(name, defaultValue) {
   const raw = process.env[name];

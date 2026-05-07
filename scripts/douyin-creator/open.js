@@ -6,7 +6,7 @@
  */
 const { chromium } = require("playwright");
 const { getAccountPaths } = require("./lib/accounts");
-const { fileExists, ensureDir } = require("./lib/fs-utils");
+const { fileExists, ensureDir } = require("../common/fs");
 const { BROWSER_VIEWPORT } = require("./lib/env");
 
 let activeBrowser = null;

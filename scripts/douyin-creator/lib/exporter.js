@@ -1,6 +1,6 @@
 const fs = require("fs/promises");
 const path = require("path");
-const { fileExists } = require("./fs-utils");
+const { fileExists } = require("../../common/fs");
 const { clickIfVisible } = require("./login");
 const { getCreatorExportDateStartSpec } = require("./env");
 

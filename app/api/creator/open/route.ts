@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     }
 
     const taskId = generateTaskIdWithTime(`creator-open-${accountName}`);
-    spawnTask(taskId, "node", ["scripts/douyin-creator/open.js", accountName], {
+    spawnTask(taskId, "node", ["scripts/run.js", "creator:open", accountName], {
       namespace: "system",
       env: { HEADLESS: "false" },
       interactive: true,
