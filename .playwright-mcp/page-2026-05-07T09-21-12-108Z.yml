@@ -1,0 +1,96 @@
+- generic [ref=e3]:
+  - generic [ref=e10]:
+    - generic [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14] [cursor=pointer]: 手机登录
+        - generic [ref=e16] [cursor=pointer]: 邮箱登录
+      - generic [ref=e17]:
+        - spinbutton "手机号码" [active] [ref=e22]
+        - generic [ref=e25]:
+          - spinbutton "验证码" [ref=e27]
+          - generic "手机号码不能为空" [ref=e28]: 发送验证码
+      - button "登录" [disabled] [ref=e31]
+      - generic [ref=e32]:
+        - generic [ref=e35] [cursor=pointer]: 收不到验证码
+        - generic [ref=e37]:
+          - generic [ref=e39] [cursor=pointer]: 手机号停用或忘记
+          - generic [ref=e40]: 手机号首次登录即自动注册
+    - generic [ref=e41]:
+      - generic [ref=e43]: 其他登录方式
+      - generic [ref=e44]:
+        - img "." [ref=e46] [cursor=pointer]
+        - img "." [ref=e48] [cursor=pointer]
+        - img "." [ref=e50] [cursor=pointer]
+    - generic [ref=e51]:
+      - generic [ref=e52]:
+        - checkbox [ref=e55] [cursor=pointer]
+        - generic [ref=e57]: 登录即代表同意
+      - generic [ref=e58]:
+        - link "用户协议" [ref=e59] [cursor=pointer]:
+          - /url: https://school.jinritemai.com/doudian/web/article/101699
+        - text: 和
+        - link "隐私条款" [ref=e60] [cursor=pointer]:
+          - /url: https://school.jinritemai.com/doudian/web/article/101700
+  - generic [ref=e62]:
+    - img "logo" [ref=e64] [cursor=pointer]
+    - generic [ref=e65]:
+      - generic [ref=e66]:
+        - heading "入驻指南" [level=2] [ref=e67]
+        - link "商家入驻" [ref=e68] [cursor=pointer]:
+          - /url: /?source=ddgwdlymzxjsjrz
+        - link "资质资费" [ref=e69] [cursor=pointer]:
+          - /url: /enter/quali-fee
+        - link "即时零售商家入驻" [ref=e70] [cursor=pointer]:
+          - /url: /instant-retail?source=loginunderside
+      - generic [ref=e71]:
+        - heading "人工咨询热线" [level=2] [ref=e72]
+        - link "950518" [ref=e73] [cursor=pointer]:
+          - /url: tel:950518
+      - generic [ref=e74]:
+        - heading "廉洁举报" [level=2] [ref=e75]
+        - heading "lianjie@bytedance.com" [level=3] [ref=e76]
+        - link "举报入口" [ref=e77] [cursor=pointer]:
+          - /url: https://bytedance.larkoffice.com/share/base/form/shrcnTMx4X98p1ISCrklZnxvHHf
+      - generic [ref=e78]:
+        - heading "关联平台" [level=2] [ref=e79]
+        - link "字节跳动" [ref=e80] [cursor=pointer]:
+          - /url: https://www.bytedance.com/zh/
+        - link "抖音短视频" [ref=e81] [cursor=pointer]:
+          - /url: https://www.douyin.com/
+        - link "今日头条" [ref=e82] [cursor=pointer]:
+          - /url: https://www.toutiao.com/
+        - link "西瓜视频" [ref=e83] [cursor=pointer]:
+          - /url: https://www.ixigua.com/
+        - link "抖音火山版" [ref=e84] [cursor=pointer]:
+          - /url: https://www.huoshanzhibo.com/
+        - link "巨量引擎" [ref=e85] [cursor=pointer]:
+          - /url: https://www.oceanengine.com/
+        - link "巨量百应" [ref=e86] [cursor=pointer]:
+          - /url: https://buyin.jinritemai.com/
+        - link "抖音电商" [ref=e87] [cursor=pointer]:
+          - /url: https://douyinec.com/
+      - generic [ref=e88]:
+        - heading "资质证照" [level=2] [ref=e89]
+        - link "营业执照" [ref=e90] [cursor=pointer]:
+          - /url: https://lf3-static.bytednsdoc.com/obj/eden-cn/wpceh7uhmhpe/fxglogin202507yingyezhizhao.pdf
+        - link "沪ICP备2021017807号-10" [ref=e91] [cursor=pointer]:
+          - /url: https://beian.miit.gov.cn/#/Integrated/index
+        - link "（沪）网械平台备字[2022]第00002号" [ref=e92] [cursor=pointer]:
+          - /url: https://lf3-static.bytednsdoc.com/obj/eden-cn/wpceh7uhmhpe/医疗器械网络交易服务第三方平台备案凭证20250929.jpg
+      - link "增值电信业务经营许可证(沪B2-20220149)" [ref=e94] [cursor=pointer]:
+        - /url: https://lf3-static.bytednsdoc.com/obj/eden-cn/wpceh7uhmhpe/434-01-089-上海格物致品网络科技有限公司-增值电信业务经营许可证20241213-20270130.pdf
+      - generic [ref=e95]:
+        - heading "沪网药信备字〔2025〕00219号" [level=3] [ref=e96]
+        - link "（沪）网药平台备字[2023]第000004-007号" [ref=e97] [cursor=pointer]:
+          - /url: https://lf3-static.bytednsdoc.com/obj/eden-cn/wpceh7uhmhpe/yaopingpingtaidisanfangbeian007.jpg
+    - generic [ref=e98]:
+      - generic [ref=e99]:
+        - img [ref=e100]
+        - generic [ref=e101]: Mac客户端 (抖店+飞鸽)
+      - generic [ref=e102]:
+        - img [ref=e103]
+        - generic [ref=e104]: Win客户端 (抖店+飞鸽)
+      - generic [ref=e105]: 下载抖店客户端
+    - generic [ref=e106]:
+      - img "qrcode" [ref=e108]
+      - generic [ref=e109]: 扫码下载抖店APP

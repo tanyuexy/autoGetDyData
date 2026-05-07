@@ -92,7 +92,11 @@ async function clickIfVisible(locator, timeout = 3500) {
       .isVisible({ timeout })
       .catch(() => false)
   ) {
-    await locator.first().click();
+    try {
+      await locator.first().click({ timeout: Math.min(timeout, 4000) });
+    } catch {
+      await locator.first().click({ force: true, timeout: 3000 });
+    }
     return true;
   }
   return false;

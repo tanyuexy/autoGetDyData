@@ -146,9 +146,14 @@ async function openDateRangePicker(page) {
   ];
   for (const locator of candidates) {
     if (await locator.isVisible({ timeout: 1200 }).catch(() => false)) {
-      await locator.click();
+      const alreadyExpanded = await locator
+        .getAttribute("aria-expanded", { timeout: 500 })
+        .catch(() => null);
+      if (alreadyExpanded !== "true") {
+        await locator.click({ force: true, timeout: 3000 }).catch(() => {});
+      }
       await page
-        .locator(".douyin-creator-pc-popover-content")
+        .locator(".douyin-creator-pc-popover-content, dialog[role='dialog']")
         .first()
         .waitFor({ state: "visible", timeout: 4000 })
         .catch(() => {});
@@ -172,13 +177,20 @@ function normalizeFlexibleYmd(raw) {
  * @see .douyin-creator-pc-datepicker-inset-input-wrapper input.douyin-creator-pc-input
  */
 async function fillInsetDateRangeInputs(page, startYmd, endYmd) {
-  const root = page.locator(".douyin-creator-pc-popover-content").first();
+  const root = page.locator(
+    ".douyin-creator-pc-popover-content, dialog[role='dialog']"
+  ).first();
   if (!(await root.isVisible({ timeout: 2500 }).catch(() => false))) {
     return false;
   }
 
   const inputs = root.locator(
-    ".douyin-creator-pc-datepicker-inset-input-wrapper input.douyin-creator-pc-input[type='text'], .douyin-creator-pc-datepicker-inset-input-wrapper input[placeholder*='yyyy']"
+    [
+      ".douyin-creator-pc-datepicker-inset-input-wrapper input.douyin-creator-pc-input[type='text']",
+      ".douyin-creator-pc-datepicker-inset-input-wrapper input[placeholder*='yyyy']",
+      "input[placeholder='yyyy-MM-dd']",
+      "input[placeholder*='yyyy']"
+    ].join(", ")
   );
   await inputs
     .first()
@@ -216,12 +228,19 @@ async function fillInsetDateRangeInputs(page, startYmd, endYmd) {
 }
 
 async function readInsetDateRangeValues(page) {
-  const root = page.locator(".douyin-creator-pc-popover-content").first();
+  const root = page.locator(
+    ".douyin-creator-pc-popover-content, dialog[role='dialog']"
+  ).first();
   if (!(await root.isVisible({ timeout: 500 }).catch(() => false))) {
     return null;
   }
   const inputs = root.locator(
-    ".douyin-creator-pc-datepicker-inset-input-wrapper input.douyin-creator-pc-input[type='text'], .douyin-creator-pc-datepicker-inset-input-wrapper input[placeholder*='yyyy']"
+    [
+      ".douyin-creator-pc-datepicker-inset-input-wrapper input.douyin-creator-pc-input[type='text']",
+      ".douyin-creator-pc-datepicker-inset-input-wrapper input[placeholder*='yyyy']",
+      "input[placeholder='yyyy-MM-dd']",
+      "input[placeholder*='yyyy']"
+    ].join(", ")
   );
   if ((await inputs.count()) < 2) {
     return null;
@@ -476,6 +495,7 @@ async function saveAuth(context, paths, accountName) {
 
 async function exportPostListData(page, paths, accountName) {
   const tabClicked =
+    (await clickIfVisible(page.getByRole("radio", { name: "投稿列表" }), 2500)) ||
     (await clickIfVisible(page.getByRole("tab", { name: "投稿列表" }), 2500)) ||
     (await clickIfVisible(page.getByText("投稿列表"), 2500));
 

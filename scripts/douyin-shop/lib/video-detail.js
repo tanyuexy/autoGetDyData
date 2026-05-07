@@ -5,6 +5,7 @@ const {
   pickLatestSelectableCalendarDay
 } = require("./pick-latest-calendar-day");
 const { appendDataDateColumn } = require("./append-data-date-column");
+const { retryableGoto, retryableDownload } = require("./network");
 
 const VIDEO_SELF_URL =
   process.env.SHOP_VIDEO_SELF_URL ||
@@ -61,15 +62,12 @@ async function gotoVideoSelf(page, tag) {
   const url = page.url() || "";
   if (!url.startsWith(VIDEO_SELF_URL)) {
     logStep(tag, `跳转至短视频明细页: ${VIDEO_SELF_URL}`);
-    try {
-      await page.goto(VIDEO_SELF_URL, {
-        waitUntil: "domcontentloaded",
-        timeout: 20000
-      });
-    } catch (error) {
-      logWarn(tag, `跳转短视频明细页失败: ${error.message || error}`);
-      throw error;
-    }
+    await retryableGoto(page, VIDEO_SELF_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 20000,
+      maxRetries: 2,
+      expectedUrlRe: /compass\.jinritemai\.com\/shop\/video\/self/
+    });
   } else {
     logStep(tag, `当前已在短视频明细页`);
   }
@@ -300,18 +298,12 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   await downloadBtn.waitFor({ state: "visible", timeout: 8000 });
 
   logStep(tag, `发现 ${btnCount} 个"下载明细"按钮，点击最后一个（${exportLabel}）`);
-  const downloadPromise = page.waitForEvent("download", { timeout: 60000 });
-
-  await downloadBtn.click({ timeout: 3000 });
-
-  let download;
-  try {
-    download = await downloadPromise;
-  } catch (error) {
-    throw new Error(
-      `点击"下载明细"后 60s 内未触发下载事件：${error.message || error}`
-    );
-  }
+  const download = await retryableDownload(page, async () => {
+    await downloadBtn.click({ timeout: 3000 });
+  }, {
+    timeout: 60000,
+    maxRetries: 1
+  });
 
   const rawName =
     download.suggestedFilename() || `video-detail-${Date.now()}.csv`;

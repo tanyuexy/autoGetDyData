@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 import { spawnTask, generateTaskIdWithTime, canStartTask } from "@/lib/taskManager";
-import { runPendingCreatorPublishTasks } from "@/lib/creatorPublishScheduler";
 import {
   readCreatorPublishTasks,
   writeCreatorPublishTasks,
@@ -23,11 +22,18 @@ function mergeImportedTasks() {
 
     const existing = readCreatorPublishTasks();
     const existingIds = new Set(existing.map((t) => t.id));
+    const existingFeishuIds = new Set(
+      existing.map((t) => t.feishuRecordId).filter(Boolean)
+    );
 
     for (const task of imported) {
-      if (!existingIds.has(task.id)) {
-        existing.unshift(task);
-      }
+      // 去重：任务 ID 或飞书 record_id 已存在则跳过
+      if (existingIds.has(task.id)) continue;
+      if (task.feishuRecordId && existingFeishuIds.has(task.feishuRecordId)) continue;
+
+      existing.unshift(task);
+      existingIds.add(task.id);
+      if (task.feishuRecordId) existingFeishuIds.add(task.feishuRecordId);
     }
 
     writeCreatorPublishTasks(existing);
@@ -59,11 +65,9 @@ export async function POST(_request: NextRequest) {
       namespace: "creator-publish",
       onClose: () => {
         mergeImportedTasks();
-        runPendingCreatorPublishTasks();
       },
       onError: () => {
         mergeImportedTasks();
-        runPendingCreatorPublishTasks();
       },
     });
 

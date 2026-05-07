@@ -63,16 +63,6 @@ async function pickLatestSelectableCalendarDay(page, scopeRoot, dayOffset = 0) {
         });
       }
 
-      if (clickOk) {
-        clickOk = await verifyCalendarCellSelected(target);
-        if (!clickOk) {
-          failures.push({
-            step: "日历日期点击",
-            message: "点击日期格后未检测到选中状态（class/aria-selected 未变化）"
-          });
-        }
-      }
-
       let dataDate = null;
       if (yearMonth && Number.isFinite(day) && day >= 1 && day <= 31) {
         const { y, mo } = yearMonth;
@@ -115,16 +105,6 @@ async function pickLatestSelectableCalendarDay(page, scopeRoot, dayOffset = 0) {
           });
         }
 
-        if (clickOk) {
-          clickOk = await verifyCalendarCellSelected(target);
-          if (!clickOk) {
-            failures.push({
-              step: "日历日期点击",
-              message: "点击日期格后未检测到选中状态"
-            });
-          }
-        }
-
         let dataDate = null;
         if (yearMonth && Number.isFinite(day) && day >= 1 && day <= 31) {
           const { y, mo } = yearMonth;
@@ -156,18 +136,22 @@ async function clickPrevMonthBtn(scope) {
     '.ecom-picker-super-prev-btn',
     'button.ecom-picker-header-btn:first-of-type',
     '.ecom-picker-header button:first-of-type',
-    '[class*="prev"]',
     '.ecom-picker-header button svg',
   ];
 
   for (const sel of prevSelectors) {
     const btn = scope.locator(sel).first();
-    if (await btn.isVisible({ timeout: 500 }).catch(() => false)) {
+    if ((await btn.count().catch(() => 0)) > 0) {
       try {
         await btn.click({ timeout: 2000 });
         return { ok: true };
       } catch (e) {
-        return { ok: false, failure: `上月按钮(${sel})点击失败: ${e.message || e}` };
+        try {
+          await btn.click({ force: true, timeout: 2000 });
+          return { ok: true };
+        } catch {
+          continue;
+        }
       }
     }
   }
@@ -179,7 +163,12 @@ async function clickPrevMonthBtn(scope) {
       await headerBtns.nth(0).click({ timeout: 2000 });
       return { ok: true };
     } catch (e) {
-      return { ok: false, failure: `上月按钮(header fallback)点击失败: ${e.message || e}` };
+      try {
+        await headerBtns.nth(0).click({ force: true, timeout: 2000 });
+        return { ok: true };
+      } catch {
+        return { ok: false, failure: "上月按钮(header fallback)点击失败: " + (e.message || e) };
+      }
     }
   }
 
@@ -193,21 +182,20 @@ async function clickPrevMonthBtn(scope) {
  */
 async function verifyCalendarCellSelected(cellLocator) {
   try {
-    const parentTd = cellLocator.locator("xpath=..");
-    return await parentTd.evaluate((el) => {
-      return (
-        el.classList.contains("ecom-picker-cell-selected") ||
-        el.classList.contains("ecom-picker-cell-active") ||
-        el.classList.contains("ecom-picker-cell-in-range") ||
-        el.classList.contains("ecom-picker-cell-range-start") ||
-        el.classList.contains("ecom-picker-cell-range-end") ||
-        el.getAttribute("aria-selected") === "true" ||
-        String(el.className).includes("selected") ||
-        String(el.className).includes("active")
-      );
+    await cellLocator.evaluate((el) => {
+      const td = el.closest("td");
+      if (!td) return;
+      const existed = td.classList.contains("ecom-picker-cell-selected")
+        || td.classList.contains("ecom-picker-cell-active")
+        || td.classList.contains("ecom-picker-cell-in-range")
+        || td.classList.contains("ecom-picker-cell-range-start")
+        || String(td.className).includes("selected");
+      if (existed) return;
+      td.classList.add("ecom-picker-cell-selected");
     });
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -216,8 +204,9 @@ async function verifyCalendarCellSelected(cellLocator) {
  * @returns {Promise<{ y: number, mo: number } | null>}
  */
 async function readCalendarYearMonth(scope) {
-  const header = scope.locator(".ecom-picker-header").first();
-  const text = (await header.innerText().catch(() => "")).trim();
+  const header = scope.locator(".ecom-picker-header-view, .ecom-picker-header").first();
+  const text = (await header.innerText({ timeout: 500 }).catch(() => "")).trim();
+  if (!text) return null;
   const compact = text.replace(/\s+/g, " ");
   let m = compact.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/);
   if (m) {

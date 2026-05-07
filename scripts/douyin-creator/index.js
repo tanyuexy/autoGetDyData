@@ -24,6 +24,10 @@ const { attachQrDataUrlSniffer } = require("./lib/qr");
 const { openTargetAndEnsureLogin } = require("./lib/login");
 const { saveAuth, exportPostListData } = require("./lib/exporter");
 const { mergeExportFiles } = require("./lib/merge-exports");
+const {
+  printAccountExecutionSummary,
+  printExportChannelSummary,
+} = require("./lib/index-helpers");
 const { parseArgs } = require("./publish/utils");
 const { runPublishArticle } = require("./publish/article");
 const { runPublishVideo } = require("./publish/video");
@@ -167,32 +171,12 @@ async function main() {
     await browser.close();
     activeBrowser = null;
 
-    const successCount = results.filter((item) => item.ok).length;
-    const failed = results.filter((item) => !item.ok);
-
-    console.log(`\n全部执行完成: 成功 ${successCount} / ${results.length}`);
-    if (failed.length > 0) {
-      console.log("失败账号:");
-      for (const item of failed) {
-        console.log(`- ${item.accountName}: ${item.error}`);
-      }
-      process.exitCode = 1;
-    }
+    printAccountExecutionSummary(results);
     return;
   }
 
   const { withAuth, withoutAuth } = await splitAccountsByStorageState(accounts);
-  console.log(`导出通道A(已有登录态): ${withAuth.length} 个账号`);
-  console.log(`导出通道B(需登录验证): ${withoutAuth.length} 个账号`);
-  console.log(
-    `登录验证方式: ${
-      LOGIN_VERIFY_METHOD === "sms"
-        ? "发送短信验证"
-        : LOGIN_VERIFY_METHOD === "receive_sms_code"
-          ? "接收短信验证码(邮件回填)"
-          : "二维码/默认流程"
-    }`
-  );
+  printExportChannelSummary(withAuth, withoutAuth, LOGIN_VERIFY_METHOD);
 
   // 串行执行两路队列，避免并行 console 交错导致「开始处理账号 A」与「账号 B 无登录态」粘在一起
   const authResults = await runAccountQueue(browser, withAuth, "export", {
@@ -212,17 +196,7 @@ async function main() {
   await browser.close();
   activeBrowser = null;
 
-  const successCount = results.filter((item) => item.ok).length;
-  const failed = results.filter((item) => !item.ok);
-  const allSuccess = results.length > 0 && successCount === results.length;
-
-  console.log(`\n全部执行完成: 成功 ${successCount} / ${results.length}`);
-  if (failed.length > 0) {
-    console.log("失败账号:");
-    for (const item of failed) {
-      console.log(`- ${item.accountName}: ${item.error}`);
-    }
-  }
+  const { allSuccess } = printAccountExecutionSummary(results);
 
   await mergeExportFiles(results);
 

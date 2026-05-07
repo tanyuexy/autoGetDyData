@@ -60,7 +60,6 @@ export async function POST(req: NextRequest) {
     const tasks = readCreatorPublishTasks();
     tasks.unshift(task);
     writeCreatorPublishTasks(tasks);
-    runPendingCreatorPublishTasks();
 
     return NextResponse.json({ ok: true, task });
   } catch (e: any) {
@@ -97,11 +96,12 @@ export async function PATCH(req: NextRequest) {
     if (action === "run-now") {
       const existing = readCreatorPublishTasks().find((t) => t.id === id);
       if (!existing) return NextResponse.json({ error: "task not found" }, { status: 404 });
-      if (existing.status !== "pending") {
+      if (existing.status !== "pending" && existing.status !== "queued") {
         return NextResponse.json({ error: "只能立即执行待执行的任务" }, { status: 400 });
       }
 
       const next = patchCreatorPublishTask(id, {
+        status: "queued",
         payload: { ...existing.payload, scheduleAt: null },
       });
       runPendingCreatorPublishTasks();
@@ -109,12 +109,36 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ ok: true, task: next });
     }
 
+    if (action === "start-bulk") {
+      const ids: string[] = Array.isArray(body.ids) ? body.ids : [];
+      if (ids.length === 0) {
+        return NextResponse.json({ error: "missing ids" }, { status: 400 });
+      }
+
+      let started = 0;
+      const tasks = readCreatorPublishTasks();
+      for (const t of tasks) {
+        if (!ids.includes(t.id)) continue;
+        if (t.status !== "pending") continue;
+        t.status = "queued";
+        t.updatedAt = new Date().toISOString();
+        started++;
+      }
+      writeCreatorPublishTasks(tasks);
+
+      if (started > 0) {
+        runPendingCreatorPublishTasks();
+      }
+
+      return NextResponse.json({ ok: true, started });
+    }
+
     if (action === "retry") {
       const existing = readCreatorPublishTasks().find((t) => t.id === id);
       if (!existing) return NextResponse.json({ error: "task not found" }, { status: 404 });
 
       const next = patchCreatorPublishTask(id, {
-        status: "pending",
+        status: "queued",
         lastError: undefined,
         taskId: undefined,
       });

@@ -16,6 +16,7 @@ export type CreatorPublishTaskType = "video" | "article";
 
 export type CreatorPublishTaskStatus =
   | "pending"
+  | "queued"
   | "running"
   | "success"
   | "failed"
@@ -59,6 +60,7 @@ export interface CreatorPublishTask {
   lastError?: string;
   taskId?: string; // runtime task id for SSE
   pid?: number; // 子进程 PID，用于崩溃恢复时检测进程是否仍存活
+  feishuRecordId?: string; // 飞书行 record_id，用于发布成功后回写状态
 }
 
 function ensureDirForFile(filePath: string) {
@@ -204,6 +206,24 @@ export function attachCreatorPublishTaskRuntime(
         status: code === 0 ? "success" : "failed",
         lastError,
       });
+
+      // 发布成功 + 来自飞书导入 → 回写飞书行状态
+      if (code === 0 && target.feishuRecordId) {
+        try {
+          const { spawn } = require("child_process");
+          spawn(
+            "node",
+            [
+              "scripts/run.js",
+              "feishu:mark-task-published",
+              target.feishuRecordId,
+              target.accountName || "",
+            ],
+            { stdio: "inherit", detached: true }
+          ).unref();
+        } catch {}
+      }
+
       hooks.onClose?.(code);
     },
     onError(error: Error) {

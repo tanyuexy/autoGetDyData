@@ -47,6 +47,14 @@ const ROUTES = {
     script: "scripts/feishu/index.js",
     argv: ["insert-xlsx"]
   },
+  "feishu:import-publish-tasks": {
+    script: "scripts/feishu/import-publish-tasks.js",
+    argv: []
+  },
+  "feishu:mark-task-published": {
+    script: "scripts/feishu/mark-task-published.js",
+    argv: []
+  },
   "feishu:sync-data-xlsx": {
     script: "scripts/feishu/index.js",
     argv: ["sync-data-xlsx"]
@@ -78,10 +86,6 @@ const ROUTES = {
   "feishu:backup": {
     script: "scripts/feishu/index.js",
     argv: ["backup-bitable"]
-  },
-  "feishu:import-publish-tasks": {
-    script: "scripts/feishu/import-publish-tasks.js",
-    argv: []
   },
 
   "shop:login": { script: "scripts/douyin-shop/index.js", argv: ["login"] },

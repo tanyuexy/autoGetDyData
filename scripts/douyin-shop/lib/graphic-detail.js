@@ -5,6 +5,7 @@ const {
   pickLatestSelectableCalendarDay
 } = require("./pick-latest-calendar-day");
 const { appendDataDateColumn } = require("./append-data-date-column");
+const { retryableGoto, retryableDownload } = require("./network");
 
 const GRAPHIC_URL =
   process.env.SHOP_GRAPHIC_URL ||
@@ -160,9 +161,11 @@ async function gotoGraphic(page, tag) {
   const base = GRAPHIC_URL.replace(/\/$/, "");
   if (!url.startsWith(base)) {
     logStep(tag, `跳转图文分析页: ${GRAPHIC_URL}`);
-    await page.goto(GRAPHIC_URL, {
+    await retryableGoto(page, GRAPHIC_URL, {
       waitUntil: "domcontentloaded",
-      timeout: 20000
+      timeout: 20000,
+      maxRetries: 2,
+      expectedUrlRe: /compass\.jinritemai\.com\/shop\/graphic/
     });
   } else {
     logStep(tag, "当前已在图文分析页路径");
@@ -186,17 +189,12 @@ async function clickGraphicDownloadAndSave(page, tag, saveDir) {
   await btn.waitFor({ state: "visible", timeout: 12000 });
 
   logStep(tag, "点击图文「下载明细」");
-  const downloadPromise = page.waitForEvent("download", { timeout: 60000 });
-  await btn.click({ timeout: 3000 });
-
-  let download;
-  try {
-    download = await downloadPromise;
-  } catch (error) {
-    throw new Error(
-      `图文点击「下载明细」后 60s 内未触发下载：${error.message || error}`
-    );
-  }
+  const download = await retryableDownload(page, async () => {
+    await btn.click({ timeout: 3000 });
+  }, {
+    timeout: 60000,
+    maxRetries: 1
+  });
 
   const rawName =
     download.suggestedFilename() || `graphic-detail-${Date.now()}.csv`;

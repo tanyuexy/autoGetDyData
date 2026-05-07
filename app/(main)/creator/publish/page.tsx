@@ -27,7 +27,7 @@ const { Text } = Typography;
 
 type TaskType = "video" | "article";
 
-type TaskStatus = "pending" | "running" | "success" | "failed" | "cancelled";
+type TaskStatus = "pending" | "queued" | "running" | "success" | "failed" | "cancelled";
 
 type TaskPayload =
   | {
@@ -302,6 +302,24 @@ export default function CreatorPublishPage() {
     }
   }
 
+  async function handleStartTasks() {
+    if (!selectedRowKeys.length) return;
+    try {
+      const res = await fetch("/api/creator/publish/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start-bulk", ids: selectedRowKeys }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "启动失败");
+      setSelectedRowKeys([]);
+      message.success(`已启动 ${data.started} 个任务`);
+      await fetchTasks();
+    } catch (e: any) {
+      message.error(e.message || "启动任务失败");
+    }
+  }
+
   async function handleBatchDelete() {
     if (!selectedRowKeys.length) return;
     let deleted = 0;
@@ -373,6 +391,7 @@ export default function CreatorPublishPage() {
       render: (s: TaskStatus) => {
         const map: Record<TaskStatus, { color: string; text: string }> = {
           pending: { color: "default", text: "待执行" },
+          queued: { color: "blue", text: "队列中" },
           running: { color: "processing", text: "执行中" },
           success: { color: "success", text: "成功" },
           failed: { color: "error", text: "失败" },
@@ -656,18 +675,27 @@ export default function CreatorPublishPage() {
       <>
         <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
           {selectedRowKeys.length > 0 && (
-            <Popconfirm
-              title="确认批量删除？"
-              description={`将删除 ${selectedRowKeys.length} 个任务，此操作不可恢复`}
-              okText="删除"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              onConfirm={handleBatchDelete}
-            >
-              <Button danger size="small">
-                删除选中 ({selectedRowKeys.length})
+            <>
+              <Button
+                type="primary"
+                size="small"
+                onClick={handleStartTasks}
+              >
+                启动任务 ({selectedRowKeys.length})
               </Button>
-            </Popconfirm>
+              <Popconfirm
+                title="确认批量删除？"
+                description={`将删除 ${selectedRowKeys.length} 个任务，此操作不可恢复`}
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={handleBatchDelete}
+              >
+                <Button danger size="small">
+                  删除选中 ({selectedRowKeys.length})
+                </Button>
+              </Popconfirm>
+            </>
           )}
           {runningCount > 0 && (
             <Popconfirm

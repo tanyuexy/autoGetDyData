@@ -10,10 +10,9 @@ import {
 } from "./creatorPublishStore";
 
 function buildRunArgs(task: CreatorPublishTask): string[] {
-  const scriptPath = "scripts/douyin-creator/index.js";
-  const cmd = task.payload.type === "video" ? "publish-video" : "publish-article";
+  const cmd = task.payload.type === "video" ? "creator:publish-video" : "creator:publish-article";
 
-  const args: string[] = [scriptPath, cmd, "--account", task.accountName, "--task", task.id];
+  const args: string[] = ["scripts/run.js", cmd, "--account", task.accountName, "--task", task.id];
 
   if (task.payload.type === "video") {
     args.push("--videoKey", task.payload.videoFileKey);
@@ -44,6 +43,8 @@ function buildRunArgs(task: CreatorPublishTask): string[] {
 let dispatching = false;
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 const SCHEDULER_INTERVAL_MS = 5_000;
+
+const GLOBAL_INTERVAL_KEY = "__creator_publish_scheduler_interval__";
 
 /** 内存中正在执行任务的店铺名集合（每次调度从磁盘初始化，派生时即时更新） */
 const runningAccountNames = new Set<string>();
@@ -92,7 +93,7 @@ export function runPendingCreatorPublishTasks(): number {
     let started = 0;
 
     for (const t of tasks) {
-      if (t.status !== "pending") continue;
+      if (t.status !== "queued") continue;
 
       // 1) 全局并发上限
       if (!canStartTask("creator-publish")) break;
@@ -141,11 +142,22 @@ export function runPendingCreatorPublishTasks(): number {
 }
 
 export function startCreatorPublishScheduler(): void {
-  if (schedulerInterval) return;
+  const g = globalThis as any;
+
+  // 清除上一个模块实例遗留的旧定时器（HMR 热重载场景）
+  if (typeof g[GLOBAL_INTERVAL_KEY] === "number") {
+    clearInterval(g[GLOBAL_INTERVAL_KEY]);
+    g[GLOBAL_INTERVAL_KEY] = undefined;
+  }
+
+  // 同一模块实例只需启动一次
+  if (schedulerInterval != null) return;
+
   runPendingCreatorPublishTasks();
   schedulerInterval = setInterval(() => {
     runPendingCreatorPublishTasks();
   }, SCHEDULER_INTERVAL_MS);
+  g[GLOBAL_INTERVAL_KEY] = schedulerInterval;
 }
 
 export function stopCreatorPublishScheduler(): void {

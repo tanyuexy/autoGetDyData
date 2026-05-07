@@ -1,0 +1,94 @@
+const { isLoggedInAtTarget, notifyLoginRequired, waitForManualLoginFlow } = require("../lib/login");
+const { saveAuth } = require("../lib/exporter");
+const { TARGET_URL } = require("../lib/env");
+
+async function ensureLoggedIn(page, accountName, paths) {
+  console.log(`检查账号 [${accountName}] 登录状态...`);
+  await page.goto(TARGET_URL, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(3000);
+
+  if (await isLoggedInAtTarget(page)) {
+    console.log(`账号 [${accountName}] 登录态有效`);
+    return;
+  }
+
+  const reason = "cookies/storageState 失效或已过期";
+  console.log(`账号 [${accountName}] ${reason}，进入登录流程`);
+  await notifyLoginRequired(page, paths, accountName, reason);
+  await waitForManualLoginFlow(page, paths, accountName, reason);
+
+  console.log(`账号 [${accountName}] 登录流程完成，验证状态...`);
+  await page.goto(TARGET_URL, { waitUntil: "networkidle" });
+  await page.waitForTimeout(3000);
+
+  for (let i = 0; i < 3; i += 1) {
+    if (await isLoggedInAtTarget(page)) break;
+    console.log(`  验证未通过，等待渲染... (${i + 1}/3)`);
+    await page.waitForTimeout(3000);
+  }
+
+  if (!(await isLoggedInAtTarget(page))) {
+    throw new Error(`账号 ${accountName} 登录验证未通过`);
+  }
+
+  await saveAuth(page.context(), paths, accountName);
+  console.log(`账号 [${accountName}] 登录态已保存`);
+}
+
+async function clickPublishButton(page) {
+  console.log("点击发布按钮...");
+
+  const publishBtn = page.locator([
+    'button.primary-cECiOJ:has-text("发布")',
+    'button.fixed-J9O8Yw:has-text("发布")',
+    'button:has-text("发布"):not(:has-text("定时")):not(:has-text("高清"))',
+  ].join(", ")).first();
+
+  if (!(await publishBtn.isVisible({ timeout: 5000 }).catch(() => false))) {
+    console.log("  ⚠️ 未找到发布按钮，可能已自动发布或按钮被遮挡");
+    return false;
+  }
+
+  const isDisabled = await publishBtn.isDisabled().catch(() => false);
+  if (isDisabled) {
+    console.log("  ⚠️ 发布按钮处于禁用状态，可能必填字段未填写完成");
+    return false;
+  }
+
+  await publishBtn.click();
+  console.log("  ✓ 已点击发布按钮");
+
+  await page.waitForTimeout(3000);
+
+  const toastSelector = '.semi-toast-content, .semi-message, [class*="toast"], [class*="message"]';
+  try {
+    const toast = await page.waitForSelector(toastSelector, { timeout: 25000 }).catch(() => null);
+    if (toast) {
+      const toastText = await toast.textContent().catch(() => "");
+      console.log(`  提示信息: ${toastText.slice(0, 100)}`);
+      if (toastText.includes("发布成功") || toastText.includes("success")) {
+        console.log("  ✅ 发布成功");
+        return true;
+      }
+      if (toastText.includes("失败") || toastText.includes("错误") || toastText.includes("违规")) {
+        throw new Error(`发布失败: ${toastText.slice(0, 200)}`);
+      }
+    }
+  } catch (e) {
+    if (e.message.startsWith("发布失败")) throw e;
+  }
+
+  const stillVisible = await publishBtn.isVisible().catch(() => false);
+  if (stillVisible) {
+    console.log("  ⚠️ 发布按钮仍在，可能发布未完成");
+    return false;
+  }
+
+  console.log("  ✅ 发布已提交（按钮已隐藏）");
+  return true;
+}
+
+module.exports = {
+  ensureLoggedIn,
+  clickPublishButton,
+};
