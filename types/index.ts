@@ -4,12 +4,20 @@ export interface CreatorAccount {
   hasCookies: boolean;
   hasExportDateConfig: boolean;
   exportDateStart: string | null;
+  cookieStatus?: "valid" | "warning" | "expired" | "missing";
+  cookieDetail?: string | null;
+  lastLoginAt?: string | null;
+  lastVerifiedAt?: string | null;
 }
 
 export interface ShopAccount {
   email: string;
   password: string;
   hasStorageState: boolean;
+  cookieStatus?: "valid" | "warning" | "expired" | "missing";
+  cookieDetail?: string | null;
+  lastLoginAt?: string | null;
+  lastVerifiedAt?: string | null;
 }
 
 export interface FeishuTokenStatus {

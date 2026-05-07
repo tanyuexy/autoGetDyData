@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
-    // Import existing CJS modules
     const { getProjectConfigPath } = require("@/scripts/project-config-path");
     const path = require("path");
     const fs = require("fs");
+    const { analyzeStorageState, CREATOR_KEY_COOKIE_PATTERNS, readLastVerified } = require("@/app/lib/cookie-checker");
 
     const configPath =
       process.env.PROJECT_CONFIG_PATH ||
@@ -17,9 +17,7 @@ export async function GET() {
       const raw = fs.readFileSync(configPath, "utf-8");
       const config = JSON.parse(raw);
       accounts = config.accounts || [];
-    } catch {
-      // Config file missing
-    }
+    } catch {}
 
     const ACCOUNTS_DIR = (() => {
       const envVal = process.env.CREATOR_ACCOUNTS_DIR;
@@ -34,7 +32,7 @@ export async function GET() {
 
     const result = await Promise.all(
       accounts.map(async (name: string) => {
-        const normalized = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_");
+        const normalized = String(name || "").trim().replace(/[\\/:*?"<>|]+/g, "_");
         const accountDir = path.join(ACCOUNTS_DIR, normalized);
         const storagePath = path.join(accountDir, "storageState.json");
         const cookiesPath = path.join(accountDir, "cookies.json");
@@ -45,10 +43,19 @@ export async function GET() {
         let hasExportDate = false;
         let exportDate: string | null = null;
 
-        try {
-          fs.accessSync(storagePath);
-          hasStorage = true;
-        } catch {}
+        const analysis = analyzeStorageState(storagePath, CREATOR_KEY_COOKIE_PATTERNS, 14);
+        hasStorage = analysis.status !== "missing";
+
+        const lastVerified = readLastVerified(accountDir);
+
+        let cookieStatus = hasStorage ? analysis.status : "missing";
+        let cookieDetail: string | null = hasStorage ? analysis.detail : null;
+
+        if (lastVerified.verifiedAt) {
+          cookieStatus = "valid";
+          cookieDetail = lastVerified.detail || analysis.detail;
+        }
+
         try {
           fs.accessSync(cookiesPath);
           hasCookies = true;
@@ -62,7 +69,17 @@ export async function GET() {
           }
         } catch {}
 
-        return { name, hasStorageState: hasStorage, hasCookies, hasExportDateConfig: hasExportDate, exportDateStart: exportDate };
+        return {
+          name,
+          hasStorageState: hasStorage,
+          hasCookies,
+          hasExportDateConfig: hasExportDate,
+          exportDateStart: exportDate,
+          cookieStatus,
+          cookieDetail,
+          lastLoginAt: analysis.lastLoginAt || null,
+          lastVerifiedAt: lastVerified.verifiedAt || null,
+        };
       })
     );
 

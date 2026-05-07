@@ -1,7 +1,7 @@
 "use client";
 
-import { Table, Button, Space, Modal, Form, Input, Popconfirm, App, Tag } from "antd";
-import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Table, Button, Space, Modal, Form, Input, Popconfirm, App, Tag, Tooltip } from "antd";
+import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SafetyCertificateOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 import type { ShopAccount } from "@/types";
 
@@ -21,6 +21,7 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin }: P
   const [emails, setEmails] = useState<EmailEntry[]>(initial || []);
   const [accounts, setAccounts] = useState<ShopAccount[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
+  const [verifying, setVerifying] = useState<Set<string>>(new Set());
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editIndex, setEditIndex] = useState<number | null>(null);
@@ -56,13 +57,51 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin }: P
 
   useEffect(() => {
     refreshLoginStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const hasStorageByEmail = useMemo(() => {
-    const m = new Map<string, boolean>();
+  async function handleVerify(email: string) {
+    setVerifying((prev) => new Set(prev).add(email));
+    try {
+      const res = await fetch("/api/shop/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (!res.ok) throw new Error("验证请求失败");
+      const result = await res.json();
+
+      if (result.verified) {
+        message.success(`账号 ${email} 验证通过 (${(result.elapsed / 1000).toFixed(1)}s)`);
+      } else {
+        message.warning(`账号 ${email} 验证失败: ${result.detail}`);
+      }
+
+      setAccounts((prev) =>
+        prev.map((a) => {
+          if (a.email === email) {
+            return {
+              ...a,
+              cookieStatus: result.verified ? "valid" : "expired",
+              cookieDetail: result.detail,
+            };
+          }
+          return a;
+        })
+      );
+    } catch (e: any) {
+      message.error(`验证失败: ${e.message || e}`);
+    }
+    setVerifying((prev) => {
+      const next = new Set(prev);
+      next.delete(email);
+      return next;
+    });
+  }
+
+  const accountMap = useMemo(() => {
+    const m = new Map<string, ShopAccount>();
     for (const a of accounts) {
-      m.set(String(a.email || "").trim(), !!a.hasStorageState);
+      m.set(String(a.email || "").trim(), a);
     }
     return m;
   }, [accounts]);
@@ -103,19 +142,82 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin }: P
     onChange(next);
   }
 
+  function renderCookieTag(entry: EmailEntry) {
+    const acc = accountMap.get(entry.email);
+    if (!acc || !acc.hasStorageState) {
+      return (
+        <Tag icon={<CloseCircleOutlined />} color="default">
+          未登录
+        </Tag>
+      );
+    }
+
+    const status = acc.cookieStatus || "valid";
+
+    if (status === "valid") {
+      return (
+        <Tooltip title={acc.cookieDetail || "登录态有效"}>
+          <Tag icon={<CheckCircleOutlined />} color="success">
+            有效
+          </Tag>
+        </Tooltip>
+      );
+    }
+
+    if (status === "warning") {
+      return (
+        <Tooltip title={acc.cookieDetail || "登录态可能过期"}>
+          <Tag icon={<ExclamationCircleOutlined />} color="warning">
+            可能过期
+          </Tag>
+        </Tooltip>
+      );
+    }
+
+    if (status === "expired") {
+      return (
+        <Tooltip title={acc.cookieDetail || "登录态已过期"}>
+          <Tag icon={<CloseCircleOutlined />} color="error">
+            已过期
+          </Tag>
+        </Tooltip>
+      );
+    }
+
+    return (
+      <Tooltip title={acc.cookieDetail || "未知状态"}>
+        <Tag icon={<QuestionCircleOutlined />} color="default">
+          未知
+        </Tag>
+      </Tooltip>
+    );
+  }
+
   const columns = [
     { title: "邮箱", dataIndex: "email", key: "email" },
     {
       title: "登录态",
       dataIndex: "hasStorageState",
       key: "hasStorageState",
-      width: 100,
-      render: (_: any, row: EmailEntry) =>
-        hasStorageByEmail.get(row.email) ? (
-          <Tag color="success">有效</Tag>
-        ) : (
-          <Tag>未登录</Tag>
-        ),
+      width: 110,
+      render: (_: any, row: EmailEntry) => renderCookieTag(row),
+    },
+    {
+      title: "最后登录",
+      dataIndex: "lastLoginAt",
+      key: "lastLoginAt",
+      width: 130,
+      render: (_: any, row: EmailEntry) => {
+        const acc = accountMap.get(row.email);
+        if (!acc?.lastLoginAt) return "-";
+        const d = new Date(acc.lastLoginAt);
+        return d.toLocaleString("zh-CN", {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      },
     },
     {
       title: "密码",
@@ -126,29 +228,45 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin }: P
     {
       title: "操作",
       key: "actions",
-      width: 220,
-      render: (_: any, row: EmailEntry, index: number) => (
-        <Space>
-          {onLogin && (
+      width: 280,
+      render: (_: any, row: EmailEntry, index: number) => {
+        const acc = accountMap.get(row.email);
+        const hasState = acc?.hasStorageState;
+        const isVerifying = verifying.has(row.email);
+
+        return (
+          <Space>
+            {onLogin && (
+              <Button
+                size="small"
+                type="primary"
+                disabled={!!hasState}
+                onClick={() => onLogin(row.email)}
+              >
+                登录
+              </Button>
+            )}
+            {hasState && (
+              <Button
+                size="small"
+                icon={<SafetyCertificateOutlined />}
+                loading={isVerifying}
+                onClick={() => handleVerify(row.email)}
+              >
+                验证
+              </Button>
+            )}
             <Button
               size="small"
-              type="primary"
-              disabled={!!hasStorageByEmail.get(row.email)}
-              onClick={() => onLogin(row.email)}
-            >
-              登录
-            </Button>
-          )}
-          <Button
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => openEdit(index)}
-          />
-          <Popconfirm title="确认删除？" onConfirm={() => handleDelete(index)}>
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </Space>
-      ),
+              icon={<EditOutlined />}
+              onClick={() => openEdit(index)}
+            />
+            <Popconfirm title="确认删除？" onConfirm={() => handleDelete(index)}>
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </Space>
+        );
+      },
     },
   ];
 

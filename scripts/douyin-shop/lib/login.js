@@ -134,8 +134,9 @@ async function fillCredentials(page, email, password) {
  * 需要点击它的 wrapper（label / .semi-checkbox / 父元素）。
  */
 async function ensureAgreementChecked(page) {
-  const result = await page
-    .evaluate(() => {
+  const failures = [];
+  try {
+    const result = await page.evaluate(() => {
       const inputs = Array.from(
         document.querySelectorAll('input[type="checkbox"]')
       );
@@ -151,10 +152,32 @@ async function ensureAgreementChecked(page) {
         }
       }
       return { total: inputs.length, clicked };
-    })
-    .catch(() => ({ total: 0, clicked: 0 }));
-  await page.waitForTimeout(120);
-  return result;
+    });
+    await page.waitForTimeout(120);
+
+    // 验证：点击后再次检查是否已勾选
+    const verifyResult = await page.evaluate(() => {
+      const inputs = Array.from(
+        document.querySelectorAll('input[type="checkbox"]')
+      );
+      const allChecked = inputs.every((el) => el.checked);
+      const checkedCount = inputs.filter((el) => el.checked).length;
+      return { allChecked, checkedCount, total: inputs.length };
+    });
+    if (!verifyResult.allChecked) {
+      failures.push({
+        step: "登录-同意协议",
+        message: `协议勾选验证失败: ${verifyResult.checkedCount}/${verifyResult.total} 项已勾选`
+      });
+    }
+    return { total: result.total, clicked: result.clicked, failures };
+  } catch (e) {
+    failures.push({
+      step: "登录-同意协议",
+      message: `勾选协议异常: ${e.message || e}`
+    });
+    return { total: 0, clicked: 0, failures };
+  }
 }
 
 /**
@@ -351,7 +374,7 @@ async function captureFailureShot(page, debugDir, kind) {
  * @param {object} paths
  * @param {object} [options]
  * @param {number} [options.daysToExport] 循环导出天数，默认 1
- * @returns {Promise<{ok: boolean, shopName: string, videoPath?: string, graphicPath?: string, videoError?: string, graphicError?: string, downloadPath?: string, error?: string}>}
+ * @returns {Promise<{ok: boolean, shopName: string, videoPath?: string, graphicPath?: string, videoError?: string, graphicError?: string, downloadPath?: string, error?: string, failures: Array<{ step: string, message: string }>}>}
  */
 async function downloadCurrentShop(page, tag, paths, options = {}) {
   let shopName = "";
@@ -381,6 +404,7 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
   let graphicError;
   let videoDateMismatches = [];
   let graphicDateMismatches = [];
+  let allFailures = [];
 
   try {
     const result = await downloadVideoSelfDetail(page, {
@@ -389,6 +413,41 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       shopName: sn,
       daysToExport
     });
+    if (result.failures && result.failures.length) {
+      allFailures.push(...result.failures);
+    }
+    if (result.allResults) {
+      videoPaths = result.allResults
+        .filter(r => r.dateMatch !== false)
+        .map(r => r.savePath)
+        .filter(Boolean);
+      videoDateMismatches = result.allResults
+        .filter(r => r.dateMatch === false)
+        .map(r => r.dataDate);
+    } else if (result.savePath) {
+      videoPaths = [result.savePath];
+    }
+  } catch (error) {
+    videoError = error?.message || String(error);
+    console.error(`[${shopTag}] 视频明细下载失败: ${videoError}`);
+    const shot = await captureFailureShot(
+      page,
+      paths.debugDir,
+      "download-video-failed"
+    );
+    if (shot) console.error(`[${shopTag}] 失败截图: ${shot}`);
+  }
+
+  try {
+    const result = await downloadGraphicDetail(page, {
+      tag: shopTag,
+      saveDir: paths.dataDir,
+      shopName: sn,
+      daysToExport
+    });
+    if (result.failures && result.failures.length) {
+      allFailures.push(...result.failures);
+    }
     if (result.allResults) {
       // 仅保留日历日期与预期匹配的文件
       videoPaths = result.allResults
@@ -451,13 +510,24 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
   if (videoDateMismatches.length) dateMismatchWarn.push(`视频日期不符: ${videoDateMismatches.join(', ')}`);
   if (graphicDateMismatches.length) dateMismatchWarn.push(`图文日期不符: ${graphicDateMismatches.join(', ')}`);
   const dateOk = videoDateMismatches.length === 0 && graphicDateMismatches.length === 0;
+  const failedStepsDetail = [];
+  if (allFailures.length) {
+    const counts = {};
+    for (const f of allFailures) {
+      counts[f.step] = (counts[f.step] || 0) + 1;
+    }
+    for (const [step, n] of Object.entries(counts)) {
+      failedStepsDetail.push(`${step}(${n}次)`);
+    }
+  }
 
   console.log(
     `[${shopTag}] ─── 导出汇总: 视频 ${videoDaysOk}/${daysToExport}天 ${videoDaysOk === daysToExport ? '✓' : '✗'} | ` +
     `图文 ${graphicDaysOk}/${daysToExport}天 ${graphicDaysOk === daysToExport ? '✓' : '✗'}` +
     (!dateOk ? ` | ⚠ ${dateMismatchWarn.join('; ')}` : '') +
     (videoError ? ` | 视频错误: ${videoError}` : '') +
-    (graphicError ? ` | 图文错误: ${graphicError}` : '')
+    (graphicError ? ` | 图文错误: ${graphicError}` : '') +
+    (failedStepsDetail.length ? ` | 表单失败项: ${failedStepsDetail.join(', ')}` : '')
   );
 
   return {
@@ -473,7 +543,8 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     videoDateMismatches,
     graphicDateMismatches,
     downloadPath: videoPaths[0] || graphicPaths[0] || null,
-    error: parts.length ? parts.join("；") : undefined
+    error: parts.length ? parts.join("；") : undefined,
+    failures: allFailures
   };
 }
 
@@ -631,7 +702,8 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
       graphicDays: round.graphicDays,
       daysToExport: round.daysToExport,
       videoError: round.videoError,
-      graphicError: round.graphicError
+      graphicError: round.graphicError,
+      failures: round.failures || []
     });
     if (round.videoPath && !result.downloadPath) {
       result.downloadPath = round.videoPath;
@@ -647,16 +719,20 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
     }
 
     if (round.ok) {
+      const failDetail = (round.failures && round.failures.length) ? ` | 表单非致命告警: ${round.failures.length}项` : '';
       console.log(
-        `[${tag}] 本轮全部成功: ${round.shopName || "unknown"} | 视频 ${round.videoDays}/${round.daysToExport}天 ✓ | 图文 ${round.graphicDays}/${round.daysToExport}天 ✓`
+        `[${tag}] 本轮全部成功: ${round.shopName || "unknown"} | 视频 ${round.videoDays}/${round.daysToExport}天 ✓ | 图文 ${round.graphicDays}/${round.daysToExport}天 ✓${failDetail}`
       );
     } else {
       const detail = [
         round.videoError ? `视频 ✗ ${round.videoError}` : `视频 ${round.videoDays}/${round.daysToExport}天 ✓`,
         round.graphicError ? `图文 ✗ ${round.graphicError}` : `图文 ${round.graphicDays}/${round.daysToExport}天 ✓`
       ].join(" | ");
+      const failList = (round.failures && round.failures.length)
+        ? ` | 表单失败项: [${round.failures.map(f => f.step).join(', ')}]`
+        : '';
       console.warn(
-        `[${tag}] 本轮部分失败: ${round.shopName || "unknown"}（${detail}）`
+        `[${tag}] 本轮部分失败: ${round.shopName || "unknown"}（${detail}）${failList}`
       );
     }
 
@@ -720,6 +796,15 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
       (d.videoError ? ` | 视频问题: ${d.videoError}` : '') +
       (d.graphicError ? ` | 图文问题: ${d.graphicError}` : '')
     );
+    if (d.failures && d.failures.length) {
+      const grouped = {};
+      for (const f of d.failures) {
+        grouped[f.step] = (grouped[f.step] || 0) + 1;
+      }
+      for (const [step, count] of Object.entries(grouped)) {
+        console.log(`    ⚠ 表单失败: ${step}${count > 1 ? ` (共${count}次)` : ''}`);
+      }
+    }
   }
   return result;
 }

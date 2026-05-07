@@ -383,6 +383,16 @@ async function main() {
       const gdm = Array.isArray(d.graphicDateMismatches) ? d.graphicDateMismatches : [];
       if (vdm.length) console.log(`      ⚠ 视频日期不符（日历选中≠预期）: ${vdm.join(', ')}`);
       if (gdm.length) console.log(`      ⚠ 图文日期不符（日历选中≠预期）: ${gdm.join(', ')}`);
+      if (d.failures && d.failures.length) {
+        const grouped = {};
+        for (const f of d.failures) {
+          grouped[f.step] = (grouped[f.step] || 0) + 1;
+        }
+        console.log(`      ⚠ 表单操作失败详情:`);
+        for (const [step, count] of Object.entries(grouped)) {
+          console.log(`          - ${step}${count > 1 ? ` (共${count}次)` : ''}`);
+        }
+      }
     }
   }
 

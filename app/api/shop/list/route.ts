@@ -5,6 +5,7 @@ export async function GET() {
     const path = require("path");
     const fs = require("fs");
     const { getProjectConfigPath } = require("@/scripts/project-config-path");
+    const { analyzeStorageState, SHOP_KEY_COOKIE_PATTERNS, readLastVerified } = require("@/app/lib/cookie-checker");
 
     const configPath =
       process.env.PROJECT_CONFIG_PATH ||
@@ -36,17 +37,31 @@ export async function GET() {
     const result = await Promise.all(
       emails.map(async (entry: { email: string; password: string }) => {
         const dirName = String(entry.email || "").trim().replace(/[\\/:*?"<>|]+/g, "_");
-        const storagePath = path.join(ACCOUNTS_DIR, dirName, "storageState.json");
-        let hasStorage = false;
-        try {
-          fs.accessSync(storagePath);
-          hasStorage = true;
-        } catch {}
+        const accountDir = path.join(ACCOUNTS_DIR, dirName);
+        const storagePath = path.join(accountDir, "storageState.json");
+
+        const analysis = analyzeStorageState(storagePath, SHOP_KEY_COOKIE_PATTERNS, 14);
+        const hasStorage = analysis.status !== "missing";
+
+        // 最近 24h 内浏览器验证通过的，覆盖 cookie 静态分析结果
+        const lastVerified = readLastVerified(accountDir);
+
+        let cookieStatus = hasStorage ? analysis.status : "missing";
+        let cookieDetail: string | null = hasStorage ? analysis.detail : null;
+
+        if (lastVerified.verifiedAt) {
+          cookieStatus = "valid";
+          cookieDetail = lastVerified.detail || analysis.detail;
+        }
 
         return {
           email: entry.email,
           password: entry.password,
           hasStorageState: hasStorage,
+          cookieStatus,
+          cookieDetail,
+          lastLoginAt: analysis.lastLoginAt || null,
+          lastVerifiedAt: lastVerified.verifiedAt || null,
         };
       })
     );

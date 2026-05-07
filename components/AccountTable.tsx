@@ -9,6 +9,7 @@ import {
   Modal,
   Input,
   App,
+  Tooltip,
 } from "antd";
 import {
   CheckCircleOutlined,
@@ -16,9 +17,12 @@ import {
   ReloadOutlined,
   DownOutlined,
   PlusOutlined,
+  ExclamationCircleOutlined,
+  QuestionCircleOutlined,
+  SafetyCertificateOutlined,
 } from "@ant-design/icons";
 import type { CreatorAccount, ShopAccount } from "@/types";
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useTaskContext } from "@/contexts/TaskContext";
 
 interface CreatorProps {
@@ -83,38 +87,153 @@ function AddAccountModal({
   );
 }
 
+function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | null }) {
+  const status = acc.cookieStatus;
+
+  if (!status || status === "missing") {
+    return (
+      <Tag icon={<CloseCircleOutlined />} color="default">
+        未登录
+      </Tag>
+    );
+  }
+
+  if (status === "valid") {
+    return (
+      <Tooltip title={acc.cookieDetail || "登录态有效"}>
+        <Tag icon={<CheckCircleOutlined />} color="success">
+          有效
+        </Tag>
+      </Tooltip>
+    );
+  }
+
+  if (status === "warning") {
+    return (
+      <Tooltip title={acc.cookieDetail || "登录态可能过期"}>
+        <Tag icon={<ExclamationCircleOutlined />} color="warning">
+          可能过期
+        </Tag>
+      </Tooltip>
+    );
+  }
+
+  if (status === "expired") {
+    return (
+      <Tooltip title={acc.cookieDetail || "登录态已过期"}>
+        <Tag icon={<CloseCircleOutlined />} color="error">
+          已过期
+        </Tag>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Tooltip title={acc.cookieDetail || "未知状态"}>
+      <Tag icon={<QuestionCircleOutlined />} color="default">
+        未知
+      </Tag>
+    </Tooltip>
+  );
+}
+
 export default function AccountTable(props: Props) {
   const { accounts, loading, onRefresh, type } = props;
+  const { message } = App.useApp();
 
   if (type === "creator") {
     const { onLogin, onAddAccount, onDeleteAccount, onOpenCreator } = props as CreatorProps;
     const { isNamespaceBusy } = useTaskContext();
     const loginBusy = isNamespaceBusy("login");
     const [modalOpen, setModalOpen] = useState(false);
+    const [verifying, setVerifying] = useState<Set<string>>(new Set());
+
+    // Store verify results locally so we can show them immediately
+    const [verifyResults, setVerifyResults] = useState<Record<string, { status: string; detail: string }>>({});
+
+    // Reset verify results when accounts prop changes (e.g. after refresh)
+    useEffect(() => {
+      setVerifyResults({});
+    }, [accounts]);
+
+    const mergedAccounts = useMemo(() => {
+      return (accounts as CreatorAccount[]).map((a) => {
+        const vr = verifyResults[a.name];
+        if (!vr) return a;
+        return {
+          ...a,
+          cookieStatus: vr.status as CreatorAccount["cookieStatus"],
+          cookieDetail: vr.detail,
+        };
+      });
+    }, [accounts, verifyResults]);
+
+    async function handleVerify(accountName: string) {
+      setVerifying((prev) => new Set(prev).add(accountName));
+      try {
+        const res = await fetch("/api/creator/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accountName }),
+        });
+        if (!res.ok) throw new Error("验证请求失败");
+        const result = await res.json();
+
+        if (result.verified) {
+          message.success(`账号 ${accountName} 验证通过 (${(result.elapsed / 1000).toFixed(1)}s)`);
+        } else {
+          message.warning(`账号 ${accountName} 验证失败: ${result.detail}`);
+        }
+
+        setVerifyResults((prev) => ({
+          ...prev,
+          [accountName]: {
+            status: result.verified ? "valid" : "expired",
+            detail: result.detail,
+          },
+        }));
+      } catch (e: any) {
+        message.error(`验证失败: ${e.message || e}`);
+      }
+      setVerifying((prev) => {
+        const next = new Set(prev);
+        next.delete(accountName);
+        return next;
+      });
+    }
 
     const columns = [
       { title: "账号名称", dataIndex: "name", key: "name" },
       {
         title: "登录态",
-        dataIndex: "hasStorageState",
-        key: "hasStorageState",
-        render: (v: boolean) =>
-          v ? (
-            <Tag icon={<CheckCircleOutlined />} color="success">
-              有效
-            </Tag>
-          ) : (
-            <Tag icon={<CloseCircleOutlined />} color="default">
-              未登录
-            </Tag>
-          ),
+        dataIndex: "cookieStatus",
+        key: "cookieStatus",
+        width: 100,
+        render: (_: any, row: CreatorAccount) => renderCookieTag(row),
+      },
+      {
+        title: "最后登录",
+        dataIndex: "lastLoginAt",
+        key: "lastLoginAt",
+        width: 130,
+        render: (_: any, row: CreatorAccount) => {
+          if (!row.lastLoginAt) return "-";
+          const d = new Date(row.lastLoginAt);
+          return d.toLocaleString("zh-CN", {
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        },
       },
       {
         title: "操作",
         key: "actions",
-        width: 200,
+        width: 280,
         render: (_: any, row: CreatorAccount) => {
           const disabled = row.hasStorageState;
+          const isVerifying = verifying.has(row.name);
 
           const items = [
             {
@@ -149,6 +268,16 @@ export default function AccountTable(props: Props) {
                   </Space>
                 </Button>
               </Dropdown>
+              {row.hasStorageState && (
+                <Button
+                  size="small"
+                  icon={<SafetyCertificateOutlined />}
+                  loading={isVerifying}
+                  onClick={() => handleVerify(row.name)}
+                >
+                  验证
+                </Button>
+              )}
               {onOpenCreator && (
                 <Button
                   size="small"
@@ -175,7 +304,7 @@ export default function AccountTable(props: Props) {
       },
     ];
 
-    const dataSource = (accounts as CreatorAccount[]).map((a, i) => ({
+    const dataSource = mergedAccounts.map((a, i) => ({
       ...a,
       key: a.name || String(i),
     }));
@@ -222,27 +351,37 @@ export default function AccountTable(props: Props) {
     );
   }
 
-  // Shop mode
+  // Shop mode - simpler version (used when AccountTable is called with type="shop")
+  const shopAccounts = (accounts as ShopAccount[]);
+
   const columns = [
     { title: "邮箱", dataIndex: "email", key: "email" },
     {
       title: "登录态",
-      dataIndex: "hasStorageState",
-      key: "hasStorageState",
-      render: (v: boolean) =>
-        v ? (
-          <Tag icon={<CheckCircleOutlined />} color="success">
-            有效
-          </Tag>
-        ) : (
-          <Tag icon={<CloseCircleOutlined />} color="default">
-            未登录
-          </Tag>
-        ),
+      dataIndex: "cookieStatus",
+      key: "cookieStatus",
+      width: 100,
+      render: (_: any, row: ShopAccount) => renderCookieTag(row),
+    },
+    {
+      title: "最后登录",
+      dataIndex: "lastLoginAt",
+      key: "lastLoginAt",
+      width: 130,
+      render: (_: any, row: ShopAccount) => {
+        if (!row.lastLoginAt) return "-";
+        const d = new Date(row.lastLoginAt);
+        return d.toLocaleString("zh-CN", {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      },
     },
   ];
 
-  const dataSource = (accounts as ShopAccount[]).map((a, i) => ({
+  const dataSource = shopAccounts.map((a, i) => ({
     ...a,
     key: a.email || String(i),
   }));
