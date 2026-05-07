@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
     spawnTask(taskId, "node", ["scripts/douyin-creator/open.js", accountName], {
       namespace: "system",
       env: { HEADLESS: "false" },
+      interactive: true,
     });
 
     return NextResponse.json({ taskId });

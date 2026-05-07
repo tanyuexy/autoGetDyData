@@ -17,6 +17,25 @@ const {
 } = require("./lib/merge-shop-exports");
 const { calcDaysToExport } = require("./lib/backup-dates");
 
+let activeBrowser = null;
+let shuttingDown = false;
+
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`收到 ${signal}，正在关闭抖店浏览器...`);
+  try {
+    if (activeBrowser) await activeBrowser.close();
+  } catch (error) {
+    console.error("关闭抖店浏览器失败:", error.message || error);
+  } finally {
+    process.exit(signal === "SIGTERM" ? 143 : 130);
+  }
+}
+
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));
+
 function parseArgs(argv) {
   // 支持 "login"（默认）或 "login <email> <password>"
   const args = argv.slice(2);
@@ -105,6 +124,7 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
     headless: HEADLESS,
     args: ["--start-maximized"]
   });
+  activeBrowser = browser;
 
   let daysToExport = 1;
   try {
@@ -159,6 +179,7 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
     }
   } finally {
     await browser.close();
+    activeBrowser = null;
   }
 
   const failed = results.filter((r) => !r.ok);
@@ -248,6 +269,7 @@ async function main() {
     headless: HEADLESS,
     args: ["--start-maximized"]
   });
+  activeBrowser = browser;
 
   // 读取飞书备份表最后日期，计算需要循环导出多少天
   let daysToExport = 1;
@@ -306,6 +328,7 @@ async function main() {
   }
 
   await browser.close();
+  activeBrowser = null;
 
   await mergeAllShopExportsToData({
     daysToExport,

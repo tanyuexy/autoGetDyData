@@ -9,6 +9,22 @@ const { getAccountPaths } = require("./lib/accounts");
 const { fileExists, ensureDir } = require("./lib/fs-utils");
 const { BROWSER_VIEWPORT } = require("./lib/env");
 
+let activeBrowser = null;
+let activeContext = null;
+let shuttingDown = false;
+
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`收到 ${signal}，正在关闭浏览器...`);
+  try {
+    if (activeContext) await activeContext.close().catch(() => {});
+    if (activeBrowser) await activeBrowser.close().catch(() => {});
+  } finally {
+    process.exit(signal === "SIGTERM" ? 143 : 0);
+  }
+}
+
 async function main() {
   const accountName = process.argv[2];
   if (!accountName) {
@@ -33,11 +49,13 @@ async function main() {
     headless: false,
     args: ["--start-maximized"],
   });
+  activeBrowser = browser;
 
   const context = await browser.newContext({
     viewport: BROWSER_VIEWPORT,
     storageState: paths.storageStatePath,
   });
+  activeContext = context;
 
   const page = await context.newPage();
   await page.goto("https://creator.douyin.com/creator-micro/data-center/content", {
@@ -49,13 +67,9 @@ async function main() {
   console.log(`✓ 已打开抖音创作者中心 - 账号: ${accountName}`);
   console.log("  关闭浏览器窗口即可退出");
 
-  const cleaner = () => {
-    browser.close().catch(() => {});
-    process.exit(0);
-  };
-  process.on("SIGINT", cleaner);
-  process.on("SIGTERM", cleaner);
-  process.on("SIGHUP", cleaner);
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGHUP", () => shutdown("SIGHUP"));
   browser.on("disconnected", () => {
     console.log("浏览器已关闭，退出");
     process.exit(0);

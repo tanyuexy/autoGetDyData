@@ -15,6 +15,25 @@ const {
   clickPublishButton,
 } = require("./utils");
 
+let activeBrowser = null;
+let activeContext = null;
+let shuttingDown = false;
+
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`收到 ${signal}，正在关闭图文发布浏览器...`);
+  try {
+    if (activeContext) await activeContext.close().catch(() => {});
+    if (activeBrowser) await activeBrowser.close().catch(() => {});
+  } finally {
+    process.exit(signal === "SIGTERM" ? 143 : 130);
+  }
+}
+
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));
+
 async function uploadImages(page, imageKeys, accountName) {
   const filePaths = imageKeys.map((key) => path.join(MATERIALS_DIR, key));
   for (const filePath of filePaths) {
@@ -254,11 +273,13 @@ async function runPublishArticle(options) {
     headless: HEADLESS,
     args: ["--start-maximized"],
   });
+  activeBrowser = browser;
 
   const context = await browser.newContext({
     viewport: BROWSER_VIEWPORT,
     storageState: paths.storageStatePath,
   });
+  activeContext = context;
 
   let page;
   try {
@@ -307,7 +328,9 @@ async function runPublishArticle(options) {
     throw error;
   } finally {
     await context.close().catch(() => {});
+    activeContext = null;
     await browser.close().catch(() => {});
+    activeBrowser = null;
   }
 }
 

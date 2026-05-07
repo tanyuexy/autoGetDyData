@@ -3,6 +3,14 @@ import fs from "fs";
 import path from "path";
 import { createChannel } from "./sseManager";
 import { getConfig } from "./configService";
+import {
+  getRuntimeProcess,
+  getRuntimeProcessesByNamespace,
+  isPidAlive,
+  readRuntimeProcesses,
+  registerRuntimeProcess,
+  removeRuntimeProcess,
+} from "./runtimeProcessStore";
 
 export type TaskNamespace = "creator-export" | "shop-export" | "creator-publish" | "login" | "system" | "feishu";
 
@@ -32,6 +40,14 @@ const DEFAULT_MAX_CONCURRENT: Record<TaskNamespace, number> = {
   login: 1,
   system: 1,
   feishu: 1,
+};
+
+const DEFAULT_TIMEOUT_MS: Partial<Record<TaskNamespace, number>> = {
+  "creator-export": 60 * 60 * 1000,
+  "shop-export": 2 * 60 * 60 * 1000,
+  "creator-publish": 30 * 60 * 1000,
+  login: 30 * 60 * 1000,
+  feishu: 30 * 60 * 1000,
 };
 
 const namespaces = new Map<TaskNamespace, NamespaceState>();
@@ -81,14 +97,28 @@ function appendTaskLog(taskId: string, entry: { level: string; text: string; tim
   }
 }
 
-/** Check if a namespace can accept a new task */
-export function canStartTask(namespace: TaskNamespace): boolean {
-  const ns = getOrCreateNamespace(namespace);
+function countMemoryRunning(ns: NamespaceState): number {
   let running = 0;
   for (const id of ns.tasks.keys()) {
     if (!ns.stoppingTasks.has(id)) running++;
   }
-  return running < ns.maxConcurrent;
+  return running;
+}
+
+function countRegistryRunning(namespace: TaskNamespace): number {
+  const ns = getOrCreateNamespace(namespace);
+  const memoryIds = new Set(ns.tasks.keys());
+  let running = countMemoryRunning(ns);
+  for (const record of getRuntimeProcessesByNamespace(namespace)) {
+    if (!memoryIds.has(record.taskId)) running++;
+  }
+  return running;
+}
+
+/** Check if a namespace can accept a new task */
+export function canStartTask(namespace: TaskNamespace): boolean {
+  const ns = getOrCreateNamespace(namespace);
+  return countRegistryRunning(namespace) < ns.maxConcurrent;
 }
 
 /** Get the maxConcurrent limit for a namespace */
@@ -99,10 +129,8 @@ export function getConcurrencyLimit(namespace: TaskNamespace): number {
 /** Legacy: check if any task is running (optionally scoped to namespace) */
 export function isTaskRunning(namespace?: TaskNamespace): boolean {
   if (namespace) return !canStartTask(namespace);
-  for (const ns of namespaces.values()) {
-    for (const id of ns.tasks.keys()) {
-      if (!ns.stoppingTasks.has(id)) return true;
-    }
+  for (const nsName of Object.keys(DEFAULT_MAX_CONCURRENT) as TaskNamespace[]) {
+    if (countRegistryRunning(nsName) > 0) return true;
   }
   return false;
 }
@@ -117,13 +145,15 @@ export function getRunningTaskId(namespace?: TaskNamespace): string | null {
   };
   if (namespace) {
     const ns = namespaces.get(namespace);
-    return ns ? check(ns) : null;
+    const memoryId = ns ? check(ns) : null;
+    if (memoryId) return memoryId;
+    return getRuntimeProcessesByNamespace(namespace)[0]?.taskId || null;
   }
   for (const ns of namespaces.values()) {
     const id = check(ns);
     if (id) return id;
   }
-  return null;
+  return readRuntimeProcesses({ pruneDead: true })[0]?.taskId || null;
 }
 
 export interface RunningTaskInfo {
@@ -134,16 +164,79 @@ export interface RunningTaskInfo {
 
 /** List all currently running tasks across all namespaces */
 export function getRunningTaskList(): RunningTaskInfo[] {
-  const result: RunningTaskInfo[] = [];
+  const result = new Map<string, RunningTaskInfo>();
   for (const [nsName, ns] of namespaces) {
     for (const [taskId, meta] of ns.taskMeta) {
       if (!ns.stoppingTasks.has(taskId) && ns.tasks.has(taskId)) {
-        result.push({ taskId, namespace: nsName, startedAt: meta.startedAt });
+        result.set(taskId, { taskId, namespace: nsName, startedAt: meta.startedAt });
       }
     }
   }
-  result.sort((a, b) => b.startedAt - a.startedAt);
-  return result;
+  for (const record of readRuntimeProcesses({ pruneDead: true })) {
+    if (!result.has(record.taskId)) {
+      result.set(record.taskId, {
+        taskId: record.taskId,
+        namespace: record.namespace,
+        startedAt: record.startedAt,
+      });
+    }
+  }
+  return Array.from(result.values()).sort((a, b) => b.startedAt - a.startedAt);
+}
+
+async function collectDescendantPids(pid: number): Promise<number[]> {
+  if (process.platform === "win32") return [];
+  const { execFile } = await import("child_process");
+  return await new Promise((resolve) => {
+    execFile("pgrep", ["-P", String(pid)], async (error, stdout) => {
+      if (error || !stdout.trim()) {
+        resolve([]);
+        return;
+      }
+      const children = stdout
+        .split(/\s+/)
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0);
+      const nested = await Promise.all(children.map((childPid) => collectDescendantPids(childPid)));
+      resolve([...children, ...nested.flat()]);
+    });
+  });
+}
+
+function killPid(pid: number, signal: NodeJS.Signals) {
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // process may have exited
+  }
+}
+
+async function killProcessTree(pid: number, signal: NodeJS.Signals) {
+  if (!isPidAlive(pid)) return;
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // fall back to explicit descendant traversal
+    }
+  }
+  const descendants = await collectDescendantPids(pid).catch(() => []);
+  for (const childPid of descendants.reverse()) killPid(childPid, signal);
+  killPid(pid, signal);
+}
+
+function scheduleForceKill(taskId: string, pid: number, child?: ChildProcess) {
+  setTimeout(() => {
+    const stillAlive = child ? child.exitCode === null : isPidAlive(pid);
+    if (!stillAlive) return;
+    appendTaskLog(taskId, {
+      text: `任务仍未退出，发送 SIGKILL pid=${pid}`,
+      level: "error",
+      timestamp: new Date().toISOString(),
+    });
+    killProcessTree(pid, "SIGKILL").catch(() => {});
+  }, 5000).unref?.();
 }
 
 export function spawnTask(
@@ -156,6 +249,8 @@ export function spawnTask(
     onClose?: (code: number | null) => void;
     onError?: (err: Error) => void;
     env?: Record<string, string | undefined>;
+    timeoutMs?: number;
+    interactive?: boolean;
   }
 ): { sse: ReturnType<typeof createChannel>; child: ChildProcess } {
   const nsName = options?.namespace || "system";
@@ -168,17 +263,48 @@ export function spawnTask(
     headless = String(cfg.headless === true);
   } catch { }
 
+  const cwd = options?.cwd || process.cwd();
   const child = spawn(command, args, {
-    cwd: options?.cwd || process.cwd(),
+    cwd,
     env: { ...process.env, HEADLESS: headless, ...(options?.env || {}) },
     stdio: ["pipe", "pipe", "pipe"],
     shell: false,
-    detached: true,
+    detached: process.platform !== "win32",
   });
+
+  const startedAt = Date.now();
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS[nsName];
 
   ns.tasks.set(taskId, child);
   ns.stoppingTasks.delete(taskId);
-  ns.taskMeta.set(taskId, { startedAt: Date.now(), namespace: nsName });
+  ns.taskMeta.set(taskId, { startedAt, namespace: nsName });
+
+  if (child.pid) {
+    registerRuntimeProcess({
+      taskId,
+      namespace: nsName,
+      pid: child.pid,
+      command,
+      args,
+      cwd,
+      startedAt,
+      timeoutMs,
+      interactive: options?.interactive,
+    });
+  }
+
+  let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  if (timeoutMs && timeoutMs > 0 && !options?.interactive) {
+    timeoutTimer = setTimeout(() => {
+      appendTaskLog(taskId, {
+        text: `任务运行超过 ${Math.round(timeoutMs / 1000)} 秒，自动终止`,
+        level: "error",
+        timestamp: new Date().toISOString(),
+      });
+      killTask(taskId);
+    }, timeoutMs);
+    timeoutTimer.unref?.();
+  }
 
   let stdoutBuf = "";
   child.stdout?.on("data", (chunk: Buffer) => {
@@ -210,6 +336,14 @@ export function spawnTask(
     }
   });
 
+  function cleanupRuntimeState() {
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    ns.stoppingTasks.delete(taskId);
+    ns.tasks.delete(taskId);
+    ns.taskMeta.delete(taskId);
+    removeRuntimeProcess(taskId);
+  }
+
   child.on("close", (code) => {
     if (stdoutBuf.trim()) {
       const ts = new Date().toISOString();
@@ -234,9 +368,7 @@ export function spawnTask(
     });
     sse.send("done", doneEvent);
     sse.close();
-    ns.stoppingTasks.delete(taskId);
-    ns.tasks.delete(taskId);
-    ns.taskMeta.delete(taskId);
+    cleanupRuntimeState();
     options?.onClose?.(code);
   });
 
@@ -253,9 +385,7 @@ export function spawnTask(
     });
     sse.send("done", { code: -1, summary: err.message });
     sse.close();
-    ns.stoppingTasks.delete(taskId);
-    ns.tasks.delete(taskId);
-    ns.taskMeta.delete(taskId);
+    cleanupRuntimeState();
     options?.onError?.(err);
   });
 
@@ -265,26 +395,37 @@ export function spawnTask(
 export function killTask(taskId: string): boolean {
   for (const ns of namespaces.values()) {
     const child = ns.tasks.get(taskId);
-    if (child) {
+    if (child?.pid) {
       ns.stoppingTasks.add(taskId);
-      // Kill the process group (detached:true creates a new group where child.pid is leader)
-      try { process.kill(-child.pid!, "SIGTERM"); } catch { child.kill("SIGTERM"); }
-      setTimeout(() => {
-        if (child.exitCode === null) {
-          try { process.kill(-child.pid!, "SIGKILL"); } catch { child.kill("SIGKILL"); }
-        }
-      }, 5000);
+      appendTaskLog(taskId, {
+        text: `正在终止任务进程树 pid=${child.pid}`,
+        level: "info",
+        timestamp: new Date().toISOString(),
+      });
+      killProcessTree(child.pid, "SIGTERM").catch(() => child.kill("SIGTERM"));
+      scheduleForceKill(taskId, child.pid, child);
       return true;
     }
   }
-  return false;
+
+  const record = getRuntimeProcess(taskId);
+  if (!record) return false;
+  appendTaskLog(taskId, {
+    text: `正在终止已恢复的任务进程树 pid=${record.pid}`,
+    level: "info",
+    timestamp: new Date().toISOString(),
+  });
+  killProcessTree(record.pid, "SIGTERM").catch(() => killPid(record.pid, "SIGTERM"));
+  scheduleForceKill(taskId, record.pid);
+  return true;
 }
 
 /** Legacy: list all task IDs across all namespaces */
 export function getTaskList(): string[] {
-  const ids: string[] = [];
+  const ids = new Set<string>();
   for (const ns of namespaces.values()) {
-    for (const id of ns.tasks.keys()) ids.push(id);
+    for (const id of ns.tasks.keys()) ids.add(id);
   }
-  return ids;
+  for (const record of readRuntimeProcesses({ pruneDead: true })) ids.add(record.taskId);
+  return Array.from(ids);
 }

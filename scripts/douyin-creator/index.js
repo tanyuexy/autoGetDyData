@@ -28,6 +28,25 @@ const { parseArgs } = require("./publish/utils");
 const { runPublishArticle } = require("./publish/article");
 const { runPublishVideo } = require("./publish/video");
 
+let activeBrowser = null;
+let shuttingDown = false;
+
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`收到 ${signal}，正在关闭抖创浏览器...`);
+  try {
+    if (activeBrowser) await activeBrowser.close();
+  } catch (error) {
+    console.error("关闭抖创浏览器失败:", error.message || error);
+  } finally {
+    process.exit(signal === "SIGTERM" ? 143 : 130);
+  }
+}
+
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));
+
 async function runOneAccount(browser, accountName, command, options = {}) {
   const paths = getAccountPaths(accountName);
   await ensureDir(paths.accountDir);
@@ -137,6 +156,7 @@ async function main() {
     headless: HEADLESS,
     args: ["--start-maximized"]
   });
+  activeBrowser = browser;
 
   if (command === "login") {
     const results = await runAccountQueue(browser, accounts, "login", {
@@ -145,6 +165,7 @@ async function main() {
       manualLoginReason: "手动触发账号登录"
     });
     await browser.close();
+    activeBrowser = null;
 
     const successCount = results.filter((item) => item.ok).length;
     const failed = results.filter((item) => !item.ok);
@@ -189,6 +210,7 @@ async function main() {
 
   const results = [...authResults, ...loginResults];
   await browser.close();
+  activeBrowser = null;
 
   const successCount = results.filter((item) => item.ok).length;
   const failed = results.filter((item) => !item.ok);
