@@ -77,7 +77,7 @@ function ensureDir(p: string) {
 function safeFileName(name: string) {
   return String(name || "")
     .trim()
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
     .slice(0, 180);
 }
 

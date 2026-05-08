@@ -26,16 +26,9 @@ async function shutdown(signal) {
 }
 
 async function waitForBrowserDisconnect(browser) {
-  return new Promise((resolve) => {
-    const disconnectWatcher = browser.waitForEvent("disconnected").then(() => resolve("disconnected"));
-    const poll = setInterval(() => {
-      if (!browser.isConnected()) {
-        clearInterval(poll);
-        resolve("poll");
-      }
-    }, 2000);
-    Promise.race([disconnectWatcher]).then(() => clearInterval(poll));
-  });
+  while (browser.isConnected()) {
+    await new Promise((r) => setTimeout(r, 2000));
+  }
 }
 
 async function main() {
