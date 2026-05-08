@@ -16,13 +16,26 @@ let shuttingDown = false;
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`收到 ${signal}，正在关闭浏览器...`);
+  if (signal) console.log(`收到 ${signal}，正在关闭浏览器...`);
   try {
     if (activeContext) await activeContext.close().catch(() => {});
     if (activeBrowser) await activeBrowser.close().catch(() => {});
   } finally {
     process.exit(signal === "SIGTERM" ? 143 : 0);
   }
+}
+
+async function waitForBrowserDisconnect(browser) {
+  return new Promise((resolve) => {
+    const disconnectWatcher = browser.waitForEvent("disconnected").then(() => resolve("disconnected"));
+    const poll = setInterval(() => {
+      if (!browser.isConnected()) {
+        clearInterval(poll);
+        resolve("poll");
+      }
+    }, 2000);
+    Promise.race([disconnectWatcher]).then(() => clearInterval(poll));
+  });
 }
 
 async function main() {
@@ -47,21 +60,24 @@ async function main() {
 
   const browser = await chromium.launch({
     headless: false,
-    args: ["--start-maximized"],
+    args: ["--start-maximized"]
   });
   activeBrowser = browser;
 
   const context = await browser.newContext({
     viewport: BROWSER_VIEWPORT,
-    storageState: paths.storageStatePath,
+    storageState: paths.storageStatePath
   });
   activeContext = context;
 
   const page = await context.newPage();
-  await page.goto("https://creator.douyin.com/creator-micro/data-center/content", {
-    waitUntil: "domcontentloaded",
-    timeout: 30000,
-  });
+  await page.goto(
+    "https://creator.douyin.com/creator-micro/data-center/content",
+    {
+      waitUntil: "domcontentloaded",
+      timeout: 30000
+    }
+  );
   await page.waitForTimeout(3000);
 
   console.log(`✓ 已打开抖音创作者中心 - 账号: ${accountName}`);
@@ -70,12 +86,10 @@ async function main() {
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGHUP", () => shutdown("SIGHUP"));
-  browser.on("disconnected", () => {
-    console.log("浏览器已关闭，退出");
-    process.exit(0);
-  });
 
-  await new Promise(() => {});
+  await waitForBrowserDisconnect(browser);
+  console.log("浏览器已关闭，退出");
+  await shutdown();
 }
 
 main().catch((e) => {
