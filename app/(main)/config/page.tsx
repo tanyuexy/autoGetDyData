@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Tabs, Button, Spin, App, Switch, Space, Typography, Alert, Divider, InputNumber } from "antd";
-import { SaveOutlined } from "@ant-design/icons";
 import ConfigEmailTab from "@/components/ConfigEmailTab";
 import ConfigFeishuTab from "@/components/ConfigFeishuTab";
 import ConfigCreatorDatesSection from "@/components/ConfigCreatorDatesSection";
@@ -15,13 +14,12 @@ export default function ConfigPage() {
   const { startTask } = useTaskContext();
   const [config, setConfig] = useState<ConfigData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
   const [creatorAccounts, setCreatorAccounts] = useState<CreatorAccount[]>([]);
   const [loadingCreatorAccounts, setLoadingCreatorAccounts] = useState(false);
 
-  // Track dirty changes per tab
-  const [dirty, setDirty] = useState<Partial<Record<string, any>>>({});
+  const configRef = useRef<ConfigData | null>(null);
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -56,34 +54,44 @@ export default function ConfigPage() {
     fetchCreatorAccounts();
   }, [fetchConfig, fetchCreatorAccounts]);
 
-  async function handleSave() {
-    if (!config || !Object.keys(dirty).length) return;
-    setSaving(true);
-    try {
-      const merged: ConfigData = { ...config, ...dirty };
-      const res = await fetch("/api/config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(merged),
-      });
-      if (res.ok) {
-        message.success("保存成功");
-        setConfig(merged);
-        setDirty({});
-        await fetchCreatorAccounts();
-      } else {
+  // Keep ref in sync for debounced saves
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
+  function autoSave(patch: Partial<ConfigData>) {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      configRef.current = next;
+      return next;
+    });
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      if (!configRef.current) return;
+      try {
+        const res = await fetch("/api/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(configRef.current),
+        });
+        if (!res.ok) {
+          message.error("保存失败");
+        } else {
+          fetchCreatorAccounts();
+        }
+      } catch {
         message.error("保存失败");
       }
-    } catch {
-      message.error("保存失败");
-    }
-    setSaving(false);
-  }
-
-  function mergeChange(patch: Partial<ConfigData>) {
-    // Apply patch to cached config and mark dirty
-    setConfig((prev) => (prev ? { ...prev, ...patch } : prev));
-    setDirty((prev) => ({ ...prev, ...patch }));
+    }, 300);
   }
 
   if (loading) {
@@ -166,7 +174,7 @@ export default function ConfigPage() {
           <Space>
             <Switch
               checked={config.headless ?? false}
-              onChange={(v) => mergeChange({ headless: v })}
+              onChange={(v) => autoSave({ headless: v })}
             />
             <Space orientation="vertical" size={0}>
               <Typography.Text strong>无头模式 (Headless)</Typography.Text>
@@ -196,7 +204,7 @@ export default function ConfigPage() {
             dateMap={config.creatorExportDateStartByAccount || {}}
             globalDate={config.creatorExportDateStart || null}
             onChange={(dateMap, globalDate) =>
-              mergeChange({
+              autoSave({
                 creatorExportDateStartByAccount: dateMap,
                 creatorExportDateStart: globalDate,
               })
@@ -211,7 +219,7 @@ export default function ConfigPage() {
             <Switch
               checked={config.creatorPublish?.publishEnabled ?? true}
               onChange={(v) =>
-                mergeChange({ creatorPublish: { ...config.creatorPublish, publishEnabled: v, publishWaitSec: config.creatorPublish?.publishWaitSec ?? 3 } })
+                autoSave({ creatorPublish: { ...config.creatorPublish, publishEnabled: v, publishWaitSec: config.creatorPublish?.publishWaitSec ?? 3 } })
               }
             />
             <Space orientation="vertical" size={0}>
@@ -235,7 +243,7 @@ export default function ConfigPage() {
                 max={Infinity}
                 value={config.creatorPublish?.publishWaitSec ?? 3}
                 onChange={(v) =>
-                  mergeChange({ creatorPublish: { ...config.creatorPublish, publishEnabled: config.creatorPublish?.publishEnabled ?? true, publishWaitSec: v || 3 } })
+                  autoSave({ creatorPublish: { ...config.creatorPublish, publishEnabled: config.creatorPublish?.publishEnabled ?? true, publishWaitSec: v || 3 } })
                 }
                 style={{ width: 80 }}
               />
@@ -251,7 +259,7 @@ export default function ConfigPage() {
       children: (
         <ConfigEmailTab
           emails={config.emails || []}
-          onChange={(emails) => mergeChange({ emails })}
+          onChange={(emails) => autoSave({ emails })}
           onLogin={async (email) => {
             try {
               await startTask("/api/shop/login-one", { email }, "login");
@@ -271,7 +279,7 @@ export default function ConfigPage() {
           shop={config.feishu.shop}
           creator={config.feishu.creator}
           task={config.feishu.task}
-          onChange={(data) => mergeChange({ feishu: data })}
+          onChange={(data) => autoSave({ feishu: data })}
         />
       ),
     },
@@ -279,17 +287,8 @@ export default function ConfigPage() {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+      <div style={{ marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>配置管理</h2>
-        <Button
-          type="primary"
-          icon={<SaveOutlined />}
-          onClick={handleSave}
-          loading={saving}
-          disabled={!Object.keys(dirty).length}
-        >
-          保存更改
-        </Button>
       </div>
       <Tabs items={tabItems} />
     </div>
