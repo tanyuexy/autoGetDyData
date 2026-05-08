@@ -235,7 +235,7 @@ function scheduleForceKill(taskId: string, pid: number, child?: ChildProcess) {
       level: "error",
       timestamp: new Date().toISOString(),
     });
-    killProcessTree(pid, "SIGKILL").catch(() => {});
+    killProcessTree(pid, "SIGKILL").catch(() => { });
   }, 5000).unref?.();
 }
 

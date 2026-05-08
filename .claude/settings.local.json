@@ -59,7 +59,8 @@
       "Bash(grep *)",
       "Bash(mdfind -name '.mp4' -onlyin /Users/xy/)",
       "Read(//Users/xy/.claude/**)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(defaults read *)"
     ]
   },
   "mcpServers": {
