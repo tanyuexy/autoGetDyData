@@ -9,22 +9,55 @@ const {
   SLIDER_MAX_RETRY
 } = require("./env");
 const { solveCaptchaIfPresent } = require("./captcha");
-const { runPostLoginFlow } = require("./post-login-flow");
+const {
+  selectShopIfPicker,
+  loadPreferredShopNames,
+  isShopPickerVisible
+} = require("./shop-picker");
+const { downloadVideoSelfDetail, gotoVideoSelf } = require("./video-detail");
+const { downloadGraphicDetail } = require("./graphic-detail");
+const { readCurrentShopName, switchToNextPreferredShop } = require("./shop-switch");
+const { waitForDomLoaded } = require("./dom-ready");
 const {
   STAGES,
+  detectStage,
   isAuthenticatedStage,
   waitForStage
 } = require("./stage");
 
+function getAccountPaths(email) {
+  const safeName = String(email).replace(/[\\/:*?"<>|]+/g, "_");
+  const accountDir = path.join(ACCOUNTS_DIR, safeName);
+  return {
+    email,
+    accountDir,
+    storageStatePath: path.join(accountDir, "storageState.json"),
+    cookiesPath: path.join(accountDir, "cookies.json"),
+    debugDir: path.join(accountDir, "debug"),
+    dataDir: path.join(accountDir, "data")
+  };
+}
+
+async function ensureAccountPaths(paths) {
+  await fs.mkdir(paths.accountDir, { recursive: true });
+  await fs.mkdir(paths.debugDir, { recursive: true });
+  await fs.mkdir(paths.dataDir, { recursive: true });
+}
+
+/**
+ * 切换到"邮箱登录" tab。页面加载后可能默认是手机号登录，必须显式点击。
+ * 切完后必须等到"邮箱输入框"和"密码输入框"同时可见，否则下一步会把两个值写到同一个框里。
+ */
 async function switchToEmailTab(page) {
   const tabLoc = page
     .locator(
-      ':text-is("邮箱登录"), div[role="tab"]:has-text("邮箱登录"), span:has-text("邮箱登录")'
+      'div[role="tab"]:has-text("邮箱登录"), span:has-text("邮箱登录"), :text-is("邮箱登录")'
     )
     .first();
   if (await tabLoc.isVisible({ timeout: 2000 }).catch(() => false)) {
     await tabLoc.click({ timeout: 2000 }).catch(() => {});
   }
+  // 关键：必须等密码输入框也已渲染，否则 fillCredentials 会把密码写进邮箱框
   await page
     .locator('input[type="password"]')
     .first()
@@ -33,13 +66,21 @@ async function switchToEmailTab(page) {
   return true;
 }
 
+/**
+ * 清空一个 input 再写入目标值。
+ * 用 triple-click 全选 + 填空，兼容带受控清除按钮的 React 组件。
+ */
 async function clearAndFill(input, value) {
   await input.click({ clickCount: 3 }).catch(() => {});
   await input.fill("").catch(() => {});
   await input.fill(value);
 }
 
+/**
+ * 填写邮箱 + 密码；填完回读校验，发现串行写入到同一框就清空重填。
+ */
 async function fillCredentials(page, email, password) {
+  // 用严格 placeholder 匹配，避免把"请输入邮箱"错匹成别的 input。
   const emailInput = page
     .locator(
       'input[placeholder="请输入邮箱"], input[placeholder*="邮箱"], input[type="email"]'
@@ -47,15 +88,22 @@ async function fillCredentials(page, email, password) {
     .first();
   await emailInput.waitFor({ state: "visible", timeout: 6000 });
 
+  // type=password 是最可靠的密码框识别方式；兜底再加上 placeholder。
   const passwordInput = page
     .locator('input[type="password"], input[placeholder="密码"]')
     .first();
   await passwordInput.waitFor({ state: "visible", timeout: 6000 });
 
+  // 先把焦点打到 email 上一次性写入（不在填写中途切换焦点）
   await clearAndFill(emailInput, email);
+
+  // 切焦点到 password；triple-click 会把焦点确切落在目标 input
   await clearAndFill(passwordInput, password);
+
+  // 让 React 完成 setState 与表单校验
   await page.waitForTimeout(150);
 
+  // 回读校验：邮箱字段里不能混进密码；密码字段长度必须匹配
   const emailVal = await emailInput.inputValue().catch(() => "");
   const pwVal = await passwordInput.inputValue().catch(() => "");
 
@@ -80,44 +128,42 @@ async function fillCredentials(page, email, password) {
   }
 }
 
+/**
+ * 勾选"同意用户协议"checkbox。
+ * 页面上的 <input type="checkbox"> 是 readonly 的，直接 click 无效，
+ * 需要点击它的 wrapper（label / .semi-checkbox / 父元素）。
+ */
 async function ensureAgreementChecked(page) {
-  const failures = [];
-  try {
-    const checkbox = page.locator('input[type="checkbox"]').first();
-    if (!(await checkbox.isVisible({ timeout: 2000 }).catch(() => false))) {
-      failures.push({
-        step: "登录-同意协议",
-        message: "未找到复选框元素"
-      });
-      return { total: 0, clicked: 0, failures };
-    }
-    const isChecked = await checkbox.isChecked().catch(() => false);
-    if (!isChecked) {
-      try {
-        await checkbox.click({ timeout: 2000 });
-      } catch {
-        await checkbox.click({ force: true, timeout: 2000 });
+  const result = await page
+    .evaluate(() => {
+      const inputs = Array.from(
+        document.querySelectorAll('input[type="checkbox"]')
+      );
+      let clicked = 0;
+      for (const input of inputs) {
+        if (!input.checked) {
+          const wrap =
+            input.closest("label") ||
+            input.closest('[class*="checkbox"]') ||
+            input.parentElement;
+          (wrap || input).click();
+          clicked += 1;
+        }
       }
-    }
-    await page.waitForTimeout(120);
-
-    const finalChecked = await checkbox.isChecked().catch(() => false);
-    if (!finalChecked) {
-      failures.push({
-        step: "登录-同意协议",
-        message: "协议复选框勾选失败"
-      });
-    }
-    return { total: 1, clicked: finalChecked ? 1 : 0, failures };
-  } catch (e) {
-    failures.push({
-      step: "登录-同意协议",
-      message: `勾选协议异常: ${e.message || e}`
-    });
-    return { total: 0, clicked: 0, failures };
-  }
+      return { total: inputs.length, clicked };
+    })
+    .catch(() => ({ total: 0, clicked: 0 }));
+  await page.waitForTimeout(120);
+  return result;
 }
 
+/**
+ * 点击“登录”按钮。
+ * 关键点：
+ * 1) 用 :not([disabled]) 精确等待按钮变为 enabled（协议勾选 + 表单通过后才会 enabled）；
+ * 2) noWaitAfter 避免点击后还去轮询"stable"，防止 captcha 弹出后卡死 30 秒；
+ * 3) 如果 click 真抛错了，但 captcha 已出现，视为点击生效直接返回。
+ */
 async function clickLogin(page) {
   if (
     await page
@@ -136,13 +182,14 @@ async function clickLogin(page) {
   try {
     await enabledBtn.waitFor({ state: "visible", timeout: 6000 });
     await enabledBtn.click({ timeout: 2500, noWaitAfter: true });
-  } catch (_error) {
+  } catch (error) {
     const captchaShown = await page
       .locator("#captcha_container, text=请完成下列验证后继续")
       .first()
       .isVisible({ timeout: 300 })
       .catch(() => false);
     if (captchaShown) return;
+    // 兜底：强制点，让事件一定派发
     await page
       .locator('button', { hasText: "登录" })
       .first()
@@ -151,7 +198,14 @@ async function clickLogin(page) {
   }
 }
 
+/**
+ * 是否出现抖店/罗盘「登录」相关 UI（会话失效时常驻留在工作台 URL 但表单已弹出）。
+ * 命中则视为未登录，避免仅靠 URL 误判。
+ * 选店页 URL 常为 /login/common，必须与真实登录弹层区分。
+ */
 async function hasLoginUi(page) {
+  if (await isShopPickerVisible(page)) return false;
+
   const url = page.url() || "";
   const pw = page.locator('input[type="password"]').first();
   const pwOk = await pw.isVisible({ timeout: 280 }).catch(() => false);
@@ -167,7 +221,7 @@ async function hasLoginUi(page) {
 
   const emailTab = page
     .locator(
-      ':text-is("邮箱登录"), div[role="tab"]:has-text("邮箱登录"), span:has-text("邮箱登录")'
+      'div[role="tab"]:has-text("邮箱登录"), span:has-text("邮箱登录"), :text-is("邮箱登录")'
     )
     .first();
   const emailTabOk = await emailTab
@@ -190,7 +244,12 @@ async function hasLoginUi(page) {
   return hasCredentialUi;
 }
 
+/**
+ * 工作台已登录后的 DOM 特征（与 shop-switch 中实地结构一致），用于 cookie 复用探测。
+ */
 async function hasAuthenticatedWorkspaceDom(page) {
+  if (await isShopPickerVisible(page)) return true;
+
   const userDrop = page
     .locator(
       'div[class*="userDropDown"].ecom-dropdown-trigger, div[class*="userDropDown"]'
@@ -213,7 +272,13 @@ async function hasAuthenticatedWorkspaceDom(page) {
   return false;
 }
 
+/**
+ * 判断是否已经登录到抖店后台。
+ * 必须先排除登录页/登录表单，再要求选店页或工作台 DOM，避免「探测 URL 即 /ffa/mshop」时瞬间误判。
+ */
 async function isLoggedIn(page) {
+  if (await isShopPickerVisible(page)) return true;
+
   if (await hasLoginUi(page)) return false;
 
   const url = page.url() || "";
@@ -236,6 +301,7 @@ async function isLoggedIn(page) {
 async function waitForLoginSettled(page, timeoutMs = 15000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    if (await isShopPickerVisible(page)) return true;
     if (await isLoggedIn(page)) return true;
     await page.waitForTimeout(400);
   }
@@ -254,26 +320,408 @@ async function saveStorageState(context, paths) {
       "utf-8"
     );
   } catch {
+    // 忽略
   }
 }
 
-function getAccountPaths(email) {
-  const safeName = String(email).replace(/[\\/:*?"<>|]+/g, "_");
-  const accountDir = path.join(ACCOUNTS_DIR, safeName);
+/**
+ * 截图并返回路径，专用于失败时记录现场。
+ */
+async function captureFailureShot(page, debugDir, kind) {
+  try {
+    const ts = new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")
+      .replace("T", "_")
+      .slice(0, 19);
+    const shot = path.join(debugDir, `${kind}-${ts}.png`);
+    await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+    return shot;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 下载当前店铺的短视频明细 + 图文明细；二者独立 try/catch，互不影响。
+ * 店铺名优先从当前页读取；读不到时用上游 hint。
+ *
+ * @param {import('playwright').Page} page
+ * @param {string} tag
+ * @param {object} paths
+ * @param {object} [options]
+ * @param {number} [options.daysToExport] 循环导出天数，默认 1
+ * @returns {Promise<{ok: boolean, shopName: string, videoPath?: string, graphicPath?: string, videoError?: string, graphicError?: string, downloadPath?: string, error?: string}>}
+ */
+async function downloadCurrentShop(page, tag, paths, options = {}) {
+  let shopName = "";
+  try {
+    shopName = await readCurrentShopName(page);
+    if (shopName) {
+      console.log(`[${tag}] 当前登录店铺: ${shopName}`);
+    } else if (options.shopNameHint) {
+      shopName = String(options.shopNameHint).trim();
+      console.warn(
+        `[${tag}] 页面未能读取到当前店铺名，回退使用上游 hint "${shopName}"`
+      );
+    } else {
+      console.warn(`[${tag}] 未能读取到当前店铺名，将以 "unknown" 归档`);
+    }
+  } catch (error) {
+    console.warn(`[${tag}] 读取当前店铺名异常: ${error.message || error}`);
+  }
+
+  const shopTag = shopName ? `${tag}|${shopName}` : tag;
+  const sn = shopName || "unknown";
+  const daysToExport = options.daysToExport || 1;
+
+  let videoPaths = [];
+  let graphicPaths = [];
+  let videoError;
+  let graphicError;
+  let videoDateMismatches = [];
+  let graphicDateMismatches = [];
+
+  try {
+    const result = await downloadVideoSelfDetail(page, {
+      tag: shopTag,
+      saveDir: paths.dataDir,
+      shopName: sn,
+      daysToExport
+    });
+    if (result.allResults) {
+      // 仅保留日历日期与预期匹配的文件
+      videoPaths = result.allResults
+        .filter(r => r.dateMatch !== false)
+        .map(r => r.savePath)
+        .filter(Boolean);
+      videoDateMismatches = result.allResults
+        .filter(r => r.dateMatch === false)
+        .map(r => r.dataDate);
+    } else if (result.savePath) {
+      videoPaths = [result.savePath];
+    }
+  } catch (error) {
+    videoError = error?.message || String(error);
+    console.error(`[${shopTag}] 视频明细下载失败: ${videoError}`);
+    const shot = await captureFailureShot(
+      page,
+      paths.debugDir,
+      "download-video-failed"
+    );
+    if (shot) console.error(`[${shopTag}] 失败截图: ${shot}`);
+  }
+
+  try {
+    const result = await downloadGraphicDetail(page, {
+      tag: shopTag,
+      saveDir: paths.dataDir,
+      shopName: sn,
+      daysToExport
+    });
+    if (result.allResults) {
+      graphicPaths = result.allResults
+        .filter(r => r.dateMatch !== false)
+        .map(r => r.savePath)
+        .filter(Boolean);
+      graphicDateMismatches = result.allResults
+        .filter(r => r.dateMatch === false)
+        .map(r => r.dataDate);
+    } else if (result.savePath) {
+      graphicPaths = [result.savePath];
+    }
+  } catch (error) {
+    graphicError = error?.message || String(error);
+    console.error(`[${shopTag}] 图文明细下载失败: ${graphicError}`);
+    const shot = await captureFailureShot(
+      page,
+      paths.debugDir,
+      "download-graphic-failed"
+    );
+    if (shot) console.error(`[${shopTag}] 失败截图: ${shot}`);
+  }
+
+  const ok = Boolean(videoPaths.length && graphicPaths.length);
+  const parts = [videoError, graphicError].filter(Boolean);
+
+  // ─── 店铺汇总 ───
+  const videoDaysOk = videoError ? 0 : videoPaths.length;
+  const graphicDaysOk = graphicError ? 0 : graphicPaths.length;
+  const dateMismatchWarn = [];
+  if (videoDateMismatches.length) dateMismatchWarn.push(`视频日期不符: ${videoDateMismatches.join(', ')}`);
+  if (graphicDateMismatches.length) dateMismatchWarn.push(`图文日期不符: ${graphicDateMismatches.join(', ')}`);
+  const dateOk = videoDateMismatches.length === 0 && graphicDateMismatches.length === 0;
+
+  console.log(
+    `[${shopTag}] ─── 导出汇总: 视频 ${videoDaysOk}/${daysToExport}天 ${videoDaysOk === daysToExport ? '✓' : '✗'} | ` +
+    `图文 ${graphicDaysOk}/${daysToExport}天 ${graphicDaysOk === daysToExport ? '✓' : '✗'}` +
+    (!dateOk ? ` | ⚠ ${dateMismatchWarn.join('; ')}` : '') +
+    (videoError ? ` | 视频错误: ${videoError}` : '') +
+    (graphicError ? ` | 图文错误: ${graphicError}` : '')
+  );
+
   return {
-    email,
-    accountDir,
-    storageStatePath: path.join(accountDir, "storageState.json"),
-    cookiesPath: path.join(accountDir, "cookies.json"),
-    debugDir: path.join(accountDir, "debug"),
-    dataDir: path.join(accountDir, "data")
+    ok,
+    shopName,
+    videoDays: videoDaysOk,
+    graphicDays: graphicDaysOk,
+    daysToExport,
+    videoPath: videoPaths[0] || null,
+    graphicPath: graphicPaths[0] || null,
+    videoError,
+    graphicError,
+    videoDateMismatches,
+    graphicDateMismatches,
+    downloadPath: videoPaths[0] || graphicPaths[0] || null,
+    error: parts.length ? parts.join("；") : undefined
   };
 }
 
-async function ensureAccountPaths(paths) {
-  await fs.mkdir(paths.accountDir, { recursive: true });
-  await fs.mkdir(paths.debugDir, { recursive: true });
-  await fs.mkdir(paths.dataDir, { recursive: true });
+/**
+ * 登录成功后统一执行的后续动作：
+ * 1) 若出现「请选择店铺」页，按 config.json accounts 选中第一个匹配项并等待落地稳定
+ * 2) 若无选店页（cookie 等），必要时通过「切换数据视角」切到名单中的第一家
+ * 3) 每店依次下载短视频明细与图文分析明细，再切到下一个未处理名单店铺重复
+ *
+ * 每一步都尽量独立捕获异常，避免因后置步骤失败而否定登录动作本身的成果。
+ */
+async function runPostLoginFlow(page, tag, paths, options = {}) {
+  const processed =
+    options.processedNames instanceof Set
+      ? options.processedNames
+      : new Set(options.processedNames || []);
+
+  const result = {
+    shopPicked: null,
+    shopName: null,
+    downloads: [],
+    downloadPath: null,
+    downloadError: null,
+    processedNames: processed
+  };
+
+  const selectedShopNames = Array.isArray(options.selectedShopNames)
+    ? options.selectedShopNames.map((name) => String(name || "").trim()).filter(Boolean)
+    : [];
+  const fullPreferredList = selectedShopNames.length > 0
+    ? selectedShopNames
+    : await loadPreferredShopNames();
+  const preferredList = fullPreferredList.filter((name) => {
+    for (const done of processed) {
+      if (!done) continue;
+      if (done === name) return false;
+      if (name.includes(done) || done.includes(name)) return false;
+    }
+    return true;
+  });
+  console.log(
+    `[${tag}] 优先级名单总计 ${fullPreferredList.length}，已处理 ${processed.size}，本轮待处理 ${preferredList.length}: ${preferredList.join(", ") || "(空)"}`
+  );
+
+  if (preferredList.length === 0) {
+    console.log(`[${tag}] 本账号无新店铺可处理，跳过登录后流程`);
+    return result;
+  }
+
+  // === Gate: post-login 入口先识别阶段 ===
+  const entryStage = await detectStage(page);
+  console.log(
+    `[${tag}] 进入 post-login 流程，当前阶段=${entryStage.stage} url=${entryStage.url}`
+  );
+
+  if (entryStage.stage === STAGES.LOGIN_FORM || entryStage.stage === STAGES.CAPTCHA) {
+    console.warn(
+      `[${tag}] 意外：post-login 入口仍是 ${entryStage.stage}，终止后续下载流程`
+    );
+    return result;
+  }
+
+  if (entryStage.stage === STAGES.SHOP_PICKER) {
+    try {
+      const pick = await selectShopIfPicker(page, { tag, preferredList });
+      if (pick.picked) {
+        result.shopPicked = true;
+        result.shopName = pick.name;
+      } else {
+        result.shopPicked = false;
+      }
+    } catch (error) {
+      console.warn(`[${tag}] 店铺选择阶段异常: ${error.message || error}`);
+      result.shopPicked = false;
+    }
+  } else {
+    // 不在选店页（cookie 复用/已在罗盘）：跳过 selectShopIfPicker，避免多余等待
+    console.log(
+      `[${tag}] 当前阶段=${entryStage.stage}，不在选店页，跳过 selectShopIfPicker`
+    );
+    result.shopPicked = false;
+  }
+
+  function isPreferredShop(shopName) {
+    const name = String(shopName || "").trim();
+    if (!name) return false;
+    return preferredList.some((p) => {
+      const pref = String(p || "").trim();
+      if (!pref) return false;
+      return name === pref || name.includes(pref) || pref.includes(name);
+    });
+  }
+
+  let pendingShopHint = result.shopName || null;
+
+  if (!result.shopPicked && preferredList.length > 0) {
+    const sw = await switchToNextPreferredShop(page, {
+      tag,
+      processedNames: processed,
+      preferredList
+    });
+    if (!sw.switched && sw.reason === "no-match") {
+      console.log(
+        `[${tag}] 本账号未命中任何优先级名单店铺（${preferredList.length} 项名单中无可用店铺），跳过下载`
+      );
+      return result;
+    }
+    if (sw.switched) {
+      pendingShopHint = sw.name || null;
+      result.shopName = result.shopName || sw.name || null;
+    }
+  }
+
+  await waitForDomLoaded(page, { tag });
+
+  try {
+    await gotoVideoSelf(page, tag);
+  } catch (error) {
+    console.warn(
+      `[${tag}] 进入短视频明细页失败（仍尝试在下载流程内重试）: ${error.message || error}`
+    );
+  }
+
+  const maxShops =
+    preferredList.length > 0 ? preferredList.length + 2 : 1;
+
+  for (let i = 0; i < maxShops; i += 1) {
+    const daysToExport = options.daysToExport || 1;
+    console.log(
+      `\n[${tag}] ========== 第 ${i + 1}/${maxShops} 轮（${maxShops}=名单${preferredList.length}项+2）| 导出天数: ${daysToExport}天 ==========`
+    );
+    // 下载当前店铺（仅名单店铺）
+    const round = await downloadCurrentShop(page, tag, paths, {
+      shopNameHint: pendingShopHint,
+      daysToExport
+    });
+    if (round.shopName) {
+      processed.add(round.shopName);
+      if (!result.shopName) result.shopName = round.shopName;
+    }
+
+    // 如果仍然出现非名单店铺（极少数：读名失败/页面跳转异常导致），直接跳过记录并结束循环
+    if (round.shopName && preferredList.length > 0 && !isPreferredShop(round.shopName)) {
+      console.warn(
+        `[${tag}] 本轮店铺 "${round.shopName}" 不在优先级名单内，已跳过并结束（仅下载名单店铺）`
+      );
+      break;
+    }
+
+    result.downloads.push({
+      shopName: round.shopName,
+      videoPath: round.videoPath,
+      graphicPath: round.graphicPath,
+      videoDays: round.videoDays,
+      graphicDays: round.graphicDays,
+      daysToExport: round.daysToExport,
+      videoError: round.videoError,
+      graphicError: round.graphicError
+    });
+    if (round.videoPath && !result.downloadPath) {
+      result.downloadPath = round.videoPath;
+    }
+    if (round.graphicPath) {
+      result.downloadPath = round.graphicPath;
+    }
+    if (round.videoError && !result.downloadError) {
+      result.downloadError = round.videoError;
+    }
+    if (round.graphicError) {
+      result.downloadError = round.graphicError;
+    }
+
+    if (round.ok) {
+      console.log(
+        `[${tag}] 本轮全部成功: ${round.shopName || "unknown"} | 视频 ${round.videoDays}/${round.daysToExport}天 ✓ | 图文 ${round.graphicDays}/${round.daysToExport}天 ✓`
+      );
+    } else {
+      const detail = [
+        round.videoError ? `视频 ✗ ${round.videoError}` : `视频 ${round.videoDays}/${round.daysToExport}天 ✓`,
+        round.graphicError ? `图文 ✗ ${round.graphicError}` : `图文 ${round.graphicDays}/${round.daysToExport}天 ✓`
+      ].join(" | ");
+      console.warn(
+        `[${tag}] 本轮部分失败: ${round.shopName || "unknown"}（${detail}）`
+      );
+    }
+
+    // 没有优先级名单就不进入多店铺切换循环
+    if (preferredList.length === 0) {
+      console.log(`[${tag}] 未配置优先级名单，结束循环`);
+      break;
+    }
+
+    // 尝试切到下一个匹配且未处理的店铺
+    let switchRes;
+    try {
+      switchRes = await switchToNextPreferredShop(page, {
+        tag,
+        processedNames: processed,
+        preferredList
+      });
+    } catch (error) {
+      console.warn(`[${tag}] 切换店铺阶段异常: ${error.message || error}`);
+      await captureFailureShot(page, paths.debugDir, "switch-shop-failed");
+      break;
+    }
+
+    if (!switchRes.switched) {
+      if (switchRes.reason === "no-match") {
+        console.log(
+          `[${tag}] 切店铺弹窗中已无匹配且未处理的店铺，结束循环（共处理 ${processed.size} 个店铺）`
+        );
+      } else if (switchRes.reason === "modal-not-opened") {
+        console.warn(
+          `[${tag}] 右上角菜单中没有"切换数据视角"入口（该账号可能只绑定 1 个自营账号），结束循环`
+        );
+        await captureFailureShot(page, paths.debugDir, "switch-entry-missing");
+      } else {
+        console.warn(
+          `[${tag}] 未能继续切换店铺（原因: ${switchRes.reason || "unknown"}），结束循环`
+        );
+      }
+      break;
+    }
+
+    // 切换成功后等页面稳定（罗盘整页重载），并把刚切到的店铺名作为下一轮 hint
+    pendingShopHint = switchRes.name || null;
+    console.log(
+      `[${tag}] 切换成功（目标店铺=${switchRes.name || "?"}），进入下一轮，当前累计已处理: ${[...processed].join(", ")}`
+    );
+  }
+
+  const fullOk = result.downloads.filter(
+    (d) => d.videoPath && d.graphicPath
+  ).length;
+  console.log(
+    `\n[${tag}] ========== 多店铺循环结束: 共 ${result.downloads.length} 家店铺 ==========`
+  );
+  for (const d of result.downloads) {
+    const videoIcon = d.videoDays === d.daysToExport ? '✓' : '✗';
+    const graphicIcon = d.graphicDays === d.daysToExport ? '✓' : '✗';
+    console.log(
+      `  [${d.shopName || "unknown"}] 视频 ${d.videoDays}/${d.daysToExport}天 ${videoIcon}` +
+      ` | 图文 ${d.graphicDays}/${d.daysToExport}天 ${graphicIcon}` +
+      (d.videoError ? ` | 视频问题: ${d.videoError}` : '') +
+      (d.graphicError ? ` | 图文问题: ${d.graphicError}` : '')
+    );
+  }
+  return result;
 }
 
 /**

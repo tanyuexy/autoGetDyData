@@ -275,9 +275,6 @@ async function validateShopExportFiles(options = {}) {
   const preferredShopNames = Array.isArray(options.preferredShopNames)
     ? options.preferredShopNames
     : [];
-  const processedAccountEmails = Array.isArray(options.processedAccountEmails)
-    ? new Set(options.processedAccountEmails.filter(Boolean))
-    : null;
   const problems = [];
   const shopReports = [];
   let accountDirs;
@@ -287,23 +284,7 @@ async function validateShopExportFiles(options = {}) {
     accountDirs = [];
   }
 
-  const filteredAccountDirs = processedAccountEmails
-    ? accountDirs.filter((ent) => {
-        if (!ent.isDirectory()) return false;
-        const safeName = String(ent.name).replace(/[\\/:*?"<>|]+/g, "_");
-        for (const email of processedAccountEmails) {
-          const safeEmail = String(email).replace(/[\\/:*?"<>|]+/g, "_");
-          if (safeName === safeEmail) return true;
-        }
-        return false;
-      })
-    : accountDirs;
-
-  const accountDirsToCheck = filteredAccountDirs.length > 0
-    ? filteredAccountDirs
-    : accountDirs;
-
-  for (const ent of accountDirsToCheck) {
+  for (const ent of accountDirs) {
     if (!ent.isDirectory()) continue;
     const dataRoot = path.join(ACCOUNTS_DIR, ent.name, "data");
     const shops = (await listShopNames(dataRoot)).filter((shopName) =>

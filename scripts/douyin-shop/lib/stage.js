@@ -57,7 +57,7 @@ async function hasLoginForm(page) {
 
   const emailTab = page
     .locator(
-      ':text-is("邮箱登录"), div[role="tab"]:has-text("邮箱登录"), span:has-text("邮箱登录")'
+      'div[role="tab"]:has-text("邮箱登录"), span:has-text("邮箱登录"), :text-is("邮箱登录")'
     )
     .first();
   if (await isVisibleFast(emailTab, 280)) return true;

@@ -5,7 +5,6 @@ const {
   pickLatestSelectableCalendarDay
 } = require("./pick-latest-calendar-day");
 const { appendDataDateColumn } = require("./append-data-date-column");
-const { retryableGoto, retryableDownload } = require("./network");
 
 const VIDEO_SELF_URL =
   process.env.SHOP_VIDEO_SELF_URL ||
@@ -49,12 +48,12 @@ async function waitForVideoSelfReady(page, tag, timeoutMs = 20000) {
       .catch(() => false);
     if (hasMore && hasAdTab) {
       logStep(tag, "视频明细页筛选区已就绪", started);
-      return { ok: true };
+      return true;
     }
     await page.waitForTimeout(300);
   }
   logWarn(tag, `视频明细页筛选区 ${timeoutMs}ms 内未全部就绪`);
-  return { ok: false, failure: `视频明细页筛选区 ${timeoutMs}ms 内未就绪` };
+  return false;
 }
 
 async function gotoVideoSelf(page, tag) {
@@ -62,12 +61,15 @@ async function gotoVideoSelf(page, tag) {
   const url = page.url() || "";
   if (!url.startsWith(VIDEO_SELF_URL)) {
     logStep(tag, `跳转至短视频明细页: ${VIDEO_SELF_URL}`);
-    await retryableGoto(page, VIDEO_SELF_URL, {
-      waitUntil: "domcontentloaded",
-      timeout: 20000,
-      maxRetries: 2,
-      expectedUrlRe: /compass\.jinritemai\.com\/shop\/video\/self/
-    });
+    try {
+      await page.goto(VIDEO_SELF_URL, {
+        waitUntil: "domcontentloaded",
+        timeout: 20000
+      });
+    } catch (error) {
+      logWarn(tag, `跳转短视频明细页失败: ${error.message || error}`);
+      throw error;
+    }
   } else {
     logStep(tag, `当前已在短视频明细页`);
   }
@@ -80,12 +82,9 @@ async function gotoVideoSelf(page, tag) {
  * 视频明细：悬浮「更多」→ 左侧选「自然日」→ 日历里点「当前可选的最后一个自然日 - dayOffset」
  * dayOffset=0 最新一天，dayOffset=1 前一天，以此类推。
  * 适用于需要回溯导出多天数据的场景。
- *
- * @returns {Promise<{ ok: boolean, dataDate: string | null, failures: Array<{ step: string, message: string }> }>}
  */
 async function selectDateRangeYesterday(page, tag, dayOffset = 0) {
   const started = Date.now();
-  const failures = [];
 
   const moreTrigger = page
     .locator(
@@ -97,44 +96,22 @@ async function selectDateRangeYesterday(page, tag, dayOffset = 0) {
     .then(() => true)
     .catch(() => false);
   if (!moreVisible) {
-    failures.push({ step: '视频-「更多」按钮', message: '未找到「更多」按钮' });
-    return { ok: false, dataDate: null, failures };
+    logWarn(tag, '未找到"更多"按钮，跳过日期选择');
+    return { ok: false, dataDate: null };
   }
 
-  let dropdownVisible = false;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      if (attempt < 2) {
-        await moreTrigger.hover({ timeout: 1500 });
-      } else if (attempt === 2) {
-        await moreTrigger.click({ timeout: 2000 });
-      } else {
-        await moreTrigger.click({ force: true, timeout: 2000 });
-      }
-    } catch (e) {
-      if (attempt >= 4) {
-        failures.push({ step: '视频-「更多」触发', message: `触发「更多」失败: ${e.message || e}` });
-      }
-      if (attempt < 2) continue;
-    }
-    await page.waitForTimeout(attempt < 2 ? 350 : 600);
-    dropdownVisible = await page
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await moreTrigger.hover({ timeout: 1500 }).catch(() => {});
+    await page.waitForTimeout(350);
+    const dropdownVisible = await page
       .locator(".ecom-dorami-date-picker-quick-picker-dropdown")
       .first()
-      .isVisible({ timeout: 800 })
+      .isVisible({ timeout: 500 })
       .catch(() => false);
     if (dropdownVisible) break;
-    if (attempt >= 2) {
-      await page.keyboard.press("Escape").catch(() => {});
-      await page.waitForTimeout(200);
+    if (attempt === 2) {
+      logWarn(tag, `hover "更多" 3 次后弹层仍未出现`);
     }
-    if (attempt === 4) {
-      failures.push({ step: '视频-「更多」弹层', message: '触发「更多」5 次后弹层仍未出现' });
-    }
-  }
-
-  if (!dropdownVisible) {
-    return { ok: false, dataDate: null, failures };
   }
 
   const dropdown = page
@@ -152,20 +129,13 @@ async function selectDateRangeYesterday(page, tag, dayOffset = 0) {
   if (!(await naturalDay.isVisible({ timeout: 500 }).catch(() => false))) {
     naturalDay = page.locator(':text-is("自然日")').first();
   }
-
-  let naturalDayClicked = false;
   if (await naturalDay.isVisible({ timeout: 1500 }).catch(() => false)) {
-    try {
-      await naturalDay.hover({ timeout: 1000 });
-      await naturalDay.click({ timeout: 2000 });
-      naturalDayClicked = true;
-      await page.waitForTimeout(400);
-      logStep(tag, '已点击"自然日"分类');
-    } catch (e) {
-      failures.push({ step: '视频-「自然日」选项', message: `点击「自然日」失败: ${e.message || e}` });
-    }
+    await naturalDay.hover({ timeout: 1000 }).catch(() => {});
+    await naturalDay.click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(400);
+    logStep(tag, '已点击"自然日"分类');
   } else {
-    failures.push({ step: '视频-「自然日」选项', message: '悬浮「更多」后仍未找到「自然日」选项' });
+    logWarn(tag, '悬浮"更多"后仍未找到"自然日"选项');
   }
 
   const rightPanel = page
@@ -180,8 +150,6 @@ async function selectDateRangeYesterday(page, tag, dayOffset = 0) {
     : page;
 
   const pickResult = await pickLatestSelectableCalendarDay(page, scope, dayOffset);
-  if (pickResult.failures) failures.push(...pickResult.failures);
-
   const clicked = Boolean(pickResult.ok);
   const dataDate = pickResult.dataDate || null;
   if (clicked) {
@@ -190,9 +158,7 @@ async function selectDateRangeYesterday(page, tag, dayOffset = 0) {
       logStep(tag, `解析到的数据日期: ${dataDate}`);
     }
   } else {
-    if (!pickResult.failures || pickResult.failures.length === 0) {
-      failures.push({ step: '视频-日历选择', message: '日历中未找到可点击的日期格' });
-    }
+    logWarn(tag, "日历中未找到可点击的日期格");
   }
 
   await page.waitForTimeout(400);
@@ -201,12 +167,11 @@ async function selectDateRangeYesterday(page, tag, dayOffset = 0) {
   await page.waitForTimeout(300);
 
   logStep(tag, `selectDateRangeYesterday(offset=${dayOffset}) ${clicked ? "成功" : "失败"}`, started);
-  return { ok: clicked, dataDate, failures };
+  return { ok: clicked, dataDate };
 }
 
 async function ensureVideoDetailTab(page, tag) {
   const started = Date.now();
-  const failures = [];
   const tabSel = 'div[role="tab"]:has-text("视频明细"), :text-is("视频明细")';
   let tab = page.locator(tabSel).first();
   const visible1 = await tab.isVisible({ timeout: 2000 }).catch(() => false);
@@ -216,30 +181,24 @@ async function ensureVideoDetailTab(page, tag) {
     tab = page.locator(tabSel).first();
     const visible2 = await tab.isVisible({ timeout: 1500 }).catch(() => false);
     if (!visible2) {
-      failures.push({ step: '视频-「视频明细」Tab', message: '未找到「视频明细」Tab' });
-      return { ok: false, failures };
+      logWarn(tag, '未找到"视频明细" Tab，按当前 tab 继续');
+      return false;
     }
   }
   const selected = await tab.getAttribute("aria-selected").catch(() => null);
   if (selected === "true") {
     logStep(tag, '"视频明细" Tab 已选中', started);
-    return { ok: true, failures };
+    return true;
   }
-  try {
-    await tab.scrollIntoViewIfNeeded();
-    await tab.click({ timeout: 2000 });
-    await page.waitForTimeout(600);
-    logStep(tag, '已切换到"视频明细" Tab', started);
-    return { ok: true, failures };
-  } catch (e) {
-    failures.push({ step: '视频-「视频明细」Tab', message: `点击Tab失败: ${e.message || e}` });
-    return { ok: false, failures };
-  }
+  await tab.scrollIntoViewIfNeeded().catch(() => {});
+  await tab.click({ timeout: 2000 }).catch(() => {});
+  await page.waitForTimeout(600);
+  logStep(tag, '已切换到"视频明细" Tab', started);
+  return true;
 }
 
 async function selectNonAdTab(page, tag) {
   const started = Date.now();
-  const failures = [];
   let targetTab = page.locator('#_auto__ad_type div[role="tab"]:has-text("非投放")').first();
   const viaContainer = await targetTab
     .waitFor({ state: "visible", timeout: 8000 })
@@ -255,23 +214,18 @@ async function selectNonAdTab(page, tag) {
       .then(() => true)
       .catch(() => false);
     if (!byText) {
-      failures.push({ step: '视频-「非投放」Tab', message: '未找到「非投放」Tab' });
-      return { ok: false, failures };
+      logWarn(tag, '未找到"非投放" Tab，跳过切换');
+      return false;
     }
   }
 
   const selected = await targetTab.getAttribute("aria-selected").catch(() => null);
   if (selected === "true") {
     logStep(tag, '投放属性已为"非投放"，跳过切换', started);
-    return { ok: true, failures };
+    return true;
   }
 
-  try {
-    await targetTab.click({ timeout: 3000 });
-  } catch (e) {
-    failures.push({ step: '视频-「非投放」Tab', message: `点击失败: ${e.message || e}` });
-    return { ok: false, failures };
-  }
+  await targetTab.click({ timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(600);
   const ok = await page
     .locator('div[role="tab"][aria-selected="true"]:has-text("非投放")')
@@ -282,9 +236,9 @@ async function selectNonAdTab(page, tag) {
   if (ok) {
     logStep(tag, '已将投放属性切换为"非投放"', started);
   } else {
-    failures.push({ step: '视频-「非投放」Tab', message: '点击后未观察到 aria-selected=true 切换' });
+    logWarn(tag, '点击"非投放"后未观察到 aria-selected=true 切换');
   }
-  return { ok, failures };
+  return ok;
 }
 
 function safeShopDirName(name) {
@@ -308,12 +262,18 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   await downloadBtn.waitFor({ state: "visible", timeout: 8000 });
 
   logStep(tag, `发现 ${btnCount} 个"下载明细"按钮，点击最后一个（${exportLabel}）`);
-  const download = await retryableDownload(page, async () => {
-    await downloadBtn.click({ timeout: 3000 });
-  }, {
-    timeout: 60000,
-    maxRetries: 1
-  });
+  const downloadPromise = page.waitForEvent("download", { timeout: 60000 });
+
+  await downloadBtn.click({ timeout: 3000 });
+
+  let download;
+  try {
+    download = await downloadPromise;
+  } catch (error) {
+    throw new Error(
+      `点击"下载明细"后 60s 内未触发下载事件：${error.message || error}`
+    );
+  }
 
   const rawName =
     download.suggestedFilename() || `video-detail-${Date.now()}.csv`;
@@ -330,6 +290,7 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   return savePath;
 }
 
+/** 根据 dayOffset 计算实际数据日期（昨天 - offset），格式 YYYY/MM/DD */
 function calcDataDate(dayOffset) {
   const d = new Date();
   d.setDate(d.getDate() - 1 - dayOffset);
@@ -350,7 +311,6 @@ function calcDataDate(dayOffset) {
  */
 async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExport = 1 }) {
   const startedAll = Date.now();
-  const allFailures = [];
   logStep(tag, `视频下载开始，目标店铺: ${shopName || "(未指定)"}，循环天数: ${daysToExport}`);
 
   await gotoVideoSelf(page, tag);
@@ -360,34 +320,16 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
   for (let offset = 0; offset < daysToExport; offset++) {
     logStep(tag, `--- 第 ${offset + 1}/${daysToExport} 轮（offset=${offset}）---`);
 
-    let { dataDate, failures: dateFailures } = await selectDateRangeYesterday(page, tag, offset);
-    if (dateFailures && dateFailures.length) {
-      allFailures.push(...dateFailures);
-    }
-
-    if (!dataDate) {
-      logWarn(tag, `日期选择失败(offset=${offset})，等待500ms后重试一次`);
-      await page.waitForTimeout(500);
-      const retry = await selectDateRangeYesterday(page, tag, offset);
-      dataDate = retry.dataDate || dataDate;
-      if (retry.failures && retry.failures.length) {
-        allFailures.push(...retry.failures);
-      }
-    }
+    // 如果是首轮且 daysToExport>1，可能已有当天数据需要清除
+    const { dataDate } = await selectDateRangeYesterday(page, tag, offset);
 
     const expectedDate = calcDataDate(offset);
     const dateMatch = dataDate && dataDate === expectedDate;
     if (dataDate && !dateMatch) {
       console.warn(`[${tag}] ⚠ 日历选中日期 ${dataDate} ≠ 预期 ${expectedDate} (offset=${offset})`);
     }
-    if (dataDate && dateMatch) {
-      // Only log but still track that we had no match
-    }
 
-    const nonAdResult = await selectNonAdTab(page, tag);
-    if (nonAdResult.failures && nonAdResult.failures.length) {
-      allFailures.push(...nonAdResult.failures);
-    }
+    await selectNonAdTab(page, tag);
 
     await page.waitForTimeout(1200);
 
@@ -408,6 +350,7 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
 
     results.push({ savePath, dataDate: dateToWrite, dateMatch });
 
+    // 非最后一轮，让页面稳定后再进入下一轮
     if (offset < daysToExport - 1) {
       await page.waitForTimeout(800);
     }
@@ -415,8 +358,8 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
 
   logStep(tag, `视频下载流程完成，共 ${results.length} 天`, startedAll);
   return results.length > 0
-    ? { savePath: results[0].savePath, dataDate: results[0].dataDate, allResults: results, failures: allFailures }
-    : { savePath: null, dataDate: null, allResults: [], failures: allFailures };
+    ? { savePath: results[0].savePath, dataDate: results[0].dataDate, allResults: results }
+    : { savePath: null, dataDate: null, allResults: [] };
 }
 
 module.exports = {

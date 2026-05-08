@@ -67,10 +67,10 @@ async function ensureBackupExists() {
     return;
   } catch {
     console.log("未找到飞书备份表（抖店-飞书表备份.xlsx），先执行备份…");
-    execSync("node scripts/run.js feishu:backup --profiles shop", {
-      stdio: "inherit",
-      cwd: process.cwd()
-    });
+    execSync(
+      "node run.js feishu:backup-bitable --profiles shop",
+      { stdio: "inherit", cwd: process.cwd() }
+    );
     console.log("备份完成。");
   }
 }
