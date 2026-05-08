@@ -113,6 +113,74 @@ export function patchCreatorPublishTask(
 }
 
 /**
+ * 飞书状态回写 reconciliation — 启动时兜底修复。
+ * 读取本地 status=success 且有 feishuRecordId 的任务，对比飞书表「已创建任务」字段，
+ * 如果飞书中尚未标记为「是」，则补写回。
+ */
+export async function reconcileFeishuWritebacks(): Promise<void> {
+  const tasks = readCreatorPublishTasks();
+  const pending = tasks.filter(
+    (t) => t.status === "success" && t.feishuRecordId
+  );
+  if (pending.length === 0) return;
+
+  try {
+    const { loadFeishuBitableConfigForProfile } = require(
+      "../scripts/feishu/lib/config"
+    );
+    const { getValidAccessToken } = require("../scripts/feishu/lib/oauth");
+    const { updateBitableRecord, listAllBitableRecords } = require(
+      "../scripts/feishu/lib/bitable"
+    );
+
+    const cfg = loadFeishuBitableConfigForProfile("task");
+    const tokenCache = await getValidAccessToken(cfg);
+
+    // 读取飞书表所有记录（只需「已创建任务」字段）
+    const records = await listAllBitableRecords(
+      cfg,
+      tokenCache.accessToken,
+      "",
+      ["已创建任务"]
+    );
+
+    // 构建 record_id → 已创建任务 的查找 map
+    const feishuStatusMap = new Map<string, string>();
+    for (const r of records) {
+      if (r.record_id && r.fields) {
+        feishuStatusMap.set(r.record_id, r.fields["已创建任务"] || "");
+      }
+    }
+
+    let written = 0;
+    for (const task of pending) {
+      const feishuStatus = feishuStatusMap.get(task.feishuRecordId!) || "";
+      if (feishuStatus === "是") continue;
+
+      try {
+        await updateBitableRecord(cfg, tokenCache.accessToken, task.feishuRecordId!, {
+          已创建任务: "是",
+        });
+        written++;
+        console.log(
+          `[reconcile-feishu] ✓ 补回写 record ${task.feishuRecordId} (${task.accountName})`
+        );
+      } catch (e: any) {
+        console.error(
+          `[reconcile-feishu] ✗ 回写失败 record ${task.feishuRecordId} (${task.accountName}): ${e.message}`
+        );
+      }
+    }
+
+    if (written > 0) {
+      console.log(`[reconcile-feishu] 补回写完成: ${written}/${pending.length}`);
+    }
+  } catch (e: any) {
+    console.error("[reconcile-feishu] reconciliation 失败:", e.message);
+  }
+}
+
+/**
  * 子进程已不在 taskManager 中，但 tasks.json 仍为 running 时（进程崩溃、onClose 未执行、热重载丢内存等），
  * 根据磁盘日志把状态补成 success / failed，与命令行/日志文件一致。
  *

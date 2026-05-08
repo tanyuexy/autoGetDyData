@@ -60,7 +60,8 @@
       "Bash(mdfind -name '.mp4' -onlyin /Users/xy/)",
       "Read(//Users/xy/.claude/**)",
       "Bash(git *)",
-      "Bash(defaults read *)"
+      "Bash(defaults read *)",
+      "Bash(npm search *)"
     ]
   },
   "mcpServers": {

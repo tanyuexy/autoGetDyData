@@ -102,12 +102,27 @@ function main() {
   const childArgv = [scriptPath, ...(route.argv || []), ...rest];
   const env = route.env ? { ...process.env, ...route.env } : { ...process.env };
 
+  let killed = false;
+  process.on("SIGTERM", () => {
+    if (!killed) {
+      killed = true;
+    }
+  });
+  process.on("SIGINT", () => {
+    if (!killed) {
+      killed = true;
+    }
+  });
+
   const result = spawnSync(process.execPath, childArgv, {
     cwd: projectRoot,
     stdio: "inherit",
     env
   });
 
+  if (killed) {
+    process.exit(143);
+  }
   if (result.status == null) {
     process.exit(result.signal ? 1 : 0);
   }

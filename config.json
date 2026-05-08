@@ -55,6 +55,6 @@
   "headless": true,
   "creatorPublish": {
     "publishEnabled": true,
-    "publishWaitSec": 5
+    "publishWaitSec": 3
   }
 }

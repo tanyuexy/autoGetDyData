@@ -174,9 +174,11 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
     );
   }
 
+  const processedAccountEmails = results.map((r) => r.account).filter(Boolean);
   const validation = await validateShopExportFiles({
     daysToExport,
-    preferredShopNames: preferredList
+    preferredShopNames: preferredList,
+    processedAccountEmails
   });
   console.log(
     `抖店导出文件校验：期望日期 ${validation.expectedDates.join(", ")}，检查店铺 ${validation.shopReports.length} 个`

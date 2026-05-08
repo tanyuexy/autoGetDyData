@@ -1083,8 +1083,20 @@ async function run() {
       : await findLatestXlsxFile(dirOption, defaultNamePrefix);
 
     const tokenRecord = await getValidAccessToken(config);
-    const prepared = await prepareBitableRowsFromXlsx(
-      { filePath, sheet, limit, fieldAliases },
+
+    // 同步前先备份飞书表当前数据（dry-run 跳过）
+    if (!dryRun) {
+      const syncProfile = optionalEnv("FEISHU_BITABLE_PROFILE", "shop");
+      const backupOutDir = path.resolve(process.cwd(), getDefaultExportsDir());
+      await backupBitableProfileToXlsx({
+        profile: syncProfile,
+        outDir: backupOutDir,
+        tokenRecord,
+        dryRun: false,
+      });
+    }
+
+    const prepared = await prepareBitableRowsFromXlsx(      { filePath, sheet, limit, fieldAliases },
       config,
       tokenRecord
     );
@@ -1223,6 +1235,18 @@ async function run() {
       : path.resolve(process.cwd(), SHOP_DEFAULT_XLSX_RELATIVE);
 
     const tokenRecord = await getValidAccessToken(config);
+
+    // 同步前先备份飞书表当前数据（dry-run 跳过）
+    if (!dryRun) {
+      const shopBackupOutDir = path.resolve(process.cwd(), getDefaultExportsDir());
+      await backupBitableProfileToXlsx({
+        profile: "shop",
+        outDir: shopBackupOutDir,
+        tokenRecord,
+        dryRun: false,
+      });
+    }
+
     const prepared = await prepareBitableRowsFromXlsx(
       { filePath, sheet, limit, fieldAliases },
       config,

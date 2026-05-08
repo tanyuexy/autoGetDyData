@@ -86,42 +86,48 @@ function warnLog(tag, msg) {
  * 返回空字符串表示无法读取。
  */
 async function readCurrentShopName(page) {
-  // 步骤 1：左上角店铺标题（最稳，多店铺/子账号场景都有）
-  for (const sel of SHOP_TITLE_SELECTORS) {
-    const el = page.locator(sel).first();
-    if (await el.isVisible({ timeout: 500 }).catch(() => false)) {
-      const t = ((await el.textContent().catch(() => "")) || "").trim();
-      // 页面左上角还可能挂着店铺等级等数字，截断到第一个常见后缀为止
-      const cleaned = t
-        .replace(/\s+/g, "")
-        .match(/[^\s]*(?:旗舰店|专营店|专卖店|官方旗舰店|小店|直营店)/);
-      if (cleaned && cleaned[0]) return cleaned[0];
-      if (t && t.length <= 40) return t;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) {
+      await page.waitForTimeout(800);
     }
-  }
 
-  // 步骤 2：右上角 userName（单店账号里通常是店铺名本身）
-  const nameNode = page
-    .locator('span[class*="userName"], div[class*="userName"]')
-    .first();
-  if (await nameNode.isVisible({ timeout: 1500 }).catch(() => false)) {
-    const text = ((await nameNode.textContent().catch(() => "")) || "").trim();
-    if (text) return text;
-  }
-
-  // 步骤 3：整个触发器 textContent
-  for (const sel of USER_TRIGGER_SELECTORS) {
-    const el = page.locator(sel).first();
-    if (await el.isVisible({ timeout: 500 }).catch(() => false)) {
-      const t = ((await el.textContent().catch(() => "")) || "").trim();
-      if (t && t.length <= 40) return t;
+    // 步骤 1：左上角店铺标题（最稳，多店铺/子账号场景都有）
+    for (const sel of SHOP_TITLE_SELECTORS) {
+      const el = page.locator(sel).first();
+      if (await el.isVisible({ timeout: 500 }).catch(() => false)) {
+        const t = ((await el.textContent().catch(() => "")) || "").trim();
+        // 页面左上角还可能挂着店铺等级等数字，截断到第一个常见后缀为止
+        const cleaned = t
+          .replace(/\s+/g, "")
+          .match(/[^\s]*(?:旗舰店|专营店|专卖店|官方旗舰店|小店|直营店)/);
+        if (cleaned && cleaned[0]) return cleaned[0];
+        if (t && t.length <= 40) return t;
+      }
     }
-  }
 
-  // 步骤 4：document.title（例如 "莲藕医药专营店-罗盘"）
-  const title = (await page.title().catch(() => "")) || "";
-  const m = title.match(/[^\s|\-·]*(?:旗舰店|专营店|专卖店|官方旗舰店|小店|直营店)/);
-  if (m && m[0]) return m[0];
+    // 步骤 2：右上角 userName（单店账号里通常是店铺名本身）
+    const nameNode = page
+      .locator('span[class*="userName"], div[class*="userName"]')
+      .first();
+    if (await nameNode.isVisible({ timeout: 1500 }).catch(() => false)) {
+      const text = ((await nameNode.textContent().catch(() => "")) || "").trim();
+      if (text) return text;
+    }
+
+    // 步骤 3：整个触发器 textContent
+    for (const sel of USER_TRIGGER_SELECTORS) {
+      const el = page.locator(sel).first();
+      if (await el.isVisible({ timeout: 500 }).catch(() => false)) {
+        const t = ((await el.textContent().catch(() => "")) || "").trim();
+        if (t && t.length <= 40) return t;
+      }
+    }
+
+    // 步骤 4：document.title（例如 "莲藕医药专营店-罗盘"）
+    const title = (await page.title().catch(() => "")) || "";
+    const m = title.match(/[^\s|\-·]*(?:旗舰店|专营店|专卖店|官方旗舰店|小店|直营店)/);
+    if (m && m[0]) return m[0];
+  }
 
   return "";
 }

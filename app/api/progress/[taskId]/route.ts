@@ -44,6 +44,6 @@ export async function DELETE(
   { params }: { params: Promise<{ taskId: string }> }
 ) {
   const { taskId } = await params;
-  const ok = killTask(taskId);
+  const ok = await killTask(taskId);
   return Response.json({ ok });
 }

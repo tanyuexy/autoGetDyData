@@ -216,26 +216,43 @@ async function killProcessTree(pid: number, signal: NodeJS.Signals) {
   if (process.platform !== "win32") {
     try {
       process.kill(-pid, signal);
-      return;
     } catch {
       // fall back to explicit descendant traversal
     }
   }
-  const descendants = await collectDescendantPids(pid).catch(() => []);
-  for (const childPid of descendants.reverse()) killPid(childPid, signal);
-  killPid(pid, signal);
 }
 
-function scheduleForceKill(taskId: string, pid: number, child?: ChildProcess) {
-  setTimeout(() => {
+async function scheduleForceKill(
+  taskId: string,
+  pid: number,
+  child?: ChildProcess,
+  descendantPidsBeforeKill?: number[]
+) {
+  setTimeout(async () => {
     const stillAlive = child ? child.exitCode === null : isPidAlive(pid);
-    if (!stillAlive) return;
+    if (!stillAlive) {
+      // root is dead, but descendants may have survived (e.g. Chromium in own process group)
+      const survivingDescendants = (descendantPidsBeforeKill || []).filter((p) => isPidAlive(p));
+      if (survivingDescendants.length === 0) return;
+      appendTaskLog(taskId, {
+        text: `根进程已退出，但仍有 ${survivingDescendants.length} 个后代进程存活，发送 SIGKILL`,
+        level: "error",
+        timestamp: new Date().toISOString(),
+      });
+      for (const childPid of survivingDescendants.reverse()) killPid(childPid, "SIGKILL");
+      return;
+    }
     appendTaskLog(taskId, {
       text: `任务仍未退出，发送 SIGKILL pid=${pid}`,
       level: "error",
       timestamp: new Date().toISOString(),
     });
-    killProcessTree(pid, "SIGKILL").catch(() => { });
+    const descendants = await collectDescendantPids(pid).catch(() => []);
+    for (const childPid of descendants.reverse()) killPid(childPid, "SIGKILL");
+    killPid(pid, "SIGKILL");
+    if (process.platform !== "win32") {
+      try { process.kill(-pid, "SIGKILL"); } catch {}
+    }
   }, 5000).unref?.();
 }
 
@@ -392,31 +409,33 @@ export function spawnTask(
   return { sse, child };
 }
 
-export function killTask(taskId: string): boolean {
+export async function killTask(taskId: string): Promise<boolean> {
   for (const ns of namespaces.values()) {
     const child = ns.tasks.get(taskId);
     if (child?.pid) {
       ns.stoppingTasks.add(taskId);
+      const descendants = await collectDescendantPids(child.pid).catch(() => []);
       appendTaskLog(taskId, {
         text: `正在终止任务进程树 pid=${child.pid}`,
         level: "info",
         timestamp: new Date().toISOString(),
       });
       killProcessTree(child.pid, "SIGTERM").catch(() => child.kill("SIGTERM"));
-      scheduleForceKill(taskId, child.pid, child);
+      scheduleForceKill(taskId, child.pid, child, descendants);
       return true;
     }
   }
 
   const record = getRuntimeProcess(taskId);
   if (!record) return false;
+  const descendants = await collectDescendantPids(record.pid).catch(() => []);
   appendTaskLog(taskId, {
     text: `正在终止已恢复的任务进程树 pid=${record.pid}`,
     level: "info",
     timestamp: new Date().toISOString(),
   });
   killProcessTree(record.pid, "SIGTERM").catch(() => killPid(record.pid, "SIGTERM"));
-  scheduleForceKill(taskId, record.pid);
+  scheduleForceKill(taskId, record.pid, undefined, descendants);
   return true;
 }
 

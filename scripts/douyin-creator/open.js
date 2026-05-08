@@ -12,22 +12,29 @@ const { BROWSER_VIEWPORT } = require("./lib/env");
 let activeBrowser = null;
 let activeContext = null;
 let shuttingDown = false;
+let forceExitTimer = null;
 
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   if (signal) console.log(`收到 ${signal}，正在关闭浏览器...`);
-  try {
-    if (activeContext) await activeContext.close().catch(() => {});
-    if (activeBrowser) await activeBrowser.close().catch(() => {});
-  } finally {
-    process.exit(signal === "SIGTERM" ? 143 : 0);
-  }
-}
 
-async function waitForBrowserDisconnect(browser) {
-  while (browser.isConnected()) {
-    await new Promise((r) => setTimeout(r, 2000));
+  forceExitTimer = setTimeout(() => {
+    console.error("浏览器关闭超时（5秒），强制退出进程");
+    process.exit(1);
+  }, 5000);
+  if (forceExitTimer.unref) forceExitTimer.unref();
+
+  try {
+    if (activeContext) {
+      await activeContext.close().catch(() => {});
+    }
+    if (activeBrowser && activeBrowser.isConnected()) {
+      await activeBrowser.close().catch(() => {});
+    }
+  } finally {
+    if (forceExitTimer) clearTimeout(forceExitTimer);
+    process.exit(signal === "SIGTERM" ? 143 : 0);
   }
 }
 
@@ -63,6 +70,10 @@ async function main() {
   });
   activeContext = context;
 
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGHUP", () => shutdown("SIGHUP"));
+
   const page = await context.newPage();
   await page.goto(
     "https://creator.douyin.com/creator-micro/data-center/content",
@@ -76,11 +87,24 @@ async function main() {
   console.log(`✓ 已打开抖音创作者中心 - 账号: ${accountName}`);
   console.log("  关闭浏览器窗口即可退出");
 
-  process.on("SIGINT", () => shutdown("SIGINT"));
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGHUP", () => shutdown("SIGHUP"));
+  let shouldExit = false;
+  browser.on("disconnected", () => { shouldExit = true; });
+  page.on("close", () => { shouldExit = true; });
 
-  await waitForBrowserDisconnect(browser);
+  while (!shouldExit && browser.isConnected()) {
+    try {
+      const contexts = browser.contexts();
+      const allPages = [];
+      for (const ctx of contexts) {
+        try { allPages.push(...ctx.pages()); } catch {}
+      }
+      if (allPages.every((p) => { try { return p.isClosed(); } catch { return true; } })) {
+        shouldExit = true;
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+
   console.log("浏览器已关闭，退出");
   await shutdown();
 }

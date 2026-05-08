@@ -5,6 +5,7 @@ import {
   attachCreatorPublishTaskRuntime,
   patchCreatorPublishTask,
   readCreatorPublishTasks,
+  reconcileFeishuWritebacks,
   reconcileStaleRunningCreatorPublishTasks,
   type CreatorPublishTask,
 } from "./creatorPublishStore";
@@ -152,6 +153,9 @@ export function startCreatorPublishScheduler(): void {
 
   // 同一模块实例只需启动一次
   if (schedulerInterval != null) return;
+
+  // 启动时兜底修复：对比本地 success 任务与飞书表，补回写遗漏的状态
+  reconcileFeishuWritebacks();
 
   runPendingCreatorPublishTasks();
   schedulerInterval = setInterval(() => {

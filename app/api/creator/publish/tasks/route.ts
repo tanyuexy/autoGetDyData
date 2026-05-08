@@ -80,7 +80,7 @@ export async function PATCH(req: NextRequest) {
         if (task.status !== "running") continue;
         if (task.taskId) {
           const { killTask } = require("@/lib/taskManager");
-          killTask(task.taskId);
+          await killTask(task.taskId);
         }
         task.status = "cancelled";
         task.updatedAt = new Date().toISOString();
@@ -103,7 +103,7 @@ export async function PATCH(req: NextRequest) {
         if (!ids.includes(task.id)) continue;
         if (task.status === "running" && task.taskId) {
           const { killTask } = require("@/lib/taskManager");
-          killTask(task.taskId);
+          await killTask(task.taskId);
         }
         task.status = "cancelled";
         task.updatedAt = new Date().toISOString();
@@ -177,7 +177,7 @@ export async function PATCH(req: NextRequest) {
       const task = tasks[idx];
       if (task.status === "running" && task.taskId) {
         const { killTask } = require("@/lib/taskManager");
-        killTask(task.taskId);
+        await killTask(task.taskId);
       }
 
       tasks.splice(idx, 1);

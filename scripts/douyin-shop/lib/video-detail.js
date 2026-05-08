@@ -102,24 +102,34 @@ async function selectDateRangeYesterday(page, tag, dayOffset = 0) {
   }
 
   let dropdownVisible = false;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      await moreTrigger.hover({ timeout: 1500 });
-    } catch (e) {
-      if (attempt === 2) {
-        failures.push({ step: '视频-「更多」hover', message: `hover「更多」失败: ${e.message || e}` });
+      if (attempt < 2) {
+        await moreTrigger.hover({ timeout: 1500 });
+      } else if (attempt === 2) {
+        await moreTrigger.click({ timeout: 2000 });
+      } else {
+        await moreTrigger.click({ force: true, timeout: 2000 });
       }
-      continue;
+    } catch (e) {
+      if (attempt >= 4) {
+        failures.push({ step: '视频-「更多」触发', message: `触发「更多」失败: ${e.message || e}` });
+      }
+      if (attempt < 2) continue;
     }
-    await page.waitForTimeout(350);
+    await page.waitForTimeout(attempt < 2 ? 350 : 600);
     dropdownVisible = await page
       .locator(".ecom-dorami-date-picker-quick-picker-dropdown")
       .first()
-      .isVisible({ timeout: 500 })
+      .isVisible({ timeout: 800 })
       .catch(() => false);
     if (dropdownVisible) break;
-    if (attempt === 2) {
-      failures.push({ step: '视频-「更多」弹层', message: 'hover「更多」3 次后弹层仍未出现' });
+    if (attempt >= 2) {
+      await page.keyboard.press("Escape").catch(() => {});
+      await page.waitForTimeout(200);
+    }
+    if (attempt === 4) {
+      failures.push({ step: '视频-「更多」弹层', message: '触发「更多」5 次后弹层仍未出现' });
     }
   }
 
@@ -350,9 +360,19 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
   for (let offset = 0; offset < daysToExport; offset++) {
     logStep(tag, `--- 第 ${offset + 1}/${daysToExport} 轮（offset=${offset}）---`);
 
-    const { dataDate, failures: dateFailures } = await selectDateRangeYesterday(page, tag, offset);
+    let { dataDate, failures: dateFailures } = await selectDateRangeYesterday(page, tag, offset);
     if (dateFailures && dateFailures.length) {
       allFailures.push(...dateFailures);
+    }
+
+    if (!dataDate) {
+      logWarn(tag, `日期选择失败(offset=${offset})，等待500ms后重试一次`);
+      await page.waitForTimeout(500);
+      const retry = await selectDateRangeYesterday(page, tag, offset);
+      dataDate = retry.dataDate || dataDate;
+      if (retry.failures && retry.failures.length) {
+        allFailures.push(...retry.failures);
+      }
     }
 
     const expectedDate = calcDataDate(offset);
