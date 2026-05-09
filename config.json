@@ -52,7 +52,7 @@
     }
   },
   "creatorExportDateStart": null,
-  "headless": false,
+  "headless": true,
   "creatorPublish": {
     "publishEnabled": true,
     "publishWaitSec": 3

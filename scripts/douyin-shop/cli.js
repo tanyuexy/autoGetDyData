@@ -9,9 +9,9 @@ const { runShopLogin, getAccountPaths } = require("./lib/login");
 const { loadPreferredShopNames } = require("./lib/shop-picker");
 const {
   mergeAllShopExportsToData,
-  validateShopExportFiles
+  validateShopExportFiles,
+  calcDaysToExport
 } = require("./lib/merge-shop-exports");
-const { calcDaysToExport } = require("./lib/backup-dates");
 const {
   collectProcessedNamesIntoSet,
   buildRemainingTargetsResolver,
@@ -80,6 +80,14 @@ async function resolveTargetShopNames() {
   return await loadPreferredShopNames();
 }
 
+function createExportBatchId() {
+  return new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-")
+    .replace("T", "_")
+    .slice(0, 19);
+}
+
 async function runOne(browser, account, options = {}) {
   if (!account?.email || !account?.password) {
     throw new Error("账号 email/password 缺失");
@@ -133,6 +141,9 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
     console.warn(`读取备份表失败（sync-feishu 使用默认值 1 天）: ${e.message}`);
   }
 
+  const exportBatchId = createExportBatchId();
+  console.log(`抖店本次导出批次: ${exportBatchId}`);
+
   const results = [];
   const processedNames = new Set();
   const totalTargets = preferredList.length;
@@ -157,6 +168,7 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
       const result = await runOne(browser, account, {
         processedNames,
         daysToExport,
+        exportBatchId,
         selectedShopNames: preferredList
       });
       results.push(result);
@@ -177,6 +189,7 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
   const processedAccountEmails = results.map((r) => r.account).filter(Boolean);
   const validation = await validateShopExportFiles({
     daysToExport,
+    exportBatchId,
     preferredShopNames: preferredList,
     processedAccountEmails
   });
@@ -192,6 +205,7 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
 
   const mergeResult = await mergeAllShopExportsToData({
     daysToExport,
+    exportBatchId,
     preferredShopNames: preferredList
   });
   const missingMergedDates = mergeResult.expectedDates.filter(
@@ -202,6 +216,8 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
       `抖店汇总数据校验失败：缺失日期 ${missingMergedDates.join(", ")}；实际日期=${mergeResult.actualDates.join(", ") || "(空)"}`
     );
   }
+
+  printResultSummary(results);
 
   console.log("抖店数据拉取、文件校验、汇总校验均通过，开始同步飞书表格…");
   execSync("node scripts/run.js feishu:sync-shop", {
@@ -266,6 +282,9 @@ async function main() {
     console.warn(`读取备份表失败（不影响登录，使用默认值 1 天）: ${e.message}`);
   }
 
+  const exportBatchId = createExportBatchId();
+  console.log(`抖店本次导出批次: ${exportBatchId}`);
+
   const results = [];
   const processedNames = new Set();
   const totalTargets = preferredList.length;
@@ -292,6 +311,7 @@ async function main() {
     const result = await runOne(browser, account, {
       processedNames,
       daysToExport,
+      exportBatchId,
       selectedShopNames: preferredList
     });
     results.push(result);
@@ -304,6 +324,7 @@ async function main() {
 
   await mergeAllShopExportsToData({
     daysToExport,
+    exportBatchId,
     preferredShopNames: preferredList
   }).catch((err) => {
     console.error("抖店数据汇总失败:", err.message || err);

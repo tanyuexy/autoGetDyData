@@ -3,8 +3,8 @@ const fs = require("fs/promises");
 
 const {
   pickLatestSelectableCalendarDay
-} = require("./pick-latest-calendar-day");
-const { appendDataDateColumn } = require("./append-data-date-column");
+} = require("./page-utils");
+const { appendDataDateColumn } = require("./merge-shop-exports");
 
 const GRAPHIC_URL =
   process.env.SHOP_GRAPHIC_URL ||
@@ -152,7 +152,8 @@ function safeShopDirName(name) {
     .replace(/\s+/g, " ");
 }
 
-async function clickGraphicDownloadAndSave(page, tag, saveDir) {
+async function clickGraphicDownloadAndSave(page, tag, saveDir, options = {}) {
+  const exportBatchId = options.exportBatchId ? String(options.exportBatchId) : null;
   const started = Date.now();
   await fs.mkdir(saveDir, { recursive: true });
 
@@ -180,7 +181,8 @@ async function clickGraphicDownloadAndSave(page, tag, saveDir) {
     .replace(/[:.]/g, "-")
     .replace("T", "_")
     .slice(0, 19);
-  const savePath = path.join(saveDir, `${ts}-图文明细-${safeName}`);
+  const batchPrefix = exportBatchId ? `${exportBatchId}-` : "";
+  const savePath = path.join(saveDir, `${batchPrefix}${ts}-图文明细-${safeName}`);
 
   await download.saveAs(savePath);
   logStep(tag, `图文明细已保存: ${savePath}`, started);
@@ -204,7 +206,7 @@ function calcDataDate(dayOffset) {
  * @param {import('playwright').Page} page
  * @param {{ tag: string, saveDir: string, shopName?: string, daysToExport?: number }} options
  */
-async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExport = 1 }) {
+async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExport = 1, exportBatchId = null }) {
   const startedAll = Date.now();
   logStep(tag, `图文明细下载开始，店铺: ${shopName || "(未指定)"}，循环天数: ${daysToExport}`);
 
@@ -215,12 +217,21 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExpor
   for (let offset = 0; offset < daysToExport; offset++) {
     logStep(tag, `--- 图文明细第 ${offset + 1}/${daysToExport} 轮（offset=${offset}）---`);
 
-    const { dataDate } = await selectGraphicNaturalDayYesterday(page, tag, offset);
+    const { ok: datePicked, dataDate } = await selectGraphicNaturalDayYesterday(page, tag, offset);
 
     const expectedDate = calcDataDate(offset);
-    const dateMatch = dataDate && dataDate === expectedDate;
-    if (dataDate && !dateMatch) {
-      console.warn(`[${tag}] ⚠ 日历选中日期 ${dataDate} ≠ 预期 ${expectedDate} (offset=${offset})`);
+    const dateMatch = datePicked && dataDate === expectedDate;
+    if (!datePicked || !dataDate) {
+      const error = `图文日期选择失败：未能选择或解析日期，预期 ${expectedDate} (offset=${offset})`;
+      logWarn(tag, error);
+      results.push({ savePath: null, dataDate: dataDate || null, expectedDate, dateMatch: false, error });
+      continue;
+    }
+    if (!dateMatch) {
+      const error = `图文日期选择不符：日历选中 ${dataDate} ≠ 预期 ${expectedDate} (offset=${offset})`;
+      logWarn(tag, error);
+      results.push({ savePath: null, dataDate, expectedDate, dateMatch: false, error });
+      continue;
     }
 
     await page.waitForTimeout(1200);
@@ -228,7 +239,9 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExpor
     const targetDir = shopName
       ? path.join(saveDir, safeShopDirName(shopName), "图文明细")
       : saveDir;
-    const savePath = await clickGraphicDownloadAndSave(page, tag, targetDir);
+    const savePath = await clickGraphicDownloadAndSave(page, tag, targetDir, {
+      exportBatchId
+    });
 
     const dateToWrite = expectedDate;
     try {
@@ -245,10 +258,23 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExpor
     }
   }
 
-  logStep(tag, `图文明细下载完成，共 ${results.length} 天`, startedAll);
+  logStep(tag, `图文明细下载完成，成功 ${results.filter((r) => r.savePath && r.dateMatch !== false).length}/${daysToExport} 天`, startedAll);
+  const failures = results
+    .filter((r) => r.dateMatch === false || !r.savePath)
+    .map((r) => ({
+      step: "图文日期选择/下载",
+      dataDate: r.dataDate || r.expectedDate || null,
+      error: r.error || "图文明细未成功下载"
+    }));
+  const firstSuccess = results.find((r) => r.savePath);
   return results.length > 0
-    ? { savePath: results[0].savePath, dataDate: results[0].dataDate, allResults: results }
-    : { savePath: null, dataDate: null, allResults: [] };
+    ? {
+        savePath: firstSuccess?.savePath || null,
+        dataDate: firstSuccess?.dataDate || null,
+        allResults: results,
+        failures
+      }
+    : { savePath: null, dataDate: null, allResults: [], failures };
 }
 
 module.exports = {

@@ -268,6 +268,7 @@ const PREFIX_MAP: Record<string, string> = {
   "creator-feishu-sync-": "creator-feishu-sync",
   "creator-export-push-": "creator-export-push",
   "creator-login-": "creator-login",
+  "creator-open-": "creator-open",
   "creator-export-": "creator-export",
   "creator-": "creator-export",
   "shop-feishu-sync-": "shop-feishu-sync",

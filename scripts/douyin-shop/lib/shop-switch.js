@@ -2,7 +2,7 @@ const {
   loadPreferredShopNames,
   pickShopByPreference
 } = require("./shop-picker");
-const { waitForDomLoaded } = require("./dom-ready");
+const { waitForDomLoaded } = require("./page-utils");
 
 /**
  * "切换数据视角"的真实行为（实地校验版）：

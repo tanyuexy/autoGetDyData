@@ -169,13 +169,18 @@ async function main() {
     // 描述末尾拼接话题
     const fullDescription = [description, hashtags].filter(Boolean).join("\n\n");
     const isAiContent = String(f["ai内容"] || "").trim() === "是";
-    const scheduleTs = Number(f["计划发布时间"]) || 0;
+    const scheduleRaw = f["计划发布时间"];
+    const scheduleTs = Number(scheduleRaw) || 0;
     const scheduleAt = scheduleTs > 0
       ? (scheduleTs <= Date.now() ? null : new Date(scheduleTs).toISOString())
       : null;
     const type = inferType(attachments);
 
     console.log(`\n  处理: ${accountName} | ${type} | "${title}"`);
+    console.log("    计划发布时间原始值:", scheduleRaw);
+    console.log("    计划发布时间原始值类型:", Array.isArray(scheduleRaw) ? "array" : typeof scheduleRaw);
+    console.log("    计划发布时间 Number() 后:", scheduleTs);
+    console.log("    计划发布时间解析结果 scheduleAt:", scheduleAt);
 
     try {
       // 下载附件（处理同名冲突：自动加序号后缀）

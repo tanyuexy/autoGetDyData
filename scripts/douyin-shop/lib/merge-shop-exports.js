@@ -1,6 +1,7 @@
 const fs = require("fs/promises");
 const { existsSync } = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
 const XLSX = require("xlsx");
 const { ACCOUNTS_DIR } = require("./env");
 
@@ -18,9 +19,10 @@ const OUTPUT_DIR = (() => {
 const OUTPUT_FILE_NAME = "抖店-全部店铺-每日支付增量汇总.xlsx";
 const BACKUP_FILE_NAME = "抖店-飞书表备份.xlsx";
 const OUTPUT_SHEET_NAME = "全部作品";
+const DATA_DATE_COLUMN = "数据日期";
 
-/** 视频/图文明细里 append-data-date-column 写入的列名（源表读取用） */
-const SOURCE_DATA_DATE_COL = "数据日期";
+/** 视频/图文明细里写入的列名（源表读取用） */
+const SOURCE_DATA_DATE_COL = DATA_DATE_COLUMN;
 
 const SOURCE_FIELD = "数据来源";
 const SOURCE_TAG = "抖店";
@@ -42,6 +44,137 @@ const ORDERED_HEADERS = [
   OUT_DATE,
   OUT_PAY
 ];
+
+function appendDataDateColumn(filePath, dataDate) {
+  if (dataDate == null || String(dataDate).trim() === "") return;
+
+  const value = String(dataDate).trim();
+  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return;
+  const worksheet = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,
+    defval: ""
+  });
+  if (!rows.length) return;
+
+  let maxCols = 0;
+  for (const row of rows) {
+    const len = Array.isArray(row) ? row.length : 0;
+    if (len > maxCols) maxCols = len;
+  }
+
+  const headerRow = Array.isArray(rows[0]) ? [...rows[0]] : [];
+  while (headerRow.length < maxCols) headerRow.push("");
+  const headers = headerRow.map((c) => String(c ?? "").trim());
+  let colIdx = headers.indexOf(DATA_DATE_COLUMN);
+  if (colIdx === -1) {
+    colIdx = headers.length;
+    headerRow.push(DATA_DATE_COLUMN);
+    rows[0] = headerRow;
+  }
+
+  for (let r = 1; r < rows.length; r += 1) {
+    if (!Array.isArray(rows[r])) rows[r] = [];
+    const row = rows[r];
+    while (row.length <= colIdx) row.push("");
+    row[colIdx] = value;
+  }
+
+  const newSheet = XLSX.utils.aoa_to_sheet(rows);
+  workbook.Sheets[sheetName] = newSheet;
+  XLSX.writeFile(workbook, filePath);
+}
+
+async function readBackupMaxDate() {
+  const backupFile = path.join(OUTPUT_DIR, BACKUP_FILE_NAME);
+  let stat;
+  try {
+    stat = await fs.stat(backupFile);
+  } catch {
+    return null;
+  }
+  if (!stat.isFile()) return null;
+
+  const wb = XLSX.readFile(backupFile, { cellDates: true, raw: false });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+  let maxDate = null;
+  for (const row of rows) {
+    const raw = row["日期"];
+    if (raw === undefined || raw === null) continue;
+    let d = null;
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      const ms = raw > 1e15 ? raw / 1000 : raw;
+      d = new Date(ms);
+    } else {
+      const s = String(raw).trim();
+      if (!s) continue;
+      const m = s.match(/(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/);
+      if (m) {
+        d = new Date(+m[1], +m[2] - 1, +m[3]);
+      } else {
+        d = new Date(s.replace(/\//g, "-"));
+      }
+    }
+    if (d && !isNaN(d.getTime())) {
+      d.setHours(0, 0, 0, 0);
+      if (!maxDate || d > maxDate) maxDate = d;
+    }
+  }
+  return maxDate;
+}
+
+async function ensureBackupExists() {
+  const backupFile = path.join(OUTPUT_DIR, BACKUP_FILE_NAME);
+  try {
+    await fs.stat(backupFile);
+    return;
+  } catch {
+    console.log("未找到飞书备份表（抖店-飞书表备份.xlsx），先执行备份…");
+    execSync("node run.js feishu:backup-bitable --profiles shop", {
+      stdio: "inherit",
+      cwd: process.cwd()
+    });
+    console.log("备份完成。");
+  }
+}
+
+async function calcDaysToExport() {
+  await ensureBackupExists();
+
+  const maxDate = await readBackupMaxDate();
+  if (!maxDate) {
+    console.log("备份表中未找到有效日期，默认导出最近 1 天");
+    return 1;
+  }
+
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setHours(0, 0, 0, 0);
+
+  if (maxDate >= yesterday) {
+    console.log(
+      `备份表最后日期: ${fmtDateYMD(maxDate)}，已覆盖到最新可导出的昨日数据，` +
+      `本次仍刷新导出昨天 ${fmtDateYMD(yesterday)} 1 天数据`
+    );
+    return 1;
+  }
+
+  const startDate = new Date(maxDate);
+  startDate.setDate(startDate.getDate() + 1);
+
+  const diffMs = yesterday.getTime() - startDate.getTime();
+  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+
+  console.log(
+    `备份表最后日期: ${fmtDateYMD(maxDate)}，从 ${fmtDateYMD(startDate)} 开始导出，` +
+    `昨天为 ${fmtDateYMD(yesterday)}，共需导出 ${days} 天数据`
+  );
+  return days;
+}
 
 function parsePaymentYuan(value) {
   if (value === undefined || value === null || value === "") return 0;
@@ -82,8 +215,14 @@ function matchesPreferredShop(shopName, preferredShopNames = []) {
   });
 }
 
+function matchesExportBatch(filePath, exportBatchId) {
+  if (!exportBatchId) return true;
+  return path.basename(filePath).startsWith(`${exportBatchId}-`);
+}
+
 /** 返回目录下最新的 xlsx 文件路径列表（按修改时间倒序），不存在则返回 [] */
-async function pickLatestXlsxFiles(dirPath) {
+async function pickLatestXlsxFiles(dirPath, options = {}) {
+  const exportBatchId = options.exportBatchId || null;
   let names;
   try {
     names = await fs.readdir(dirPath);
@@ -101,6 +240,7 @@ async function pickLatestXlsxFiles(dirPath) {
       continue;
     }
     if (!st.isFile()) continue;
+    if (!matchesExportBatch(full, exportBatchId)) continue;
     files.push({ path: full, mtime: st.mtimeMs || 0 });
   }
   if (!files.length) return [];
@@ -193,13 +333,14 @@ function hasDateColumn(headers) {
 async function collectShopRows(dataRoot, shopName, options = {}) {
   const rows = [];
   const daysToExport = Math.max(1, Number(options.daysToExport) || 1);
+  const exportBatchId = options.exportBatchId || null;
   const videoDir = path.join(dataRoot, shopName, "视频明细");
   const graphicDir = path.join(dataRoot, shopName, "图文明细");
-  const latestVideoFiles = (await pickLatestXlsxFiles(videoDir)).slice(
+  const latestVideoFiles = (await pickLatestXlsxFiles(videoDir, { exportBatchId })).slice(
     0,
     daysToExport
   );
-  const latestGraphicFiles = (await pickLatestXlsxFiles(graphicDir)).slice(
+  const latestGraphicFiles = (await pickLatestXlsxFiles(graphicDir, { exportBatchId })).slice(
     0,
     daysToExport
   );
@@ -271,12 +412,17 @@ async function listShopNames(dataRoot) {
 
 async function validateShopExportFiles(options = {}) {
   const daysToExport = Math.max(1, Number(options.daysToExport) || 1);
+  const exportBatchId = options.exportBatchId || null;
   const expectedDates = calcExpectedDates(daysToExport);
   const preferredShopNames = Array.isArray(options.preferredShopNames)
-    ? options.preferredShopNames
+    ? options.preferredShopNames.map((name) => String(name || "").trim()).filter(Boolean)
+    : [];
+  const processedAccountEmails = Array.isArray(options.processedAccountEmails)
+    ? options.processedAccountEmails.map((name) => String(name || "").trim()).filter(Boolean)
     : [];
   const problems = [];
   const shopReports = [];
+  const candidateReports = [];
   let accountDirs;
   try {
     accountDirs = await fs.readdir(ACCOUNTS_DIR, { withFileTypes: true });
@@ -284,14 +430,20 @@ async function validateShopExportFiles(options = {}) {
     accountDirs = [];
   }
 
+  const accountNameAllowed = (accountName) => {
+    if (processedAccountEmails.length === 0) return true;
+    return processedAccountEmails.includes(accountName);
+  };
+
   for (const ent of accountDirs) {
     if (!ent.isDirectory()) continue;
+    if (!accountNameAllowed(ent.name)) continue;
     const dataRoot = path.join(ACCOUNTS_DIR, ent.name, "data");
     const shops = (await listShopNames(dataRoot)).filter((shopName) =>
       matchesPreferredShop(shopName, preferredShopNames)
     );
     for (const shopName of shops) {
-      const chunk = await collectShopRows(dataRoot, shopName, { daysToExport });
+      const chunk = await collectShopRows(dataRoot, shopName, { daysToExport, exportBatchId });
       const videoDates = [...chunk.videoDates].sort();
       const graphicDates = [...chunk.graphicDates].sort();
       const missingVideoDates = expectedDates.filter((d) => !chunk.videoDates.has(d));
@@ -304,39 +456,64 @@ async function validateShopExportFiles(options = {}) {
         videoDates,
         graphicDates,
         missingVideoDates,
-        missingGraphicDates
+        missingGraphicDates,
+        ok:
+          chunk.videoFiles.length >= daysToExport &&
+          chunk.graphicFiles.length >= daysToExport &&
+          missingVideoDates.length === 0 &&
+          missingGraphicDates.length === 0
       };
-      shopReports.push(report);
-      if (chunk.videoFiles.length < daysToExport) {
-        problems.push(
-          `[${ent.name}/${shopName}] 视频文件数量不足：期望 ${daysToExport} 个，实际 ${chunk.videoFiles.length} 个`
-        );
-      }
-      if (chunk.graphicFiles.length < daysToExport) {
-        problems.push(
-          `[${ent.name}/${shopName}] 图文文件数量不足：期望 ${daysToExport} 个，实际 ${chunk.graphicFiles.length} 个`
-        );
-      }
-      if (missingVideoDates.length > 0) {
-        problems.push(
-          `[${ent.name}/${shopName}] 视频缺少日期：${missingVideoDates.join(", ")}；实际日期=${videoDates.join(", ") || "(空)"}`
-        );
-      }
-      if (missingGraphicDates.length > 0) {
-        problems.push(
-          `[${ent.name}/${shopName}] 图文缺少日期：${missingGraphicDates.join(", ")}；实际日期=${graphicDates.join(", ") || "(空)"}`
-        );
-      }
+      candidateReports.push(report);
     }
   }
 
-  const expectedShops = preferredShopNames.filter((name) => String(name || "").trim());
+  const expectedShops = preferredShopNames.length > 0
+    ? preferredShopNames
+    : [...new Set(candidateReports.map((report) => report.shopName).filter(Boolean))];
+
   for (const expectedShop of expectedShops) {
-    const matched = shopReports.some((report) =>
+    const matchedReports = candidateReports.filter((report) =>
       matchesPreferredShop(report.shopName, [expectedShop])
     );
-    if (!matched) {
+    const okReport = matchedReports.find((report) => report.ok);
+
+    if (okReport) {
+      shopReports.push({ ...okReport, expectedShop });
+      continue;
+    }
+
+    if (matchedReports.length === 0) {
       problems.push(`[${expectedShop}] 未找到该目标店铺的本地导出文件`);
+      continue;
+    }
+
+    shopReports.push({ ...matchedReports[0], expectedShop });
+    const detailPrefix = `[${expectedShop}]`;
+    const locations = matchedReports.map((report) => `${report.account}/${report.shopName}`).join("；");
+    problems.push(`${detailPrefix} 已找到店铺目录但本批次导出不完整，检查位置: ${locations}`);
+
+    const hasEnoughVideo = matchedReports.some((report) => report.videoFiles >= daysToExport);
+    const hasEnoughGraphic = matchedReports.some((report) => report.graphicFiles >= daysToExport);
+    const hasAllVideoDates = matchedReports.some((report) => report.missingVideoDates.length === 0);
+    const hasAllGraphicDates = matchedReports.some((report) => report.missingGraphicDates.length === 0);
+
+    if (!hasEnoughVideo) {
+      const actual = Math.max(...matchedReports.map((report) => report.videoFiles));
+      problems.push(`${detailPrefix} 视频文件数量不足：期望 ${daysToExport} 个，最多找到 ${actual} 个`);
+    }
+    if (!hasEnoughGraphic) {
+      const actual = Math.max(...matchedReports.map((report) => report.graphicFiles));
+      problems.push(`${detailPrefix} 图文文件数量不足：期望 ${daysToExport} 个，最多找到 ${actual} 个`);
+    }
+    if (!hasAllVideoDates) {
+      const actualDates = [...new Set(matchedReports.flatMap((report) => report.videoDates))].sort();
+      const missingDates = expectedDates.filter((date) => !actualDates.includes(date));
+      problems.push(`${detailPrefix} 视频缺少日期：${missingDates.join(", ")}；实际日期=${actualDates.join(", ") || "(空)"}`);
+    }
+    if (!hasAllGraphicDates) {
+      const actualDates = [...new Set(matchedReports.flatMap((report) => report.graphicDates))].sort();
+      const missingDates = expectedDates.filter((date) => !actualDates.includes(date));
+      problems.push(`${detailPrefix} 图文缺少日期：${missingDates.join(", ")}；实际日期=${actualDates.join(", ") || "(空)"}`);
     }
   }
 
@@ -344,7 +521,8 @@ async function validateShopExportFiles(options = {}) {
     ok: problems.length === 0,
     expectedDates,
     problems,
-    shopReports
+    shopReports,
+    candidateReports
   };
 }
 
@@ -355,6 +533,7 @@ async function validateShopExportFiles(options = {}) {
 async function mergeAllShopExportsToData(options = {}) {
   const allRows = [];
   const daysToExport = Math.max(1, Number(options.daysToExport) || 1);
+  const exportBatchId = options.exportBatchId || null;
   const preferredShopNames = Array.isArray(options.preferredShopNames)
     ? options.preferredShopNames.filter((name) => String(name || "").trim())
     : [];
@@ -375,7 +554,7 @@ async function mergeAllShopExportsToData(options = {}) {
       matchesPreferredShop(shopName, preferredShopNames)
     );
     for (const shopName of shops) {
-      const chunk = await collectShopRows(dataRoot, shopName, { daysToExport });
+      const chunk = await collectShopRows(dataRoot, shopName, { daysToExport, exportBatchId });
       allRows.push(...chunk.rows);
       for (const d of chunk.collectedDates) actualDateSet.add(d);
     }
@@ -447,6 +626,9 @@ async function mergeAllShopExportsToData(options = {}) {
 module.exports = {
   mergeAllShopExportsToData,
   validateShopExportFiles,
+  appendDataDateColumn,
+  DATA_DATE_COLUMN,
+  calcDaysToExport,
   calcExpectedDates,
   OUTPUT_FILE_NAME,
   OUTPUT_SHEET_NAME,

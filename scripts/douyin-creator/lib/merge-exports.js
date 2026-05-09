@@ -17,6 +17,7 @@ const OUTPUT_DIR = (() => {
 })();
 /** 汇总表固定文件名，每次覆盖，避免 data 下堆积多份 */
 const OUTPUT_FILE_NAME = "抖创-全部店铺-作品列表.xlsx";
+const PARTIAL_OUTPUT_FILE_SUFFIX = "抖创-部分店铺-作品列表.xlsx";
 const OUTPUT_SHEET_NAME = "全部作品";
 const SOURCE_FIELD_NAME = "数据来源";
 const SOURCE_TAG = "抖创";
@@ -92,13 +93,30 @@ function readAccountExportRows(exportFilePath, accountName) {
   return { headers, rows: enrichedRows };
 }
 
-async function mergeExportFiles(accountResults) {
+function makeTimestampForFileName() {
+  return new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-")
+    .replace("T", "_")
+    .slice(0, 19);
+}
+
+async function mergeExportFiles(accountResults, options = {}) {
+  const requireAllSuccess = Boolean(options.requireAllSuccess);
+  const failed = accountResults.filter((item) => !item || !item.ok);
+  const isPartial = failed.length > 0;
   const succeeded = accountResults.filter(
     (item) => item && item.ok && item.exportFilePath
   );
   if (succeeded.length === 0) {
     console.log("未发现可汇总的导出文件，跳过生成总表。");
     return null;
+  }
+
+  if (requireAllSuccess && isPartial) {
+    throw new Error(
+      `存在失败账号（${failed.length} 个），已拒绝生成可同步到飞书的抖创固定总表。`
+    );
   }
 
   const allRows = [];
@@ -139,14 +157,17 @@ async function mergeExportFiles(accountResults) {
   XLSX.utils.book_append_sheet(workbook, worksheet, OUTPUT_SHEET_NAME);
 
   await ensureDir(OUTPUT_DIR);
-  const outputPath = path.join(OUTPUT_DIR, OUTPUT_FILE_NAME);
+  const outputFileName = isPartial
+    ? `部分-${makeTimestampForFileName()}-${PARTIAL_OUTPUT_FILE_SUFFIX}`
+    : OUTPUT_FILE_NAME;
+  const outputPath = path.join(OUTPUT_DIR, outputFileName);
 
   try {
     const names = await fs.readdir(OUTPUT_DIR);
     const suffix = "-全部店铺-作品列表.xlsx";
     for (const name of names) {
-      if (name === OUTPUT_FILE_NAME) continue;
-      if (name.endsWith(suffix)) {
+      if (name === outputFileName) continue;
+      if (!isPartial && name.endsWith(suffix)) {
         await fs.unlink(path.join(OUTPUT_DIR, name)).catch(() => {});
       }
     }
@@ -155,7 +176,13 @@ async function mergeExportFiles(accountResults) {
   }
 
   XLSX.writeFile(workbook, outputPath);
-  console.log(`汇总完成（已覆盖为唯一抖创总表）: ${outputPath}`);
+  if (isPartial) {
+    console.warn(
+      `存在失败账号（${failed.length} 个），已生成部分汇总文件，不覆盖固定总表: ${outputPath}`
+    );
+  } else {
+    console.log(`汇总完成（已覆盖为唯一抖创总表）: ${outputPath}`);
+  }
   return outputPath;
 }
 

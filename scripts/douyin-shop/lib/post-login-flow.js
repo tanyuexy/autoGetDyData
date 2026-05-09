@@ -6,12 +6,12 @@ const {
 } = require("./shop-picker");
 const { gotoVideoSelf, downloadVideoSelfDetail } = require("./video-detail");
 const { downloadGraphicDetail } = require("./graphic-detail");
-const { readCurrentShopName, switchToNextPreferredShop } = require("./shop-switch");
-const { waitForDomLoaded } = require("./dom-ready");
+const { switchToNextPreferredShop } = require("./shop-switch");
+const { waitForDomLoaded } = require("./page-utils");
 const {
   STAGES,
   detectStage,
-} = require("./stage");
+} = require("./page-utils");
 
 async function saveStorageState(context, paths) {
   await context.storageState({ path: paths.storageStatePath });
@@ -45,29 +45,20 @@ async function captureFailureShot(page, debugDir, kind) {
 
 /**
  * 下载当前店铺的短视频明细 + 图文明细；二者独立 try/catch，互不影响。
- * 店铺名优先从当前页读取；读不到时用上游 hint。
+ * 店铺名只使用上游传入的目标店铺名。
  */
 async function downloadCurrentShop(page, tag, paths, options = {}) {
-  let shopName = "";
-  try {
-    shopName = await readCurrentShopName(page);
-    if (shopName) {
-      console.log(`[${tag}] 当前登录店铺: ${shopName}`);
-    } else if (options.shopNameHint) {
-      shopName = String(options.shopNameHint).trim();
-      console.warn(
-        `[${tag}] 页面未能读取到当前店铺名，回退使用上游 hint "${shopName}"`
-      );
-    } else {
-      console.warn(`[${tag}] 未能读取到当前店铺名，将以 "unknown" 归档`);
-    }
-  } catch (error) {
-    console.warn(`[${tag}] 读取当前店铺名异常: ${error.message || error}`);
+  const shopName = String(options.shopNameHint || "").trim();
+  if (shopName) {
+    console.log(`[${tag}] 当前目标店铺: ${shopName}`);
+  } else {
+    console.warn(`[${tag}] 缺少上游目标店铺名，将以 "unknown" 归档`);
   }
 
   const shopTag = shopName ? `${tag}|${shopName}` : tag;
   const sn = shopName || "unknown";
   const daysToExport = options.daysToExport || 1;
+  const exportBatchId = options.exportBatchId || null;
 
   let videoPaths = [];
   let graphicPaths = [];
@@ -82,7 +73,8 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       tag: shopTag,
       saveDir: paths.dataDir,
       shopName: sn,
-      daysToExport
+      daysToExport,
+      exportBatchId
     });
     if (result.failures && result.failures.length) {
       allFailures.push(...result.failures);
@@ -94,7 +86,7 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
         .filter(Boolean);
       videoDateMismatches = result.allResults
         .filter((r) => r.dateMatch === false)
-        .map((r) => r.dataDate);
+        .map((r) => r.dataDate || r.expectedDate || "unknown");
     } else if (result.savePath) {
       videoPaths = [result.savePath];
     }
@@ -114,7 +106,8 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       tag: shopTag,
       saveDir: paths.dataDir,
       shopName: sn,
-      daysToExport
+      daysToExport,
+      exportBatchId
     });
     if (result.failures && result.failures.length) {
       allFailures.push(...result.failures);
@@ -126,7 +119,7 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
         .filter(Boolean);
       graphicDateMismatches = result.allResults
         .filter((r) => r.dateMatch === false)
-        .map((r) => r.dataDate);
+        .map((r) => r.dataDate || r.expectedDate || "unknown");
     } else if (result.savePath) {
       graphicPaths = [result.savePath];
     }
@@ -141,7 +134,7 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     if (shot) console.error(`[${shopTag}] 失败截图: ${shot}`);
   }
 
-  const ok = Boolean(videoPaths.length && graphicPaths.length);
+  const ok = videoPaths.length === daysToExport && graphicPaths.length === daysToExport;
   const parts = [videoError, graphicError].filter(Boolean);
 
   const videoDaysOk = videoError ? 0 : videoPaths.length;
@@ -306,16 +299,18 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
     );
   }
 
-  const maxShops = preferredList.length > 0 ? preferredList.length + 2 : 1;
+  const maxShops = preferredList.length > 0 ? preferredList.length : 1;
 
   for (let i = 0; i < maxShops; i += 1) {
     const daysToExport = options.daysToExport || 1;
+    const currentTarget = pendingShopHint || "unknown";
     console.log(
-      `\n[${tag}] ========== 第 ${i + 1}/${maxShops} 轮（${maxShops}=名单${preferredList.length}项+2）| 导出天数: ${daysToExport}天 ==========`
+      `\n[${tag}] ========== 第 ${i + 1}/${maxShops} 个目标店铺 | 当前目标: ${currentTarget} | 导出天数: ${daysToExport}天 ==========`
     );
     const round = await downloadCurrentShop(page, tag, paths, {
       shopNameHint: pendingShopHint,
-      daysToExport
+      daysToExport,
+      exportBatchId: options.exportBatchId || null
     });
     if (round.shopName) {
       processed.add(round.shopName);

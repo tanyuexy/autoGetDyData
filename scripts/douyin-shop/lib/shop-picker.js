@@ -1,7 +1,7 @@
 const fs = require("fs/promises");
 const path = require("path");
 
-const { waitForDomLoaded } = require("./dom-ready");
+const { waitForDomLoaded } = require("./page-utils");
 const { getProjectConfigPath } = require("../../common/config-path");
 
 const DEFAULT_ACCOUNTS_FILE = getProjectConfigPath();

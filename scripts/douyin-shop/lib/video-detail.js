@@ -3,8 +3,8 @@ const fs = require("fs/promises");
 
 const {
   pickLatestSelectableCalendarDay
-} = require("./pick-latest-calendar-day");
-const { appendDataDateColumn } = require("./append-data-date-column");
+} = require("./page-utils");
+const { appendDataDateColumn } = require("./merge-shop-exports");
 
 const VIDEO_SELF_URL =
   process.env.SHOP_VIDEO_SELF_URL ||
@@ -250,6 +250,7 @@ function safeShopDirName(name) {
 
 async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   const exportLabel = options.exportLabel || "视频明细";
+  const exportBatchId = options.exportBatchId ? String(options.exportBatchId) : null;
   const started = Date.now();
   await fs.mkdir(saveDir, { recursive: true });
 
@@ -283,7 +284,8 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
     .replace(/[:.]/g, "-")
     .replace("T", "_")
     .slice(0, 19);
-  const savePath = path.join(saveDir, `${ts}-${exportLabel}-${safeName}`);
+  const batchPrefix = exportBatchId ? `${exportBatchId}-` : "";
+  const savePath = path.join(saveDir, `${batchPrefix}${ts}-${exportLabel}-${safeName}`);
 
   await download.saveAs(savePath);
   logStep(tag, `明细文件已保存: ${savePath}`, started);
@@ -309,7 +311,7 @@ function calcDataDate(dayOffset) {
  * @param {import('playwright').Page} page
  * @param {{ tag: string, saveDir: string, shopName?: string, daysToExport?: number }} options
  */
-async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExport = 1 }) {
+async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExport = 1, exportBatchId = null }) {
   const startedAll = Date.now();
   logStep(tag, `视频下载开始，目标店铺: ${shopName || "(未指定)"}，循环天数: ${daysToExport}`);
 
@@ -320,13 +322,21 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
   for (let offset = 0; offset < daysToExport; offset++) {
     logStep(tag, `--- 第 ${offset + 1}/${daysToExport} 轮（offset=${offset}）---`);
 
-    // 如果是首轮且 daysToExport>1，可能已有当天数据需要清除
-    const { dataDate } = await selectDateRangeYesterday(page, tag, offset);
+    const { ok: datePicked, dataDate } = await selectDateRangeYesterday(page, tag, offset);
 
     const expectedDate = calcDataDate(offset);
-    const dateMatch = dataDate && dataDate === expectedDate;
-    if (dataDate && !dateMatch) {
-      console.warn(`[${tag}] ⚠ 日历选中日期 ${dataDate} ≠ 预期 ${expectedDate} (offset=${offset})`);
+    const dateMatch = datePicked && dataDate === expectedDate;
+    if (!datePicked || !dataDate) {
+      const error = `视频日期选择失败：未能选择或解析日期，预期 ${expectedDate} (offset=${offset})`;
+      logWarn(tag, error);
+      results.push({ savePath: null, dataDate: dataDate || null, expectedDate, dateMatch: false, error });
+      continue;
+    }
+    if (!dateMatch) {
+      const error = `视频日期选择不符：日历选中 ${dataDate} ≠ 预期 ${expectedDate} (offset=${offset})`;
+      logWarn(tag, error);
+      results.push({ savePath: null, dataDate, expectedDate, dateMatch: false, error });
+      continue;
     }
 
     await selectNonAdTab(page, tag);
@@ -337,7 +347,8 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
       ? path.join(saveDir, safeShopDirName(shopName), "视频明细")
       : saveDir;
     const savePath = await clickDownloadAndSave(page, tag, targetDir, {
-      exportLabel: "视频明细"
+      exportLabel: "视频明细",
+      exportBatchId
     });
 
     const dateToWrite = expectedDate;
@@ -356,10 +367,23 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
     }
   }
 
-  logStep(tag, `视频下载流程完成，共 ${results.length} 天`, startedAll);
+  logStep(tag, `视频下载流程完成，成功 ${results.filter((r) => r.savePath && r.dateMatch !== false).length}/${daysToExport} 天`, startedAll);
+  const failures = results
+    .filter((r) => r.dateMatch === false || !r.savePath)
+    .map((r) => ({
+      step: "视频日期选择/下载",
+      dataDate: r.dataDate || r.expectedDate || null,
+      error: r.error || "视频明细未成功下载"
+    }));
+  const firstSuccess = results.find((r) => r.savePath);
   return results.length > 0
-    ? { savePath: results[0].savePath, dataDate: results[0].dataDate, allResults: results }
-    : { savePath: null, dataDate: null, allResults: [] };
+    ? {
+        savePath: firstSuccess?.savePath || null,
+        dataDate: firstSuccess?.dataDate || null,
+        allResults: results,
+        failures
+      }
+    : { savePath: null, dataDate: null, allResults: [], failures };
 }
 
 module.exports = {

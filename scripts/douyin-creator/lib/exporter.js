@@ -1,5 +1,6 @@
 const fs = require("fs/promises");
 const path = require("path");
+const XLSX = require("xlsx");
 const { fileExists } = require("../../common/fs");
 const { clickIfVisible } = require("./login");
 const { getCreatorExportDateStartSpec } = require("./env");
@@ -11,7 +12,30 @@ function formatYmd(date) {
   return `${y}-${m}-${d}`;
 }
 
-/** 解析 "M.D" / "M-D" / "MM.DD"，日为当前自然年 */
+/** 解析 "YYYY-MM-DD" / "YYYY/M/D" / "YYYY.M.D" */
+function parseFullDateSpec(spec) {
+  const s = String(spec || "").trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})$/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (!Number.isFinite(year) || year < 1970 || year > 2100) return null;
+  if (!Number.isFinite(month) || month < 1 || month > 12) return null;
+  if (!Number.isFinite(day) || day < 1 || day > 31) return null;
+  const d = new Date(year, month - 1, day);
+  if (
+    d.getFullYear() !== year ||
+    d.getMonth() !== month - 1 ||
+    d.getDate() !== day
+  ) {
+    return null;
+  }
+  return d;
+}
+
+/** 解析 "M.D" / "M-D" / "MM.DD"，日为指定自然年 */
 function parseMonthDayInYear(spec, year) {
   const s = String(spec || "").trim();
   if (!s) return null;
@@ -32,9 +56,35 @@ function parseMonthDayInYear(spec, year) {
   return d;
 }
 
+function parseCreatorExportStartSpec(spec, now) {
+  const raw = String(spec || "").trim();
+  if (!raw) return null;
+
+  const full = parseFullDateSpec(raw);
+  if (full) return full;
+
+  const currentYear = now.getFullYear();
+  const yesterday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - 1
+  );
+  const currentYearDate = parseMonthDayInYear(raw, currentYear);
+  if (!currentYearDate) return null;
+  if (currentYearDate <= yesterday) return currentYearDate;
+
+  const previousYearDate = parseMonthDayInYear(raw, currentYear - 1);
+  if (previousYearDate) {
+    console.log(
+      `[抖创] creatorExportDateStart=${raw} 按上一自然年解析为 ${formatYmd(previousYearDate)}`
+    );
+    return previousYearDate;
+  }
+  return currentYearDate;
+}
+
 function getPostListDateRange(accountName) {
   const now = new Date();
-  const year = now.getFullYear();
   const yesterday = new Date(
     now.getFullYear(),
     now.getMonth(),
@@ -46,7 +96,7 @@ function getPostListDateRange(accountName) {
 
   let start;
   if (spec) {
-    const parsed = parseMonthDayInYear(spec, year);
+    const parsed = parseCreatorExportStartSpec(spec, now);
     if (parsed) {
       start = parsed;
     } else {
@@ -461,7 +511,7 @@ async function setPostListDateRange(page, accountName) {
           attempt > 1 ? "（重试成功）" : ""
         }`
       );
-      return;
+      return { start, end, startYmd, endYmd };
     }
 
     if (attempt < 2) {
@@ -477,6 +527,156 @@ async function setPostListDateRange(page, accountName) {
   throw new Error(
     `已重试仍未通过日期范围校验（${startYmd} ~ ${endYmd}），请确认日期控件展示文本是否变化。`
   );
+}
+
+function parsePublishDateValue(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const d = new Date(value);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const m = text.match(/(\d{4})[年.\-/](\d{1,2})[月.\-/](\d{1,2})/);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (!Number.isNaN(d.getTime())) {
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+  }
+  const normalized = text
+    .replace(/年/g, "-")
+    .replace(/月/g, "-")
+    .replace(/日/g, "")
+    .replace(/\//g, "-")
+    .replace(" ", "T");
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+}
+
+function detectPublishTimeField(headers) {
+  const candidates = ["发布时间", "发布时间（北京时间）", "发布时间(北京时间)"];
+  for (const candidate of candidates) {
+    if (headers.includes(candidate)) return candidate;
+  }
+  return headers.find((name) => /发布时间/.test(name)) || null;
+}
+
+function validateExportedPostListXlsx(filePath, accountName, start, end) {
+  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) {
+    throw new Error(`账号 [${accountName}] 导出文件没有可读取的 sheet: ${filePath}`);
+  }
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+    defval: "",
+    raw: false
+  });
+  if (!rows.length) {
+    throw new Error(`账号 [${accountName}] 导出文件为空: ${filePath}`);
+  }
+
+  const headers = Object.keys(rows[0] || {});
+  const publishField = detectPublishTimeField(headers);
+  if (!publishField) {
+    throw new Error(
+      `账号 [${accountName}] 导出文件缺少发布时间列，无法校验日期范围: ${filePath}`
+    );
+  }
+
+  const startDay = new Date(start);
+  startDay.setHours(0, 0, 0, 0);
+  const endDay = new Date(end);
+  endDay.setHours(0, 0, 0, 0);
+
+  let checked = 0;
+  const outOfRange = [];
+  const unparsed = [];
+  rows.forEach((row, index) => {
+    const raw = row[publishField];
+    const d = parsePublishDateValue(raw);
+    if (!d) {
+      unparsed.push({ rowNumber: index + 2, value: raw });
+      return;
+    }
+    checked += 1;
+    if (d < startDay || d > endDay) {
+      outOfRange.push({ rowNumber: index + 2, value: raw, date: formatYmd(d) });
+    }
+  });
+
+  if (checked === 0) {
+    throw new Error(
+      `账号 [${accountName}] 导出文件发布时间列全部无法解析，无法校验日期范围: ${filePath}`
+    );
+  }
+  if (unparsed.length > 0) {
+    const sample = unparsed
+      .slice(0, 5)
+      .map((item) => `第${item.rowNumber}行=${item.value || "(空)"}`)
+      .join("；");
+    throw new Error(
+      `账号 [${accountName}] 导出文件存在无法解析的发布时间（${unparsed.length} 行）：${sample}`
+    );
+  }
+  if (outOfRange.length > 0) {
+    const sample = outOfRange
+      .slice(0, 5)
+      .map((item) => `第${item.rowNumber}行=${item.value}→${item.date}`)
+      .join("；");
+    throw new Error(
+      `账号 [${accountName}] 导出文件日期超出预期范围 ${formatYmd(startDay)} ~ ${formatYmd(endDay)}（${outOfRange.length} 行）：${sample}`
+    );
+  }
+
+  console.log(
+    `账号 [${accountName}] 导出文件日期校验通过: ${formatYmd(startDay)} ~ ${formatYmd(endDay)}，有效行 ${checked}`
+  );
+}
+
+async function waitForPostListRefresh(page, accountName, startYmd, endYmd) {
+  await page
+    .locator("[class*='loading'], [class*='spin'], [aria-busy='true']")
+    .first()
+    .waitFor({ state: "hidden", timeout: 8000 })
+    .catch(() => {});
+  await page.waitForTimeout(1200);
+
+  const tableText = await page
+    .locator("table, [role='table'], [class*='table'], [class*='list']")
+    .first()
+    .textContent({ timeout: 3000 })
+    .catch(() => "");
+  if (!tableText) {
+    console.warn(
+      `账号 [${accountName}] 未采集到投稿列表文本，继续依赖导出文件日期校验。`
+    );
+    return;
+  }
+
+  const ymds = collectYmdsFromDateDisplayText(tableText, startYmd);
+  if (ymds.size === 0) {
+    console.warn(
+      `账号 [${accountName}] 投稿列表首屏未识别到发布时间，继续依赖导出文件日期校验。`
+    );
+    return;
+  }
+
+  const startDay = new Date(`${startYmd}T00:00:00`);
+  const endDay = new Date(`${endYmd}T00:00:00`);
+  const outOfRange = [...ymds].filter((ymd) => {
+    const d = new Date(`${ymd}T00:00:00`);
+    return d < startDay || d > endDay;
+  });
+  if (outOfRange.length > 0) {
+    console.warn(
+      `账号 [${accountName}] 投稿列表首屏存在范围外日期 ${outOfRange.join(", ")}，继续等待并最终以导出文件校验为准。`
+    );
+    await page.waitForTimeout(2000);
+  }
 }
 
 async function saveAuth(context, paths, accountName) {
@@ -504,7 +704,13 @@ async function exportPostListData(page, paths, accountName) {
   }
 
   await page.waitForTimeout(800);
-  await setPostListDateRange(page, accountName);
+  const dateRange = await setPostListDateRange(page, accountName);
+  await waitForPostListRefresh(
+    page,
+    accountName,
+    dateRange.startYmd,
+    dateRange.endYmd
+  );
 
   let exportBtn = page.getByRole("button", { name: /导出/ }).first();
   const roleBtnVisible = await exportBtn
@@ -532,6 +738,8 @@ async function exportPostListData(page, paths, accountName) {
   if (!(await fileExists(savePath))) {
     console.log(`账号 [${accountName}] 提示：文件已触发下载，但未检测到落盘。`);
   }
+
+  validateExportedPostListXlsx(savePath, accountName, dateRange.start, dateRange.end);
 
   console.log(`账号 [${accountName}] 导出成功:`);
   console.log(`- 文件路径: ${savePath}`);

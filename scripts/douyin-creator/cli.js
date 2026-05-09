@@ -212,9 +212,20 @@ async function main() {
 
   const { allSuccess } = printAccountExecutionSummary(results);
 
-  await mergeExportFiles(results);
+  let mergedPath = null;
+  try {
+    mergedPath = await mergeExportFiles(results, {
+      requireAllSuccess: shouldSyncFeishuAfterExport
+    });
+  } catch (error) {
+    console.error("抖创数据汇总失败:", error.message || error);
+    if (shouldSyncFeishuAfterExport) {
+      console.log("存在失败店铺或汇总失败，已跳过写入飞书多维表格。");
+      return;
+    }
+  }
 
-  if (shouldSyncFeishuAfterExport && allSuccess) {
+  if (shouldSyncFeishuAfterExport && allSuccess && mergedPath) {
     console.log("全部店铺导出成功，开始写入飞书多维表格...");
     runFeishuSyncDataXlsxCreator();
   } else if (shouldSyncFeishuAfterExport) {

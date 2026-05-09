@@ -12,7 +12,7 @@ import {
   removeRuntimeProcess,
 } from "./runtimeProcessStore";
 
-export type TaskNamespace = "creator-export" | "shop-export" | "creator-publish" | "login" | "system" | "feishu";
+export type TaskNamespace = "creator-export" | "creator-open" | "shop-export" | "creator-publish" | "login" | "system" | "feishu";
 
 /**
  * 生成带时间后缀的 taskId，格式：{prefix}-HH.mm.ss
@@ -35,6 +35,7 @@ interface NamespaceState {
 
 const DEFAULT_MAX_CONCURRENT: Record<TaskNamespace, number> = {
   "creator-export": 1,
+  "creator-open": 1,
   "shop-export": 1,
   "creator-publish": 3,
   login: 1,
@@ -44,6 +45,7 @@ const DEFAULT_MAX_CONCURRENT: Record<TaskNamespace, number> = {
 
 const DEFAULT_TIMEOUT_MS: Partial<Record<TaskNamespace, number>> = {
   "creator-export": 60 * 60 * 1000,
+  "creator-open": 60 * 60 * 1000,
   "shop-export": 2 * 60 * 60 * 1000,
   "creator-publish": 30 * 60 * 1000,
   login: 30 * 60 * 1000,

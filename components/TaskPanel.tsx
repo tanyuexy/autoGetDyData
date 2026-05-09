@@ -15,6 +15,7 @@ const { Text } = Typography;
 
 const NAMESPACE_LABELS: Record<string, string> = {
   "creator-export": "抖创导出",
+  "creator-open": "抖创页面",
   "creator-feishu-sync": "抖创同步",
   "creator-export-push": "抖创推送",
   "shop-export": "抖店导出",

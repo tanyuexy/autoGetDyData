@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
 
     const taskId = generateTaskIdWithTime(`creator-open-${accountName}`);
     spawnTask(taskId, "node", ["scripts/run.js", "creator:open", accountName], {
-      namespace: "system",
+      namespace: "creator-open",
       env: { HEADLESS: "false" },
       interactive: true,
     });
