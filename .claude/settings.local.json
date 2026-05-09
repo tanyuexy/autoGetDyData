@@ -61,7 +61,8 @@
       "Read(//Users/xy/.claude/**)",
       "Bash(git *)",
       "Bash(defaults read *)",
-      "Bash(npm search *)"
+      "Bash(npm search *)",
+      "Bash(npx -y @playwright/mcp --version)"
     ]
   },
   "mcpServers": {

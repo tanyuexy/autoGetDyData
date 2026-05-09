@@ -1,10 +1,16 @@
 require("dotenv").config();
 // stdout 接到管道时默认会块缓冲，父进程难以及时收到逐行日志
 try {
-  if (process.stdout._handle && typeof process.stdout._handle.setBlocking === "function") {
+  if (
+    process.stdout._handle &&
+    typeof process.stdout._handle.setBlocking === "function"
+  ) {
     process.stdout._handle.setBlocking(true);
   }
-  if (process.stderr._handle && typeof process.stderr._handle.setBlocking === "function") {
+  if (
+    process.stderr._handle &&
+    typeof process.stderr._handle.setBlocking === "function"
+  ) {
     process.stderr._handle.setBlocking(true);
   }
 } catch (_) {}
@@ -19,14 +25,18 @@ const {
   resolveAccountsToRun,
   splitAccountsByStorageState
 } = require("./lib/accounts");
-const { BROWSER_VIEWPORT, LOGIN_VERIFY_METHOD, HEADLESS } = require("./lib/env");
+const {
+  BROWSER_VIEWPORT,
+  LOGIN_VERIFY_METHOD,
+  HEADLESS
+} = require("./lib/env");
 const { attachQrDataUrlSniffer } = require("./lib/qr");
 const { openTargetAndEnsureLogin } = require("./lib/login");
 const { saveAuth, exportPostListData } = require("./lib/exporter");
 const { mergeExportFiles } = require("./lib/merge-exports");
 const {
   printAccountExecutionSummary,
-  printExportChannelSummary,
+  printExportChannelSummary
 } = require("./lib/index-helpers");
 const { parseArgs } = require("./publish/utils");
 const { runPublishArticle } = require("./publish/article");
@@ -114,12 +124,16 @@ async function runAccountQueue(browser, accounts, command, options = {}) {
 
 function runFeishuSyncDataXlsxCreator() {
   const projectRoot = path.resolve(__dirname, "../..");
-  const result = spawnSync(process.execPath, ["scripts/run.js", "feishu:sync-creator"], {
-    cwd: projectRoot,
-    stdio: "inherit",
-    env: { ...process.env },
-    shell: false
-  });
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/run.js", "feishu:sync-creator"],
+    {
+      cwd: projectRoot,
+      stdio: "inherit",
+      env: { ...process.env },
+      shell: false
+    }
+  );
 
   if (result.status !== 0) {
     throw new Error(
@@ -212,4 +226,3 @@ main().catch((error) => {
   console.error("\n脚本执行失败:", error);
   process.exitCode = 1;
 });
-

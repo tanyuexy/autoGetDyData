@@ -6,7 +6,6 @@ const nextConfig: NextConfig = {
   // Ensure Node.js built-ins work in API routes
   serverExternalPackages: [
     "playwright",
-    "jimp",
     "xlsx",
     "nodemailer",
     "imapflow",
