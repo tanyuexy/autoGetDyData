@@ -29,6 +29,12 @@ type TaskType = "video" | "article";
 
 type TaskStatus = "pending" | "queued" | "running" | "success" | "failed" | "cancelled";
 
+const TERMINABLE_TASK_STATUSES = new Set<TaskStatus>(["pending", "running"]);
+
+function isTerminableTask(task: PublishTask) {
+  return TERMINABLE_TASK_STATUSES.has(task.status);
+}
+
 type TaskPayload =
   | {
       type: "video";
@@ -83,6 +89,11 @@ export default function CreatorPublishPage() {
   const [scheduleAt, setScheduleAt] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<{ name: string }[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+
+  const terminableSelectedRowKeys = useMemo(() => {
+    const selected = new Set(selectedRowKeys);
+    return tasks.filter((task) => selected.has(task.id) && isTerminableTask(task)).map((task) => task.id);
+  }, [selectedRowKeys, tasks]);
 
   const accountOptions = useMemo(
     () => accounts.map((a) => ({ label: a.name, value: a.name })),
@@ -342,12 +353,15 @@ export default function CreatorPublishPage() {
   }
 
   async function handleKillSelected() {
-    if (!selectedRowKeys.length) return;
+    if (!terminableSelectedRowKeys.length) {
+      message.warning("仅待执行/执行中的任务可终止");
+      return;
+    }
     try {
       const res = await fetch("/api/creator/publish/tasks", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "kill-bulk", ids: selectedRowKeys }),
+        body: JSON.stringify({ action: "kill-bulk", ids: terminableSelectedRowKeys }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "终止失败");
@@ -687,14 +701,14 @@ export default function CreatorPublishPage() {
               </Button>
               <Popconfirm
                 title="确认终止选中任务？"
-                description={`将强制终止 ${selectedRowKeys.length} 个选中的运行中任务，不可恢复`}
+                description={`将终止 ${terminableSelectedRowKeys.length} 个选中的待执行/执行中任务，其他状态会被忽略`}
                 okText="终止"
                 cancelText="取消"
                 okButtonProps={{ danger: true }}
                 onConfirm={handleKillSelected}
               >
-                <Button danger size="small">
-                  终止选中 ({selectedRowKeys.length})
+                <Button danger size="small" disabled={terminableSelectedRowKeys.length === 0}>
+                  终止选中 ({terminableSelectedRowKeys.length})
                 </Button>
               </Popconfirm>
               <Popconfirm

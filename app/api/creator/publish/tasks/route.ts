@@ -101,6 +101,7 @@ export async function PATCH(req: NextRequest) {
       const tasks = readCreatorPublishTasks();
       for (const task of tasks) {
         if (!ids.includes(task.id)) continue;
+        if (task.status !== "pending" && task.status !== "running") continue;
         if (task.status === "running" && task.taskId) {
           const { killTask } = require("@/lib/taskManager");
           await killTask(task.taskId);
