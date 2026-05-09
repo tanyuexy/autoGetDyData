@@ -8,13 +8,12 @@ import {
   type CreatorPublishPayload,
   type CreatorPublishTask,
 } from "@/lib/creatorPublishStore";
-import { runPendingCreatorPublishTasks } from "@/lib/creatorPublishScheduler";
 
 export const maxDuration = 0;
 
 export async function GET() {
-  reconcileStaleRunningCreatorPublishTasks();
-  const tasks = readCreatorPublishTasks();
+  await reconcileStaleRunningCreatorPublishTasks();
+  const tasks = await readCreatorPublishTasks();
   return NextResponse.json({ tasks });
 }
 
@@ -57,9 +56,9 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    const tasks = readCreatorPublishTasks();
+    const tasks = await readCreatorPublishTasks();
     tasks.unshift(task);
-    writeCreatorPublishTasks(tasks);
+    await writeCreatorPublishTasks(tasks);
 
     return NextResponse.json({ ok: true, task });
   } catch (e: any) {
@@ -74,7 +73,7 @@ export async function PATCH(req: NextRequest) {
     const id = String(body.id || "").trim();
 
     if (action === "kill-all") {
-      const tasks = readCreatorPublishTasks();
+      const tasks = await readCreatorPublishTasks();
       let killed = 0;
       for (const task of tasks) {
         if (task.status !== "running") continue;
@@ -87,7 +86,7 @@ export async function PATCH(req: NextRequest) {
         task.lastError = "用户手动终止";
         killed++;
       }
-      writeCreatorPublishTasks(tasks);
+      await writeCreatorPublishTasks(tasks);
       return NextResponse.json({ ok: true, killed });
     }
 
@@ -98,7 +97,7 @@ export async function PATCH(req: NextRequest) {
       }
 
       let killed = 0;
-      const tasks = readCreatorPublishTasks();
+      const tasks = await readCreatorPublishTasks();
       for (const task of tasks) {
         if (!ids.includes(task.id)) continue;
         if (task.status !== "pending" && task.status !== "running") continue;
@@ -111,7 +110,7 @@ export async function PATCH(req: NextRequest) {
         task.lastError = "用户手动终止";
         killed++;
       }
-      writeCreatorPublishTasks(tasks);
+      await writeCreatorPublishTasks(tasks);
       return NextResponse.json({ ok: true, killed });
     }
 
@@ -122,18 +121,14 @@ export async function PATCH(req: NextRequest) {
       }
 
       let started = 0;
-      const tasks = readCreatorPublishTasks();
+      const tasks = await readCreatorPublishTasks();
       for (const t of tasks) {
         if (!ids.includes(t.id)) continue;
         t.status = "queued";
         t.updatedAt = new Date().toISOString();
         started++;
       }
-      writeCreatorPublishTasks(tasks);
-
-      if (started > 0) {
-        runPendingCreatorPublishTasks();
-      }
+      await writeCreatorPublishTasks(tasks);
 
       return NextResponse.json({ ok: true, started });
     }
@@ -141,37 +136,33 @@ export async function PATCH(req: NextRequest) {
     if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
 
     if (action === "run-now") {
-      const existing = readCreatorPublishTasks().find((t) => t.id === id);
+      const existing = (await readCreatorPublishTasks()).find((t) => t.id === id);
       if (!existing) return NextResponse.json({ error: "task not found" }, { status: 404 });
       if (existing.status !== "pending" && existing.status !== "queued") {
         return NextResponse.json({ error: "只能立即执行待执行的任务" }, { status: 400 });
       }
 
-      const next = patchCreatorPublishTask(id, {
+      const next = await patchCreatorPublishTask(id, {
         status: "queued",
         payload: { ...existing.payload, scheduleAt: null },
       });
-      runPendingCreatorPublishTasks();
-
       return NextResponse.json({ ok: true, task: next });
     }
 
     if (action === "retry") {
-      const existing = readCreatorPublishTasks().find((t) => t.id === id);
+      const existing = (await readCreatorPublishTasks()).find((t) => t.id === id);
       if (!existing) return NextResponse.json({ error: "task not found" }, { status: 404 });
 
-      const next = patchCreatorPublishTask(id, {
+      const next = await patchCreatorPublishTask(id, {
         status: "queued",
         lastError: undefined,
         taskId: undefined,
       });
-      runPendingCreatorPublishTasks();
-
       return NextResponse.json({ ok: true, task: next });
     }
 
     if (action === "delete") {
-      const tasks = readCreatorPublishTasks();
+      const tasks = await readCreatorPublishTasks();
       const idx = tasks.findIndex((t) => t.id === id);
       if (idx < 0) return NextResponse.json({ error: "task not found" }, { status: 404 });
 
@@ -182,7 +173,7 @@ export async function PATCH(req: NextRequest) {
       }
 
       tasks.splice(idx, 1);
-      writeCreatorPublishTasks(tasks);
+      await writeCreatorPublishTasks(tasks);
 
       return NextResponse.json({ ok: true });
     }

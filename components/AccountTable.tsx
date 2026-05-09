@@ -232,7 +232,10 @@ export default function AccountTable(props: Props) {
         key: "actions",
         width: 280,
         render: (_: any, row: CreatorAccount) => {
-          const disabled = row.hasStorageState;
+          const hasReusableLoginState =
+            row.hasStorageState &&
+            row.cookieStatus !== "expired" &&
+            row.cookieStatus !== "missing";
           const isVerifying = verifying.has(row.name);
 
           const items = [
@@ -254,12 +257,12 @@ export default function AccountTable(props: Props) {
                 trigger={["hover"]}
                 placement="bottomRight"
                 menu={{ items: items as any }}
-                disabled={disabled || loginBusy}
+                disabled={hasReusableLoginState || loginBusy}
               >
                 <Button
                   size="small"
                   type="primary"
-                  disabled={disabled || loginBusy}
+                  disabled={hasReusableLoginState || loginBusy}
                   onClick={() => onLogin?.(row.name, "email_qr")}
                 >
                   <Space size={4}>

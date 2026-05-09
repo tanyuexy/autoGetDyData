@@ -1,23 +1,19 @@
-const fs = require("fs/promises");
-const path = require("path");
-
 const { waitForDomLoaded } = require("./page-utils");
-const { getProjectConfigPath } = require("../../common/config-path");
+const { readProjectConfigFromEnv } = require("../../common/project-config");
 
-const DEFAULT_ACCOUNTS_FILE = getProjectConfigPath();
+const DEFAULT_ACCOUNTS_FILE = "Mongo app_config";
 
 /**
- * 读取 config.json 中的店铺名称优先级列表。
- * 文件缺失或格式异常时返回空数组，由上层决定兜底策略。
+ * 读取 Mongo app_config 中的店铺名称优先级列表。
+ * 配置缺失或格式异常时返回空数组，由上层决定兜底策略。
  */
 async function loadPreferredShopNames(file = DEFAULT_ACCOUNTS_FILE) {
   try {
-    const raw = await fs.readFile(file, "utf-8");
-    const json = JSON.parse(raw);
+    const json = readProjectConfigFromEnv();
     const arr = Array.isArray(json?.accounts) ? json.accounts : [];
     return arr.map((s) => String(s).trim()).filter(Boolean);
   } catch (error) {
-    console.warn(`读取 ${file} 失败: ${error.message}`);
+    console.warn(`读取 Mongo app_config accounts 失败: ${error.message}`);
     return [];
   }
 }
@@ -89,7 +85,7 @@ function pickShopByPreference(items, preferredList) {
 }
 
 /**
- * 若当前页面是店铺选择页，按 config.json accounts 顺序选中第一个匹配项并点击。
+ * 若当前页面是店铺选择页，按 Mongo app_config accounts 顺序选中第一个匹配项并点击。
  *
  * @param {import('playwright').Page} page
  * @param {{ tag?: string, preferredList?: string[], timeoutMs?: number }} options
@@ -118,7 +114,7 @@ async function selectShopIfPicker(page, options = {}) {
 
   if (preferredList.length === 0) {
     console.warn(
-      `[${tag}] 检测到店铺选择页，但未配置优先级名单（config.json accounts），跳过自动选店`
+      `[${tag}] 检测到店铺选择页，但未配置优先级名单（Mongo app_config accounts），跳过自动选店`
     );
     return { picked: false };
   }

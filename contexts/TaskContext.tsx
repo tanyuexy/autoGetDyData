@@ -254,7 +254,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       connectionsRef.current.delete(id);
     }
 
-    const es = new EventSource(`/api/progress/${id}`);
+    const es = new EventSource(`/api/progress/${encodeURIComponent(id)}`);
     connectionsRef.current.set(id, es);
 
     es.addEventListener("log", (e: MessageEvent) => {

@@ -44,7 +44,7 @@ const SHOP_XLSX_FIELD_ALIASES = {
 };
 
 const { existsSync } = require("fs");
-const { getProjectConfigPath } = require("../common/config-path");
+const { readProjectConfigFromEnv } = require("../common/project-config");
 
 function getDefaultExportsDir() {
   const envVal = process.env.EXPORTS_DIR;
@@ -87,7 +87,7 @@ function printHelp() {
   node scripts/feishu/cli.js backup-bitable [--dir ./data] [--profiles creator,shop] [--dry-run]
 
 说明:
-  - 多维表格 appToken/tableId：优先读环境变量 FEISHU_BITABLE_*；未设置时读项目根目录 config.json 的 feishu.<profile>（默认 profile=shop，抖创同步可设 FEISHU_BITABLE_PROFILE=creator 并在 config 中配置 feishu.creator）
+  - 多维表格 appToken/tableId：优先读环境变量 FEISHU_BITABLE_*；未设置时读 Mongo app_config 的 feishu.<profile>（默认 profile=shop，抖创同步可设 FEISHU_BITABLE_PROFILE=creator 并在 Mongo 配置 feishu.creator）
   - auth-url: 生成 OAuth 授权地址（默认自动拉起浏览器，可用 --no-open 关闭）
   - feishu:callback: 启动本地回调服务，自动 exchange 并保存 token
   - exchange: 用回调 code 换取 access_token/refresh_token 并写入本地缓存
@@ -209,10 +209,7 @@ function toNonNegativeInteger(value, fallback = 0) {
 
 function readProfileKeepRowsFromProjectConfig(profile) {
   try {
-    const cfgPath = getProjectConfigPath();
-    if (!existsSync(cfgPath)) return undefined;
-    const raw = require("fs").readFileSync(cfgPath, "utf8");
-    const data = JSON.parse(raw);
+    const data = readProjectConfigFromEnv();
     const key = String(profile || "shop").trim() || "shop";
     const value = data && data.feishu && data.feishu[key] && data.feishu[key].keepRows;
     if (value === undefined || value === null || value === "") return undefined;

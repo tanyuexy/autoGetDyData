@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { enqueueTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     require("dotenv").config();
 
     const taskId = generateTaskIdWithTime("feishu-backup");
-    spawnTask(taskId, "node", [
+    await enqueueTask(taskId, "node", [
       "scripts/run.js",
       "feishu:backup",
       "--profiles",

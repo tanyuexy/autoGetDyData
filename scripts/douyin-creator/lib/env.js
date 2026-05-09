@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { getProjectConfigPath } = require("../../common/config-path");
+const { readProjectConfigFromEnv } = require("../../common/project-config");
 
 /** 优先读 *_SEC（秒），否则读 *_MS（毫秒，兼容旧配置），最后 defaultSeconds（秒）→ 毫秒 */
 function millisecondsFromEnvSecOrMs(secName, msName, defaultSeconds) {
@@ -30,12 +30,6 @@ const ACCOUNTS_DIR = (() => {
   }
   return newPath;
 })();
-
-/**
- * 项目统一配置（config.json）绝对路径。
- * 优先环境变量 PROJECT_CONFIG_PATH 或 ADD_ACCOUNTS_JSON（兼容旧名）覆盖。
- */
-const DEFAULT_ADD_ACCOUNTS_JSON = getProjectConfigPath();
 
 const DEFAULT_ALERT_TO = "2895845213@qq.com";
 const BROWSER_VIEWPORT = { width: 1600, height: 1200 };
@@ -87,9 +81,7 @@ const CREATOR_EXPORT_ACCOUNT_FILE = "creator-export.json";
 
 function readDouyinCreatorSection() {
   try {
-    const p = DEFAULT_ADD_ACCOUNTS_JSON;
-    if (!fs.existsSync(p)) return {};
-    const data = JSON.parse(fs.readFileSync(p, "utf-8"));
+    const data = readProjectConfigFromEnv();
     if (data && data.douyinCreator && typeof data.douyinCreator === "object") {
       return data.douyinCreator;
     }
@@ -119,31 +111,12 @@ const LOGIN_VERIFY_METHOD = (() => {
   return "qr";
 })();
 
-/** 主配置（config.json）内：全局默认 + 按店铺名映射；按 mtime 缓存 */
-let creatorExportMainJsonCache = {
-  path: "",
-  mtimeMs: NaN,
-  data: /** @type {{ global: string | null, byAccount: Record<string, string> }} */ ({
-    global: null,
-    byAccount: {}
-  })
-};
-
 /** accounts/<店>/creator-export.json 按路径 mtime 缓存 */
 const creatorExportPerAccountFileCache = new Map();
 
 function readCreatorExportConfigFromMainJson() {
-  const p = DEFAULT_ADD_ACCOUNTS_JSON;
   try {
-    const st = fs.statSync(p);
-    if (
-      creatorExportMainJsonCache.path === p &&
-      creatorExportMainJsonCache.mtimeMs === st.mtimeMs
-    ) {
-      return creatorExportMainJsonCache.data;
-    }
-    const raw = fs.readFileSync(p, "utf-8");
-    const data = JSON.parse(raw);
+    const data = readProjectConfigFromEnv();
     let global = null;
     if (data && typeof data.creatorExportDateStart === "string") {
       const t = data.creatorExportDateStart.trim();
@@ -163,9 +136,7 @@ function readCreatorExportConfigFromMainJson() {
         }
       }
     }
-    const result = { global, byAccount };
-    creatorExportMainJsonCache = { path: p, mtimeMs: st.mtimeMs, data: result };
-    return result;
+    return { global, byAccount };
   } catch {
     return { global: null, byAccount: {} };
   }
@@ -204,8 +175,8 @@ function readCreatorExportFromAccountFile(accountName) {
  * 优先级（后者被前者覆盖）：
  * 1. 环境变量 DOUYIN_CREATOR_EXPORT_DATE_START（全局，所有店铺同一规则）
  * 2. accounts/<店铺目录名>/creator-export.json 的 creatorExportDateStart
- * 3. config.json 的 creatorExportDateStartByAccount["店铺名"]
- * 4. config.json 的 creatorExportDateStart 全局默认
+ * 3. Mongo app_config 的 creatorExportDateStartByAccount["店铺名"]
+ * 4. Mongo app_config 的 creatorExportDateStart 全局默认
  *
  * @param {string} [accountName] 与 accounts 下目录名一致
  */
@@ -236,7 +207,6 @@ const HEADLESS =
 module.exports = {
   TARGET_URL,
   ACCOUNTS_DIR,
-  DEFAULT_ADD_ACCOUNTS_JSON,
   DEFAULT_ALERT_TO,
   BROWSER_VIEWPORT,
   LOGIN_WAIT_TIMEOUT_MS,

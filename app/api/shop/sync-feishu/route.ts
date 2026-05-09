@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -11,7 +11,7 @@ function parseShopNames(body: any) {
 
 export async function POST(request: NextRequest) {
   try {
-    if (!canStartTask("shop-export")) {
+    if (!(await canStartTask("shop-export"))) {
       return NextResponse.json(
         { error: "已有抖店同步任务在运行，请等待完成后再执行" },
         { status: 409 }
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const shopNames = parseShopNames(body);
 
     const taskId = generateTaskIdWithTime("shop-export-push");
-    spawnTask(taskId, "node", ["scripts/run.js", "shop:sync-feishu"], {
+    await enqueueTask(taskId, "node", ["scripts/run.js", "shop:sync-feishu"], {
       namespace: "shop-export",
       env: {
         SHOP_SELECTED_NAMES: shopNames.join(","),

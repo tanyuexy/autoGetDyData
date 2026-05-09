@@ -1,6 +1,6 @@
 const path = require("path");
 const fs = require("fs");
-const { getProjectConfigPath } = require("../../common/config-path");
+const { getProjectConfigFromEnvOrThrow } = require("../../common/project-config");
 
 function numberFromEnv(name, defaultValue) {
   const raw = process.env[name];
@@ -47,29 +47,12 @@ const DOM_LOAD_TIMEOUT_MS = numberFromEnv(
   30 * 1000
 );
 
-const DEFAULT_ACCOUNTS_JSON_PATH = getProjectConfigPath();
-
 /**
- * 从 config.json 的 emails 字段读取登录邮箱池。
+ * 从 Mongo app_config 的 emails 字段读取登录邮箱池（由 scripts/run.js 注入 PROJECT_CONFIG_JSON）。
  * 要求：必须是 [{ email, password }, ...]，非空；其它位置不再做兜底。
  */
 function getDefaultAccounts() {
-  let raw;
-  try {
-    raw = fs.readFileSync(DEFAULT_ACCOUNTS_JSON_PATH, "utf-8");
-  } catch (error) {
-    throw new Error(
-      `读取 ${DEFAULT_ACCOUNTS_JSON_PATH} 失败: ${error.message || error}`
-    );
-  }
-  let json;
-  try {
-    json = JSON.parse(raw);
-  } catch (error) {
-    throw new Error(
-      `${DEFAULT_ACCOUNTS_JSON_PATH} 不是合法 JSON: ${error.message || error}`
-    );
-  }
+  const json = getProjectConfigFromEnvOrThrow();
   const list = Array.isArray(json?.emails) ? json.emails : [];
   const normalized = [];
   const seen = new Set();
@@ -84,7 +67,7 @@ function getDefaultAccounts() {
   }
   if (normalized.length === 0) {
     throw new Error(
-      `${DEFAULT_ACCOUNTS_JSON_PATH} 缺少有效的 emails 数组，应为 [{ "email": "x@x", "password": "xxx" }, ...]`
+      `Mongo app_config 缺少有效的 emails 数组，应为 [{ "email": "x@x", "password": "xxx" }, ...]`
     );
   }
   return normalized;

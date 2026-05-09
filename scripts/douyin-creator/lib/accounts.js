@@ -51,6 +51,21 @@ async function resolveAccountsToRun(
   accountNameFromArg,
   exportAccountFilters
 ) {
+  if (command === "login") {
+    const selected = (exportAccountFilters || []).filter(Boolean);
+    const unique = [];
+    const seen = new Set();
+    for (const name of selected) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      unique.push(name);
+    }
+    if (unique.length === 0) {
+      throw new Error("login 模式缺少账号名称");
+    }
+    return unique;
+  }
+
   const existingAccounts = await listAccountDirs();
 
   if (existingAccounts.length === 0) {
@@ -108,4 +123,3 @@ module.exports = {
   resolveAccountsToRun,
   splitAccountsByStorageState
 };
-

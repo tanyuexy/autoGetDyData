@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -7,7 +7,7 @@ type LoginMode = "email_qr" | "local_manual";
 
 export async function POST(request: NextRequest) {
   try {
-    if (!canStartTask("login")) {
+    if (!(await canStartTask("login"))) {
       return NextResponse.json(
         { error: "已有登录任务在运行，请等待完成后再执行" },
         { status: 409 }
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     const headless = mode === "local_manual" ? "false" : "true";
 
     const taskId = generateTaskIdWithTime("creator-login");
-    spawnTask(taskId, "node", ["scripts/run.js", "creator:login", accountName], {
+    await enqueueTask(taskId, "node", ["scripts/run.js", "creator:login", accountName], {
       namespace: "login",
       env: { HEADLESS: headless },
     });

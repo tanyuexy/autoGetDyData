@@ -1,23 +1,14 @@
 import { NextResponse } from "next/server";
+import { getConfig } from "@/lib/configService";
 
 export async function GET() {
   try {
-    const { getProjectConfigPath } = require("@/scripts/common/config-path");
     const path = require("path");
     const fs = require("fs");
     const { analyzeStorageState, CREATOR_KEY_COOKIE_PATTERNS, readLastVerified } = require("@/app/lib/cookie-checker");
 
-    const configPath =
-      process.env.PROJECT_CONFIG_PATH ||
-      process.env.ADD_ACCOUNTS_JSON ||
-      getProjectConfigPath();
-
-    let accounts: string[] = [];
-    try {
-      const raw = fs.readFileSync(configPath, "utf-8");
-      const config = JSON.parse(raw);
-      accounts = config.accounts || [];
-    } catch {}
+    const config = await getConfig();
+    const accounts: string[] = config.accounts || [];
 
     const ACCOUNTS_DIR = (() => {
       const envVal = process.env.CREATOR_ACCOUNTS_DIR;

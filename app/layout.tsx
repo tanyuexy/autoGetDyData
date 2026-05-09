@@ -14,8 +14,6 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  require("@/lib/creatorPublishScheduler").startCreatorPublishScheduler();
-
   return (
     <html lang="zh-CN">
       <body>
@@ -23,7 +21,7 @@ export default function RootLayout({
           <ConfigProvider
             locale={zhCN}
             theme={{
-              cssVar: true,
+              cssVar: {},
               hashed: true,
               token: {
                 colorPrimary: "#3B82F6",

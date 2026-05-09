@@ -8,7 +8,7 @@
  *   - 已创建任务 != "是"（飞书侧未标记完成）
  *   - 备注 != "示例"（跳过示例行）
  *   - 必须有 所属店铺 + 视频/图文内容（核心字段）
- *   - 本地去重：如果 tasks.json 中已有相同 feishuRecordId 的任务则跳过
+ *   - Mongo 去重：如果 creator_publish_tasks 中已有相同 feishuRecordId 的任务则跳过
  *
  * 注意：
  *   - 导入时不再回写飞书。发布成功后由 mark-task-published.js 回写。
@@ -18,6 +18,7 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { MongoClient } = require("mongodb");
 const { readBitable } = require("./lib/readBitable");
 const { downloadAttachment } = require("./lib/bitable");
 const { loadFeishuBitableConfigForProfile } = require("./lib/config");
@@ -26,15 +27,6 @@ const { getValidAccessToken } = require("./lib/oauth");
 const MATERIALS_DIR = path.resolve(
   process.cwd(),
   process.env.CREATOR_MATERIALS_DIR || "storage/creator-materials"
-);
-const IMPORTED_TASKS_PATH = path.resolve(
-  process.cwd(),
-  "storage/creator-publish/.imported-tasks.json"
-);
-const TASKS_PATH = path.resolve(
-  process.cwd(),
-  process.env.CREATOR_PUBLISH_TASKS_PATH ||
-    "storage/creator-publish/tasks.json"
 );
 
 function ensureDir(dir) {
@@ -63,18 +55,31 @@ function makeUniqueFileName(originalName, dir) {
 /**
  * 读取已有任务中的 feishuRecordId 集合，用于去重
  */
-function loadExistingFeishuRecordIds() {
-  const ids = new Set();
-  try {
-    if (!fs.existsSync(TASKS_PATH)) return ids;
-    const raw = fs.readFileSync(TASKS_PATH, "utf-8");
-    const tasks = JSON.parse(raw);
-    if (!Array.isArray(tasks)) return ids;
-    for (const t of tasks) {
-      if (t.feishuRecordId) ids.add(t.feishuRecordId);
-    }
-  } catch {}
-  return ids;
+async function getMongoDb() {
+  if (!process.env.MONGODB_URI) throw new Error("MONGODB_URI is required");
+  const client = new MongoClient(process.env.MONGODB_URI);
+  await client.connect();
+  const db = client.db(process.env.MONGODB_DB || "autoGetDyData");
+  await db.collection("creator_publish_tasks").createIndexes([
+    { key: { status: 1, updatedAt: -1 }, name: "status_updatedAt" },
+    { key: { accountName: 1, status: 1 }, name: "account_status" },
+    {
+      key: { feishuRecordId: 1 },
+      name: "feishuRecordId_unique",
+      unique: true,
+      sparse: true,
+    },
+    { key: { taskId: 1 }, name: "taskId_sparse", sparse: true },
+  ]);
+  return { client, db };
+}
+
+async function loadExistingFeishuRecordIds(db) {
+  const docs = await db
+    .collection("creator_publish_tasks")
+    .find({ feishuRecordId: { $exists: true, $ne: "" } }, { projection: { feishuRecordId: 1 } })
+    .toArray();
+  return new Set(docs.map((doc) => doc.feishuRecordId).filter(Boolean));
 }
 
 /**
@@ -109,10 +114,12 @@ function inferType(attachments) {
 async function main() {
   console.log("[import-publish-tasks] 开始从飞书读取任务表...");
 
-  // 读取本地已有任务的 feishuRecordId 集合用于去重
-  const existingIds = loadExistingFeishuRecordIds();
+  const { client, db } = await getMongoDb();
+
+  // 读取 Mongo 已有任务的 feishuRecordId 集合用于去重
+  const existingIds = await loadExistingFeishuRecordIds(db);
   if (existingIds.size > 0) {
-    console.log(`  本地已有 ${existingIds.size} 个飞书导入任务，将跳过重复`);
+    console.log(`  Mongo 已有 ${existingIds.size} 个飞书导入任务，将跳过重复`);
   }
 
   const { records, fieldMapByName } = await readBitable("task");
@@ -138,6 +145,7 @@ async function main() {
 
   if (pending.length === 0) {
     console.log("[import-publish-tasks] 没有待导入的任务，退出。");
+    await client.close();
     return;
   }
 
@@ -148,7 +156,6 @@ async function main() {
 
   ensureDir(MATERIALS_DIR);
 
-  const newTasks = [];
   let createdCount = 0;
   let failedCount = 0;
 
@@ -228,8 +235,17 @@ async function main() {
         },
       };
 
-      // 收集到待合并列表
-      newTasks.push(task);
+      await db.collection("creator_publish_tasks").updateOne(
+        {
+          $or: [
+            { id: task.id },
+            ...(task.feishuRecordId ? [{ feishuRecordId: task.feishuRecordId }] : []),
+          ],
+        },
+        { $setOnInsert: { ...task, _id: task.id } },
+        { upsert: true }
+      );
+      if (task.feishuRecordId) existingIds.add(task.feishuRecordId);
 
       console.log(`    ✓ 已创建任务 ${task.id}（feishuRecordId: ${record.record_id}）`);
 
@@ -240,18 +256,11 @@ async function main() {
     }
   }
 
-  // 写入临时文件，由 API route 负责用共享库合并到 tasks.json（避免竞态条件）
-  if (newTasks.length > 0) {
-    ensureDir(path.dirname(IMPORTED_TASKS_PATH));
-    const tmp = IMPORTED_TASKS_PATH + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(newTasks, null, 2) + "\n", "utf-8");
-    fs.renameSync(tmp, IMPORTED_TASKS_PATH);
-    console.log(`\n[import-publish-tasks] 临时文件写入: ${IMPORTED_TASKS_PATH} (${newTasks.length} 个任务)`);
-  }
-
   console.log(
     `\n[import-publish-tasks] 完成: 创建 ${createdCount}，失败 ${failedCount}`
   );
+
+  await client.close();
 }
 
 main().catch((e) => {

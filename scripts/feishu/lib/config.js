@@ -1,6 +1,5 @@
-const fs = require("fs");
 const path = require("path");
-const { getProjectConfigPath } = require("../../common/config-path");
+const { readProjectConfigFromEnv } = require("../../common/project-config");
 
 const DEFAULT_API_BASE = "https://open.feishu.cn";
 const DEFAULT_AUTH_BASE = "https://accounts.feishu.cn";
@@ -27,10 +26,7 @@ function optionalEnv(name, fallback = "") {
 
 function readFeishuSectionFromProjectConfig(profile) {
   try {
-    const cfgPath = getProjectConfigPath();
-    if (!fs.existsSync(cfgPath)) return null;
-    const raw = fs.readFileSync(cfgPath, "utf8");
-    const data = JSON.parse(raw);
+    const data = readProjectConfigFromEnv();
     const feishu = data && data.feishu;
     if (!feishu || typeof feishu !== "object") return null;
     const key =
@@ -47,7 +43,7 @@ function readFeishuSectionFromProjectConfig(profile) {
 }
 
 /**
- * OAuth 等与 loadFeishuConfig 相同，但多维表格定位到 config.json / 环境变量下的指定 profile（如 creator、shop）。
+ * OAuth 等与 loadFeishuConfig 相同，但多维表格定位到 Mongo app_config / 环境变量下的指定 profile（如 creator、shop）。
  * 用于同一应用下多张表的脚本（例如分别备份抖创表与抖店表）。
  */
 function loadFeishuBitableConfigForProfile(profile) {
@@ -66,7 +62,7 @@ function loadFeishuBitableConfigForProfile(profile) {
     return base;
   }
   throw new Error(
-    `无法解析 feishu.${key}：请在项目 config.json 的 feishu.${key} 中填写 appToken 与 tableId，或设置 FEISHU_BITABLE_PROFILE=${key} 及 FEISHU_BITABLE_APP_TOKEN / FEISHU_BITABLE_TABLE_ID`
+    `无法解析 feishu.${key}：请在 Mongo app_config 的 feishu.${key} 中填写 appToken 与 tableId，或设置 FEISHU_BITABLE_PROFILE=${key} 及 FEISHU_BITABLE_APP_TOKEN / FEISHU_BITABLE_TABLE_ID`
   );
 }
 

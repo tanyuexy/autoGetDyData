@@ -5,6 +5,7 @@
  */
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { MongoClient } = require("mongodb");
 
 const projectRoot = path.resolve(__dirname, "..");
 
@@ -83,7 +84,23 @@ function printHelp() {
 示例: node scripts/run.js creator:export`);
 }
 
-function main() {
+async function loadProjectConfigJson() {
+  if (process.env.PROJECT_CONFIG_JSON) return process.env.PROJECT_CONFIG_JSON;
+  if (!process.env.MONGODB_URI) {
+    throw new Error("MONGODB_URI is required");
+  }
+  const client = new MongoClient(process.env.MONGODB_URI);
+  try {
+    await client.connect();
+    const db = client.db(process.env.MONGODB_DB || "autoGetDyData");
+    const config = await db.collection("app_config").findOne({ _id: "default" });
+    return JSON.stringify(config || {});
+  } finally {
+    await client.close().catch(() => {});
+  }
+}
+
+async function main() {
   const cmd = process.argv[2];
   const rest = process.argv.slice(3);
   if (!cmd) {
@@ -101,6 +118,7 @@ function main() {
   const scriptPath = path.join(projectRoot, route.script);
   const childArgv = [scriptPath, ...(route.argv || []), ...rest];
   const env = route.env ? { ...process.env, ...route.env } : { ...process.env };
+  env.PROJECT_CONFIG_JSON = await loadProjectConfigJson();
 
   let killed = false;
   process.on("SIGTERM", () => {
@@ -129,4 +147,7 @@ function main() {
   process.exit(result.status);
 }
 
-main();
+main().catch((error) => {
+  console.error(error.message || error);
+  process.exit(1);
+});

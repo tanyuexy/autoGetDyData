@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawnTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { enqueueTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
 
@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     let defaultKeepRows = 0;
     try {
       const { getConfig } = require("@/lib/configService");
-      const cfg = getConfig();
+      const cfg = await getConfig();
       defaultKeepRows = Number(cfg?.feishu?.shop?.keepRows ?? 0) || 0;
     } catch { }
 
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
       args.push("--keep-rows", String(Math.floor(effectiveKeepRows)));
     }
 
-    spawnTask(taskId, "node", args, { namespace: "feishu" });
+    await enqueueTask(taskId, "node", args, { namespace: "feishu" });
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

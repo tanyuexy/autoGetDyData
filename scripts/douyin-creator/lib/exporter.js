@@ -637,6 +637,48 @@ function validateExportedPostListXlsx(filePath, accountName, start, end) {
   );
 }
 
+async function gatherPostListPublishedText(page) {
+  const selectors = [
+    "table",
+    "[role='table']",
+    "[class*='table']",
+    "[class*='Table']",
+    "[class*='list']",
+    "[class*='List']",
+    "[class*='row']",
+    "[class*='Row']"
+  ];
+  const chunks = [];
+  const seen = new Set();
+
+  const pushChunk = (text) => {
+    const normalized = String(text || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!normalized) return;
+    const key = normalized.slice(0, 300);
+    if (seen.has(key)) return;
+    seen.add(key);
+    chunks.push(normalized);
+  };
+
+  for (const selector of selectors) {
+    const locator = page.locator(selector);
+    const count = Math.min(await locator.count().catch(() => 0), 8);
+    for (let i = 0; i < count; i += 1) {
+      const item = locator.nth(i);
+      if (!(await item.isVisible({ timeout: 300 }).catch(() => false))) continue;
+      pushChunk(await item.textContent({ timeout: 800 }).catch(() => ""));
+    }
+  }
+
+  if (chunks.length === 0) {
+    pushChunk(await page.locator("body").textContent({ timeout: 1500 }).catch(() => ""));
+  }
+
+  return chunks.join(" ");
+}
+
 async function waitForPostListRefresh(page, accountName, startYmd, endYmd) {
   await page
     .locator("[class*='loading'], [class*='spin'], [aria-busy='true']")
@@ -645,23 +687,13 @@ async function waitForPostListRefresh(page, accountName, startYmd, endYmd) {
     .catch(() => {});
   await page.waitForTimeout(1200);
 
-  const tableText = await page
-    .locator("table, [role='table'], [class*='table'], [class*='list']")
-    .first()
-    .textContent({ timeout: 3000 })
-    .catch(() => "");
+  const tableText = await gatherPostListPublishedText(page);
   if (!tableText) {
-    console.warn(
-      `账号 [${accountName}] 未采集到投稿列表文本，继续依赖导出文件日期校验。`
-    );
     return;
   }
 
   const ymds = collectYmdsFromDateDisplayText(tableText, startYmd);
   if (ymds.size === 0) {
-    console.warn(
-      `账号 [${accountName}] 投稿列表首屏未识别到发布时间，继续依赖导出文件日期校验。`
-    );
     return;
   }
 
@@ -691,6 +723,19 @@ async function saveAuth(context, paths, accountName) {
   console.log(`- storageState: ${paths.storageStatePath}`);
   console.log(`- cookies: ${paths.cookiesPath}`);
   console.log(`- cookie 数量: ${cookies.length}`);
+}
+
+async function cleanupOldExportFiles(dataDir, keepFileName) {
+  try {
+    const names = await fs.readdir(dataDir);
+    for (const name of names) {
+      if (name === keepFileName) continue;
+      if (!name.toLowerCase().endsWith(".xlsx")) continue;
+      await fs.unlink(path.join(dataDir, name)).catch(() => {});
+    }
+  } catch {
+    // ignore cleanup failure
+  }
 }
 
 async function exportPostListData(page, paths, accountName) {
@@ -731,15 +776,22 @@ async function exportPostListData(page, paths, accountName) {
   const rawName =
     download.suggestedFilename() || `douyin-content-${Date.now()}.xlsx`;
   const safeName = rawName.replace(/[\\/:*?"<>|]/g, "_");
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const savePath = path.join(paths.dataDir, `${timestamp}-${safeName}`);
-  await download.saveAs(savePath);
+  const tempFileName = `latest-${Date.now()}-${safeName}`;
+  const tempPath = path.join(paths.dataDir, tempFileName);
+  const latestFileName = safeName;
+  const savePath = path.join(paths.dataDir, latestFileName);
+  await download.saveAs(tempPath);
 
-  if (!(await fileExists(savePath))) {
+  if (!(await fileExists(tempPath))) {
     console.log(`账号 [${accountName}] 提示：文件已触发下载，但未检测到落盘。`);
   }
 
-  validateExportedPostListXlsx(savePath, accountName, dateRange.start, dateRange.end);
+  validateExportedPostListXlsx(tempPath, accountName, dateRange.start, dateRange.end);
+  await fs.rename(tempPath, savePath).catch(async () => {
+    await fs.unlink(savePath).catch(() => {});
+    await fs.rename(tempPath, savePath);
+  });
+  await cleanupOldExportFiles(paths.dataDir, latestFileName);
 
   console.log(`账号 [${accountName}] 导出成功:`);
   console.log(`- 文件路径: ${savePath}`);

@@ -1,16 +1,8 @@
-import fs from "fs";
 import path from "path";
+import { spawn as spawnChild } from "child_process";
 import { getTaskList } from "./taskManager";
-import { loadTaskSnapshotFromDisk } from "./sseManager";
-
-export const CREATOR_PUBLISH_TASKS_PATH = path.resolve(
-  process.env.CREATOR_PUBLISH_TASKS_PATH ||
-  path.join(process.cwd(), "storage/creator-publish/tasks.json")
-);
-
-const TASK_LOGS_DIR = path.resolve(
-  process.env.TASK_LOGS_DIR || path.join(process.cwd(), "storage/task-logs")
-);
+import { getDb } from "./db/mongo";
+import { loadTaskSnapshot, readLastTaskError } from "./taskLogStore";
 
 export type CreatorPublishTaskType = "video" | "article";
 
@@ -63,53 +55,68 @@ export interface CreatorPublishTask {
   feishuRecordId?: string; // 飞书行 record_id，用于发布成功后回写状态
 }
 
-function ensureDirForFile(filePath: string) {
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+function normalizeTask(item: any): CreatorPublishTask | null {
+  if (!item || typeof item.id !== "string") return null;
+  return item as CreatorPublishTask;
 }
 
-export function readCreatorPublishTasks(): CreatorPublishTask[] {
-  try {
-    if (!fs.existsSync(CREATOR_PUBLISH_TASKS_PATH)) return [];
-    const raw = fs.readFileSync(CREATOR_PUBLISH_TASKS_PATH, "utf-8");
-    const data = JSON.parse(raw);
-    if (!Array.isArray(data)) return [];
-    return data as CreatorPublishTask[];
-  } catch {
-    return [];
+export async function readCreatorPublishTasks(): Promise<CreatorPublishTask[]> {
+  const db = await getDb();
+  const docs = await db
+    .collection("creator_publish_tasks")
+    .find({})
+    .sort({ createdAt: -1 })
+    .toArray();
+  return docs.map(normalizeTask).filter(Boolean) as CreatorPublishTask[];
+}
+
+export async function writeCreatorPublishTasks(tasks: CreatorPublishTask[]): Promise<void> {
+  const db = await getDb();
+  const collection = db.collection("creator_publish_tasks");
+  const ids = tasks.map((task) => task.id);
+  if (ids.length > 0) {
+    await collection.bulkWrite(
+      tasks.map((task) => ({
+        replaceOne: {
+          filter: { id: task.id },
+          replacement: { ...task, _id: task.id },
+          upsert: true,
+        },
+      }))
+    );
   }
+  await collection.deleteMany({ id: { $nin: ids } });
 }
 
-export function writeCreatorPublishTasks(tasks: CreatorPublishTask[]) {
-  ensureDirForFile(CREATOR_PUBLISH_TASKS_PATH);
-  const tmp = CREATOR_PUBLISH_TASKS_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(tasks, null, 2) + "\n", "utf-8");
-  fs.renameSync(tmp, CREATOR_PUBLISH_TASKS_PATH);
+export async function upsertCreatorPublishTask(task: CreatorPublishTask): Promise<void> {
+  const db = await getDb();
+  await db
+    .collection("creator_publish_tasks")
+    .replaceOne({ id: task.id }, { ...task, _id: task.id }, { upsert: true });
 }
 
-export function upsertCreatorPublishTask(task: CreatorPublishTask) {
-  const tasks = readCreatorPublishTasks();
-  const idx = tasks.findIndex((t) => t.id === task.id);
-  if (idx >= 0) tasks[idx] = task;
-  else tasks.unshift(task);
-  writeCreatorPublishTasks(tasks);
-}
-
-export function patchCreatorPublishTask(
+export async function patchCreatorPublishTask(
   id: string,
   patch: Partial<CreatorPublishTask>
-): CreatorPublishTask | null {
-  const tasks = readCreatorPublishTasks();
-  const idx = tasks.findIndex((t) => t.id === id);
-  if (idx < 0) return null;
-  const next: CreatorPublishTask = {
-    ...tasks[idx],
-    ...patch,
-    updatedAt: new Date().toISOString(),
-  };
-  tasks[idx] = next;
-  writeCreatorPublishTasks(tasks);
-  return next;
+): Promise<CreatorPublishTask | null> {
+  const db = await getDb();
+  const updatedAt = new Date().toISOString();
+  const nextPatch = { ...patch, updatedAt };
+  await db.collection("creator_publish_tasks").updateOne(
+    { id },
+    {
+      $set: Object.fromEntries(
+        Object.entries(nextPatch).filter(([, value]) => value !== undefined)
+      ),
+      $unset: Object.fromEntries(
+        Object.entries(nextPatch)
+          .filter(([, value]) => value === undefined)
+          .map(([key]) => [key, ""])
+      ),
+    }
+  );
+  const doc = await db.collection("creator_publish_tasks").findOne({ id });
+  return normalizeTask(doc);
 }
 
 /**
@@ -118,7 +125,7 @@ export function patchCreatorPublishTask(
  * 如果飞书中尚未标记为「是」，则补写回。
  */
 export async function reconcileFeishuWritebacks(): Promise<void> {
-  const tasks = readCreatorPublishTasks();
+  const tasks = await readCreatorPublishTasks();
   const pending = tasks.filter(
     (t) => t.status === "success" && t.feishuRecordId
   );
@@ -186,12 +193,12 @@ export async function reconcileFeishuWritebacks(): Promise<void> {
  *
  * 热重载场景：如果 PID 仍存活说明进程还在运行，不处理；PID 已死且日志无DONE则标记失败。
  */
-export function reconcileStaleRunningCreatorPublishTasks(): void {
-  const liveIds = new Set(getTaskList());
+export async function reconcileStaleRunningCreatorPublishTasks(): Promise<void> {
+  const liveIds = new Set(await getTaskList());
   const now = Date.now();
   const MIN_RUNNING_MS = 15_000; // skip tasks running <15s to avoid racing with process spawn
 
-  for (const task of readCreatorPublishTasks()) {
+  for (const task of await readCreatorPublishTasks()) {
     if (task.status !== "running" || !task.taskId) continue;
     if (liveIds.has(task.taskId)) continue;
 
@@ -207,7 +214,7 @@ export function reconcileStaleRunningCreatorPublishTasks(): void {
         continue;
       } catch {
         // PID 已死，进程已退出但 onClose 未执行（崩溃/孤儿）
-        patchCreatorPublishTask(task.id, {
+        await patchCreatorPublishTask(task.id, {
           status: "failed",
           lastError: "子进程异常退出（PID 已不存在）",
         });
@@ -215,41 +222,19 @@ export function reconcileStaleRunningCreatorPublishTasks(): void {
       }
     }
 
-    const snap = loadTaskSnapshotFromDisk(task.taskId);
+    const snap = loadTaskSnapshot(task.taskId);
 
     // 只有日志里明确包含 DONE 才做状态修复。
     // 如果日志存在但还没有 DONE，说明可能只是进程仍在执行或 taskManager 运行列表短暂不同步，不能提前标记失败。
     if (!snap.found || !snap.done) continue;
 
     const ok = snap.exitCode === 0;
-    patchCreatorPublishTask(task.id, {
+    await patchCreatorPublishTask(task.id, {
       status: ok ? "success" : "failed",
       lastError: ok
         ? undefined
         : snap.summary || readLastTaskError(task.taskId) || `退出码 ${snap.exitCode}`,
     });
-  }
-}
-
-function readLastTaskError(taskId: string): string | undefined {
-  try {
-    const day = new Date().toISOString().slice(0, 10);
-    const safeName = String(taskId || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 180);
-    const logPath = path.join(TASK_LOGS_DIR, day, `${safeName}.log`);
-    if (!fs.existsSync(logPath)) return undefined;
-    const content = fs.readFileSync(logPath, "utf-8");
-    const lines = content.trim().split("\n");
-    // 从后往前找第一个有意义的错误行（跳过堆栈行）
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const match = lines[i].match(/\[ERROR\] (.*)/);
-      if (!match) continue;
-      const text = match[1].trim();
-      if (/^\s*at\s/.test(text)) continue; // skip stack trace lines
-      return text;
-    }
-    return undefined;
-  } catch {
-    return undefined;
   }
 }
 
@@ -260,42 +245,53 @@ export function attachCreatorPublishTaskRuntime(
     onError?: (error: Error) => void;
   }
 ) {
-  const tasks = readCreatorPublishTasks();
-  const target = tasks.find((task) => task.taskId === runtimeTaskId);
-  if (!target) return hooks;
+  let target: CreatorPublishTask | null = null;
+  const targetPromise = readCreatorPublishTasks().then((tasks) => {
+    target = tasks.find((task) => task.taskId === runtimeTaskId) || null;
+    return target;
+  });
 
   return {
-    onClose(code: number | null) {
+    async onClose(code: number | null) {
+      const resolvedTarget = target || (await targetPromise);
+      if (!resolvedTarget) {
+        hooks.onClose?.(code);
+        return;
+      }
       let lastError: string | undefined;
       if (code !== 0) {
         lastError = readLastTaskError(runtimeTaskId) || `退出码 ${code ?? -1}`;
       }
-      patchCreatorPublishTask(target.id, {
+      await patchCreatorPublishTask(resolvedTarget.id, {
         status: code === 0 ? "success" : "failed",
         lastError,
       });
 
       // 发布成功 + 来自飞书导入 → 回写飞书行状态
-      if (code === 0 && target.feishuRecordId) {
+      if (code === 0 && resolvedTarget.feishuRecordId) {
         try {
-          const { spawn } = require("child_process");
-          spawn(
-            "node",
+          spawnChild(
+            process.execPath,
             [
-              "scripts/run.js",
+              path.join(process.cwd(), "scripts/run.js"),
               "feishu:mark-task-published",
-              target.feishuRecordId,
-              target.accountName || "",
+              resolvedTarget.feishuRecordId,
+              resolvedTarget.accountName || "",
             ],
             { stdio: "inherit", detached: true }
           ).unref();
-        } catch {}
+        } catch { }
       }
 
       hooks.onClose?.(code);
     },
-    onError(error: Error) {
-      patchCreatorPublishTask(target.id, {
+    async onError(error: Error) {
+      const resolvedTarget = target || (await targetPromise);
+      if (!resolvedTarget) {
+        hooks.onError?.(error);
+        return;
+      }
+      await patchCreatorPublishTask(resolvedTarget.id, {
         status: "failed",
         lastError: error.message || String(error),
       });

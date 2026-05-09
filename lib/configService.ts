@@ -1,24 +1,7 @@
-import fs from "fs";
-import path from "path";
 import type { ConfigData } from "@/types";
+import { getDb } from "./db/mongo";
 
-const CONFIG_PATH = path.resolve(
-  process.env.PROJECT_CONFIG_PATH ||
-    process.env.ADD_ACCOUNTS_JSON ||
-    path.join(process.cwd(), "config.json")
-);
-
-function readConfig(): ConfigData | null {
-  try {
-    const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-export function getConfig(): ConfigData {
-  const data = readConfig();
+function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigData {
   return {
     accounts: data?.accounts || [],
     emails: data?.emails || [],
@@ -43,16 +26,15 @@ export function getConfig(): ConfigData {
   };
 }
 
-export function saveConfig(data: ConfigData): void {
-  // Atomic write: write to temp file then rename
-  const tmpPath = CONFIG_PATH + ".tmp";
-  // Preserve any keys we don't manage
-  const existing = readConfig();
-  const merged = { ...(existing || {}), ...data };
-  fs.writeFileSync(tmpPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
-  fs.renameSync(tmpPath, CONFIG_PATH);
+export async function getConfig(): Promise<ConfigData> {
+  const db = await getDb();
+  const data = await db.collection<any>("app_config").findOne({ _id: "default" });
+  return normalizeConfig(data as Partial<ConfigData> | null);
 }
 
-export function getConfigPath(): string {
-  return CONFIG_PATH;
+export async function saveConfig(data: ConfigData): Promise<void> {
+  const db = await getDb();
+  const existing = await db.collection<any>("app_config").findOne({ _id: "default" });
+  const merged = { ...(existing || {}), ...data, _id: "default", updatedAt: new Date() };
+  await db.collection<any>("app_config").replaceOne({ _id: "default" }, merged, { upsert: true });
 }

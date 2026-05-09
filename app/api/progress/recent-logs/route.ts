@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { listRecentTaskLogs } from "@/lib/sseManager";
+import { listRecentTaskLogs } from "@/lib/taskLogStore";
 
 export async function GET() {
   const files = listRecentTaskLogs(10);

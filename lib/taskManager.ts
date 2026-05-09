@@ -1,8 +1,8 @@
-import { spawn, ChildProcess } from "child_process";
-import fs from "fs";
-import path from "path";
+import type { ChildProcess } from "child_process";
 import { createChannel } from "./sseManager";
 import { getConfig } from "./configService";
+import { getDb } from "./db/mongo";
+import { appendTaskLog, ensureTaskLogMeta, type TaskLogMeta } from "./taskLogStore";
 import {
   getRuntimeProcess,
   getRuntimeProcessesByNamespace,
@@ -26,6 +26,37 @@ export function generateTaskIdWithTime(prefix: string): string {
   return `${prefix}-${hh}.${mm}.${ss}`;
 }
 
+function extractTaskLogMeta(
+  taskId: string,
+  namespace: TaskNamespace,
+  command: string,
+  args: string[],
+  env?: Record<string, string | undefined>
+): TaskLogMeta {
+  const meta: TaskLogMeta = { namespace };
+  const normalizedArgs = Array.isArray(args) ? args.map((item) => String(item || "").trim()) : [];
+  const action = normalizedArgs[1] || "";
+
+  if (command === "node" && normalizedArgs[0] === "scripts/run.js") {
+    if ((action === "creator:open" || action === "creator:login") && normalizedArgs[2]) {
+      meta.accountName = normalizedArgs[2];
+      meta.target = normalizedArgs[2];
+      return meta;
+    }
+
+    if (action === "shop:login" && normalizedArgs[2]) {
+      meta.target = normalizedArgs[2];
+      return meta;
+    }
+  }
+
+  const shopNames = String(env?.SHOP_SELECTED_NAMES || "").trim();
+  if (shopNames) meta.target = shopNames;
+
+  if (!meta.target && taskId) meta.target = taskId;
+  return meta;
+}
+
 interface NamespaceState {
   tasks: Map<string, ChildProcess>;
   stoppingTasks: Set<string>;
@@ -35,7 +66,7 @@ interface NamespaceState {
 
 const DEFAULT_MAX_CONCURRENT: Record<TaskNamespace, number> = {
   "creator-export": 1,
-  "creator-open": 1,
+  "creator-open": Number.POSITIVE_INFINITY,
   "shop-export": 1,
   "creator-publish": 3,
   login: 1,
@@ -68,37 +99,6 @@ function getOrCreateNamespace(ns: TaskNamespace): NamespaceState {
   return state;
 }
 
-const TASK_LOGS_DIR = path.resolve(
-  process.env.TASK_LOGS_DIR || path.join(process.cwd(), "storage/task-logs")
-);
-
-function ensureDir(p: string) {
-  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
-}
-
-function safeFileName(name: string) {
-  return String(name || "")
-    .trim()
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
-    .slice(0, 180);
-}
-
-function getTaskLogPath(taskId: string) {
-  const day = new Date().toISOString().slice(0, 10);
-  return path.join(TASK_LOGS_DIR, day, `${safeFileName(taskId)}.log`);
-}
-
-function appendTaskLog(taskId: string, entry: { level: string; text: string; timestamp: string }) {
-  try {
-    const filePath = getTaskLogPath(taskId);
-    ensureDir(path.dirname(filePath));
-    const line = `[${entry.timestamp}] [${String(entry.level).toUpperCase()}] ${entry.text}\n`;
-    fs.appendFileSync(filePath, line, "utf-8");
-  } catch {
-    // ignore file log errors to avoid breaking tasks
-  }
-}
-
 function countMemoryRunning(ns: NamespaceState): number {
   let running = 0;
   for (const id of ns.tasks.keys()) {
@@ -107,20 +107,30 @@ function countMemoryRunning(ns: NamespaceState): number {
   return running;
 }
 
-function countRegistryRunning(namespace: TaskNamespace): number {
+async function countRegistryRunning(namespace: TaskNamespace): Promise<number> {
   const ns = getOrCreateNamespace(namespace);
   const memoryIds = new Set(ns.tasks.keys());
   let running = countMemoryRunning(ns);
-  for (const record of getRuntimeProcessesByNamespace(namespace)) {
+  for (const record of await getRuntimeProcessesByNamespace(namespace)) {
     if (!memoryIds.has(record.taskId)) running++;
+  }
+  const db = await getDb();
+  running += await db.collection("task_jobs").countDocuments({
+    namespace,
+    status: "queued",
+  });
+  if (namespace === "creator-publish") {
+    running += await db.collection("creator_publish_tasks").countDocuments({
+      status: { $in: ["queued", "running"] },
+    });
   }
   return running;
 }
 
 /** Check if a namespace can accept a new task */
-export function canStartTask(namespace: TaskNamespace): boolean {
+export async function canStartTask(namespace: TaskNamespace): Promise<boolean> {
   const ns = getOrCreateNamespace(namespace);
-  return countRegistryRunning(namespace) < ns.maxConcurrent;
+  return (await countRegistryRunning(namespace)) < ns.maxConcurrent;
 }
 
 /** Get the maxConcurrent limit for a namespace */
@@ -129,16 +139,16 @@ export function getConcurrencyLimit(namespace: TaskNamespace): number {
 }
 
 /** Legacy: check if any task is running (optionally scoped to namespace) */
-export function isTaskRunning(namespace?: TaskNamespace): boolean {
-  if (namespace) return !canStartTask(namespace);
+export async function isTaskRunning(namespace?: TaskNamespace): Promise<boolean> {
+  if (namespace) return !(await canStartTask(namespace));
   for (const nsName of Object.keys(DEFAULT_MAX_CONCURRENT) as TaskNamespace[]) {
-    if (countRegistryRunning(nsName) > 0) return true;
+    if ((await countRegistryRunning(nsName)) > 0) return true;
   }
   return false;
 }
 
 /** Get first running task ID in a namespace (or first globally) */
-export function getRunningTaskId(namespace?: TaskNamespace): string | null {
+export async function getRunningTaskId(namespace?: TaskNamespace): Promise<string | null> {
   const check = (ns: NamespaceState) => {
     for (const id of ns.tasks.keys()) {
       if (!ns.stoppingTasks.has(id)) return id;
@@ -149,13 +159,13 @@ export function getRunningTaskId(namespace?: TaskNamespace): string | null {
     const ns = namespaces.get(namespace);
     const memoryId = ns ? check(ns) : null;
     if (memoryId) return memoryId;
-    return getRuntimeProcessesByNamespace(namespace)[0]?.taskId || null;
+    return (await getRuntimeProcessesByNamespace(namespace))[0]?.taskId || null;
   }
   for (const ns of namespaces.values()) {
     const id = check(ns);
     if (id) return id;
   }
-  return readRuntimeProcesses({ pruneDead: true })[0]?.taskId || null;
+  return (await readRuntimeProcesses({ pruneDead: true }))[0]?.taskId || null;
 }
 
 export interface RunningTaskInfo {
@@ -165,7 +175,7 @@ export interface RunningTaskInfo {
 }
 
 /** List all currently running tasks across all namespaces */
-export function getRunningTaskList(): RunningTaskInfo[] {
+export async function getRunningTaskList(): Promise<RunningTaskInfo[]> {
   const result = new Map<string, RunningTaskInfo>();
   for (const [nsName, ns] of namespaces) {
     for (const [taskId, meta] of ns.taskMeta) {
@@ -174,7 +184,7 @@ export function getRunningTaskList(): RunningTaskInfo[] {
       }
     }
   }
-  for (const record of readRuntimeProcesses({ pruneDead: true })) {
+  for (const record of await readRuntimeProcesses({ pruneDead: true })) {
     if (!result.has(record.taskId)) {
       result.set(record.taskId, {
         taskId: record.taskId,
@@ -258,157 +268,57 @@ async function scheduleForceKill(
   }, 5000).unref?.();
 }
 
-export function spawnTask(
+export async function enqueueTask(
   taskId: string,
   command: string,
   args: string[],
   options?: {
     namespace?: TaskNamespace;
     cwd?: string;
-    onClose?: (code: number | null) => void;
-    onError?: (err: Error) => void;
     env?: Record<string, string | undefined>;
     timeoutMs?: number;
     interactive?: boolean;
   }
-): { sse: ReturnType<typeof createChannel>; child: ChildProcess } {
+): Promise<{ sse: ReturnType<typeof createChannel> }> {
   const nsName = options?.namespace || "system";
-  const ns = getOrCreateNamespace(nsName);
   const sse = createChannel(taskId);
 
   let headless = String(process.env.HEADLESS === "true" || process.env.HEADLESS === "1");
   try {
-    const cfg = getConfig();
+    const cfg = await getConfig();
     headless = String(cfg.headless === true);
   } catch { }
 
   const cwd = options?.cwd || process.cwd();
-  const child = spawn(command, args, {
-    cwd,
-    env: { ...process.env, HEADLESS: headless, ...(options?.env || {}) },
-    stdio: ["pipe", "pipe", "pipe"],
-    shell: false,
-    detached: process.platform !== "win32",
-  });
-
-  const startedAt = Date.now();
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS[nsName];
-
-  ns.tasks.set(taskId, child);
-  ns.stoppingTasks.delete(taskId);
-  ns.taskMeta.set(taskId, { startedAt, namespace: nsName });
-
-  if (child.pid) {
-    registerRuntimeProcess({
+  const now = new Date();
+  const db = await getDb();
+  await db.collection("task_jobs").replaceOne(
+    { taskId },
+    {
       taskId,
       namespace: nsName,
-      pid: child.pid,
+      status: "queued",
       command,
       args,
       cwd,
-      startedAt,
+      env: { HEADLESS: headless, ...(options?.env || {}) },
       timeoutMs,
-      interactive: options?.interactive,
-    });
-  }
+      interactive: options?.interactive === true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    { upsert: true }
+  );
 
-  let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  if (timeoutMs && timeoutMs > 0 && !options?.interactive) {
-    timeoutTimer = setTimeout(() => {
-      appendTaskLog(taskId, {
-        text: `任务运行超过 ${Math.round(timeoutMs / 1000)} 秒，自动终止`,
-        level: "error",
-        timestamp: new Date().toISOString(),
-      });
-      killTask(taskId);
-    }, timeoutMs);
-    timeoutTimer.unref?.();
-  }
-
-  let stdoutBuf = "";
-  child.stdout?.on("data", (chunk: Buffer) => {
-    stdoutBuf += chunk.toString();
-    const lines = stdoutBuf.split("\n");
-    stdoutBuf = lines.pop() || "";
-    for (const line of lines) {
-      const trimmed = line.trimEnd();
-      if (!trimmed) continue;
-      const ts = new Date().toISOString();
-      const entry = { text: trimmed, level: "info", timestamp: ts } as const;
-      appendTaskLog(taskId, entry);
-      sse.send("log", entry);
-    }
+  ensureTaskLogMeta(taskId, extractTaskLogMeta(taskId, nsName, command, args, options?.env), now.toISOString());
+  appendTaskLog(taskId, {
+    text: `任务已加入队列 namespace=${nsName}`,
+    level: "info",
+    timestamp: now.toISOString(),
   });
 
-  let stderrBuf = "";
-  child.stderr?.on("data", (chunk: Buffer) => {
-    stderrBuf += chunk.toString();
-    const lines = stderrBuf.split("\n");
-    stderrBuf = lines.pop() || "";
-    for (const line of lines) {
-      const trimmed = line.trimEnd();
-      if (!trimmed) continue;
-      const ts = new Date().toISOString();
-      const entry = { text: trimmed, level: "error", timestamp: ts } as const;
-      appendTaskLog(taskId, entry);
-      sse.send("log", entry);
-    }
-  });
-
-  function cleanupRuntimeState() {
-    if (timeoutTimer) clearTimeout(timeoutTimer);
-    ns.stoppingTasks.delete(taskId);
-    ns.tasks.delete(taskId);
-    ns.taskMeta.delete(taskId);
-    removeRuntimeProcess(taskId);
-  }
-
-  child.on("close", (code) => {
-    if (stdoutBuf.trim()) {
-      const ts = new Date().toISOString();
-      const entry = { text: stdoutBuf.trimEnd(), level: "info", timestamp: ts } as const;
-      appendTaskLog(taskId, entry);
-      sse.send("log", entry);
-    }
-    if (stderrBuf.trim()) {
-      const ts = new Date().toISOString();
-      const entry = { text: stderrBuf.trimEnd(), level: "error", timestamp: ts } as const;
-      appendTaskLog(taskId, entry);
-      sse.send("log", entry);
-    }
-    const doneEvent = {
-      code: code ?? -1,
-      summary: `Process exited with code ${code ?? -1}`,
-    };
-    appendTaskLog(taskId, {
-      text: `DONE code=${doneEvent.code} summary=${doneEvent.summary}`,
-      level: "info",
-      timestamp: new Date().toISOString(),
-    });
-    sse.send("done", doneEvent);
-    sse.close();
-    cleanupRuntimeState();
-    options?.onClose?.(code);
-  });
-
-  child.on("error", (err) => {
-    const ts = new Date().toISOString();
-    const entry = { text: `Process error: ${err.message}`, level: "error", timestamp: ts } as const;
-    appendTaskLog(taskId, entry);
-    sse.send("log", entry);
-
-    appendTaskLog(taskId, {
-      text: `DONE code=-1 summary=${err.message}`,
-      level: "info",
-      timestamp: new Date().toISOString(),
-    });
-    sse.send("done", { code: -1, summary: err.message });
-    sse.close();
-    cleanupRuntimeState();
-    options?.onError?.(err);
-  });
-
-  return { sse, child };
+  return { sse };
 }
 
 export async function killTask(taskId: string): Promise<boolean> {
@@ -428,8 +338,32 @@ export async function killTask(taskId: string): Promise<boolean> {
     }
   }
 
-  const record = getRuntimeProcess(taskId);
-  if (!record) return false;
+  const record = await getRuntimeProcess(taskId);
+  if (!record) {
+    const db = await getDb();
+    const result = await db.collection("task_jobs").updateOne(
+      { taskId, status: "queued" },
+      {
+        $set: {
+          status: "cancelled",
+          updatedAt: new Date(),
+          lastError: "用户手动终止",
+        },
+      }
+    );
+    return result.modifiedCount > 0;
+  }
+  const db = await getDb();
+  await db.collection("task_jobs").updateOne(
+    { taskId },
+    {
+      $set: {
+        status: "cancelled",
+        updatedAt: new Date(),
+        lastError: "用户手动终止",
+      },
+    }
+  );
   const descendants = await collectDescendantPids(record.pid).catch(() => []);
   appendTaskLog(taskId, {
     text: `正在终止已恢复的任务进程树 pid=${record.pid}`,
@@ -442,11 +376,11 @@ export async function killTask(taskId: string): Promise<boolean> {
 }
 
 /** Legacy: list all task IDs across all namespaces */
-export function getTaskList(): string[] {
+export async function getTaskList(): Promise<string[]> {
   const ids = new Set<string>();
   for (const ns of namespaces.values()) {
     for (const id of ns.tasks.keys()) ids.add(id);
   }
-  for (const record of readRuntimeProcesses({ pruneDead: true })) ids.add(record.taskId);
+  for (const record of await readRuntimeProcesses({ pruneDead: true })) ids.add(record.taskId);
   return Array.from(ids);
 }

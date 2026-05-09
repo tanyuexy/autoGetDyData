@@ -1,13 +1,18 @@
 import { NextRequest } from "next/server";
-import {
-  drainSsePending,
-  registerClient,
-  unregisterClient,
-  writeSseBootstrap,
-} from "@/lib/sseManager";
 import { killTask } from "@/lib/taskManager";
+import { loadTaskLogEvents } from "@/lib/taskLogStore";
 
 export const maxDuration = 0;
+
+const POLL_MS = 500;
+
+function writeSse(controller: ReadableStreamDefaultController, encoder: TextEncoder, chunk: string) {
+  controller.enqueue(encoder.encode(chunk));
+}
+
+function formatSse(event: string, data: string) {
+  return `event: ${event}\ndata: ${data}\n\n`;
+}
 
 export async function GET(
   _request: NextRequest,
@@ -16,16 +21,54 @@ export async function GET(
   const { taskId } = await params;
 
   const encoder = new TextEncoder();
+  let interval: ReturnType<typeof setInterval> | null = null;
+  let closed = false;
+
+  const closeStream = (controller?: ReadableStreamDefaultController) => {
+    closed = true;
+    if (interval) {
+      clearInterval(interval);
+      interval = null;
+    }
+    if (controller) {
+      try {
+        controller.close();
+      } catch {
+        // Stream may already be closed by the browser.
+      }
+    }
+  };
+
   const stream = new ReadableStream({
     start(controller) {
-      registerClient(taskId, controller, encoder);
-      writeSseBootstrap(taskId, `retry: 2000\nevent: connected\ndata: {}\n\n`);
-    },
-    pull() {
-      drainSsePending(taskId);
+      let sentCount = 0;
+
+      writeSse(controller, encoder, `retry: 2000\nevent: connected\ndata: {}\n\n`);
+
+      const flush = () => {
+        if (closed) return;
+        try {
+          const events = loadTaskLogEvents(taskId) || [];
+          if (events.length < sentCount) sentCount = 0;
+
+          for (const ev of events.slice(sentCount)) {
+            writeSse(controller, encoder, formatSse(ev.event, ev.data));
+            if (ev.event === "done") {
+              closeStream(controller);
+              return;
+            }
+          }
+          sentCount = events.length;
+        } catch {
+          closeStream();
+        }
+      };
+
+      interval = setInterval(flush, POLL_MS);
+      flush();
     },
     cancel() {
-      unregisterClient(taskId);
+      closeStream();
     },
   });
 

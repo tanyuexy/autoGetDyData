@@ -16,7 +16,7 @@ interface Props {
 
 const levelColors: Record<string, string> = {
   info: "#a9b7c6",
-  warn: "#cc7832",
+  warn: "#f0c674",
   error: "#ff6b68",
 };
 
