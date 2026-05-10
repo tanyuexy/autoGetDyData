@@ -42,8 +42,8 @@ export async function GET() {
         let cookieStatus = hasStorage ? analysis.status : "missing";
         let cookieDetail: string | null = hasStorage ? analysis.detail : null;
 
-        if (lastVerified.verifiedAt) {
-          cookieStatus = "valid";
+        if (lastVerified.verifiedAt && lastVerified.status) {
+          cookieStatus = lastVerified.status;
           cookieDetail = lastVerified.detail || analysis.detail;
         }
 

@@ -33,14 +33,14 @@ export async function GET() {
         const analysis = analyzeStorageState(storagePath, SHOP_KEY_COOKIE_PATTERNS, 14);
         const hasStorage = analysis.status !== "missing";
 
-        // 最近 24h 内浏览器验证通过的，覆盖 cookie 静态分析结果
+        // 最近 24h 内浏览器验证结果，覆盖 cookie 静态分析结果
         const lastVerified = readLastVerified(accountDir);
 
         let cookieStatus = hasStorage ? analysis.status : "missing";
         let cookieDetail: string | null = hasStorage ? analysis.detail : null;
 
-        if (lastVerified.verifiedAt) {
-          cookieStatus = "valid";
+        if (lastVerified.verifiedAt && lastVerified.status) {
+          cookieStatus = lastVerified.status;
           cookieDetail = lastVerified.detail || analysis.detail;
         }
 

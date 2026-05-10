@@ -184,22 +184,33 @@ function analyzeStorageState(storagePath, keyPatterns, maxAgeDays = 30) {
 /**
  * 读取最近一次浏览器验证结果，用于覆盖 cookie 静态分析
  * @param {string} accountDir - 账号目录路径
- * @returns {{ verifiedAt: string|null, detail: string|null }}
+ * @returns {{ verifiedAt: string|null, detail: string|null, status: "valid"|"expired"|null }}
  */
 function readLastVerified(accountDir) {
   const vp = path.join(accountDir, "verified-at.json");
   try {
     const raw = fs.readFileSync(vp, "utf-8");
     const data = JSON.parse(raw);
-    if (!data || typeof data.time !== "number") return { verifiedAt: null, detail: null };
+    if (!data || typeof data.time !== "number") {
+      return { verifiedAt: null, detail: null, status: null };
+    }
     const ageH = (Date.now() - data.time) / (3600 * 1000);
-    if (ageH > 24) return { verifiedAt: null, detail: null };
+    if (ageH > 24) return { verifiedAt: null, detail: null, status: null };
+    const status =
+      data.status === COOKIE_STATUS.VALID || data.status === COOKIE_STATUS.EXPIRED
+        ? data.status
+        : data.verified === true
+          ? COOKIE_STATUS.VALID
+          : data.verified === false
+            ? COOKIE_STATUS.EXPIRED
+            : null;
     return {
       verifiedAt: new Date(data.time).toISOString(),
       detail: data.detail || `浏览器验证通过 (${Math.round(ageH)}h 前)`,
+      status,
     };
   } catch {
-    return { verifiedAt: null, detail: null };
+    return { verifiedAt: null, detail: null, status: null };
   }
 }
 

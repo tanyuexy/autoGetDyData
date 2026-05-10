@@ -236,6 +236,8 @@ export default function AccountTable(props: Props) {
             row.hasStorageState &&
             row.cookieStatus !== "expired" &&
             row.cookieStatus !== "missing";
+          const canUseLoggedInActions =
+            row.hasStorageState && row.cookieStatus !== "expired";
           const isVerifying = verifying.has(row.name);
 
           const items = [
@@ -271,21 +273,20 @@ export default function AccountTable(props: Props) {
                   </Space>
                 </Button>
               </Dropdown>
-              {row.hasStorageState && (
-                <Button
-                  size="small"
-                  icon={<SafetyCertificateOutlined />}
-                  loading={isVerifying}
-                  onClick={() => handleVerify(row.name)}
-                >
-                  验证
-                </Button>
-              )}
+              <Button
+                size="small"
+                icon={<SafetyCertificateOutlined />}
+                loading={isVerifying}
+                disabled={!canUseLoggedInActions}
+                onClick={() => handleVerify(row.name)}
+              >
+                验证
+              </Button>
               {onOpenCreator && (
                 <Button
                   size="small"
                   type="primary"
-                  disabled={!row.hasStorageState}
+                  disabled={!canUseLoggedInActions}
                   onClick={() => onOpenCreator(row.name)}
                 >
                   抖创页面

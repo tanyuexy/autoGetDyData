@@ -124,16 +124,19 @@ export async function POST(request: Request) {
     const elapsed = Date.now() - start;
 
     // 验证通过时写入验证结果，下次刷新页面时 list API 会读到
-    if (verified) {
-      try {
-        const vp = path.join(ACCOUNTS_DIR, dirName, "verified-at.json");
-        fs.writeFileSync(
-          vp,
-          JSON.stringify({ time: Date.now(), detail }),
-          "utf-8"
-        );
-      } catch {}
-    }
+    try {
+      const vp = path.join(ACCOUNTS_DIR, dirName, "verified-at.json");
+      fs.writeFileSync(
+        vp,
+        JSON.stringify({
+          time: Date.now(),
+          detail,
+          verified,
+          status: verified ? "valid" : "expired",
+        }),
+        "utf-8"
+      );
+    } catch {}
 
     return NextResponse.json({
       email,
