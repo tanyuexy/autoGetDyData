@@ -2,13 +2,21 @@ const path = require("path");
 const fs = require("fs/promises");
 
 const {
-  pickLatestSelectableCalendarDay
+  pickLatestSelectableCalendarDay,
+  retryableDownload,
+  retryableGoto
 } = require("./page-utils");
 const { appendDataDateColumn } = require("./merge-shop-exports");
+const {
+  markFailed,
+  markRunning,
+  markSuccess
+} = require("./export-item-store");
 
 const VIDEO_SELF_URL =
   process.env.SHOP_VIDEO_SELF_URL ||
   "https://compass.jinritemai.com/shop/video/self";
+const VIDEO_READY_TIMEOUT_MS = Number(process.env.SHOP_VIDEO_READY_TIMEOUT_MS || 60000);
 
 function logStep(tag, msg, started) {
   const dur = started ? ` (+${Date.now() - started}ms)` : "";
@@ -62,9 +70,12 @@ async function gotoVideoSelf(page, tag) {
   if (!url.startsWith(VIDEO_SELF_URL)) {
     logStep(tag, `跳转至短视频明细页: ${VIDEO_SELF_URL}`);
     try {
-      await page.goto(VIDEO_SELF_URL, {
+      await retryableGoto(page, VIDEO_SELF_URL, {
         waitUntil: "domcontentloaded",
-        timeout: 20000
+        timeout: 45000,
+        maxRetries: 2,
+        baseBackoff: 2500,
+        expectedUrlRe: /compass\.jinritemai\.com\/shop\/video\/self/
       });
     } catch (error) {
       logWarn(tag, `跳转短视频明细页失败: ${error.message || error}`);
@@ -74,7 +85,21 @@ async function gotoVideoSelf(page, tag) {
     logStep(tag, `当前已在短视频明细页`);
   }
 
-  await waitForVideoSelfReady(page, tag, 25000);
+  let ready = await waitForVideoSelfReady(page, tag, VIDEO_READY_TIMEOUT_MS);
+  if (!ready) {
+    logWarn(tag, "短视频明细页未就绪，重试一次导航");
+    await retryableGoto(page, VIDEO_SELF_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 45000,
+      maxRetries: 1,
+      baseBackoff: 2500,
+      expectedUrlRe: /compass\.jinritemai\.com\/shop\/video\/self/
+    });
+    ready = await waitForVideoSelfReady(page, tag, VIDEO_READY_TIMEOUT_MS);
+  }
+  if (!ready) {
+    throw new Error(`短视频明细页筛选区未就绪（${VIDEO_READY_TIMEOUT_MS}ms）`);
+  }
   logStep(tag, `gotoVideoSelf 完成`, started);
 }
 
@@ -263,18 +288,15 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   await downloadBtn.waitFor({ state: "visible", timeout: 8000 });
 
   logStep(tag, `发现 ${btnCount} 个"下载明细"按钮，点击最后一个（${exportLabel}）`);
-  const downloadPromise = page.waitForEvent("download", { timeout: 60000 });
-
-  await downloadBtn.click({ timeout: 3000 });
-
-  let download;
-  try {
-    download = await downloadPromise;
-  } catch (error) {
-    throw new Error(
-      `点击"下载明细"后 60s 内未触发下载事件：${error.message || error}`
-    );
-  }
+  const download = await retryableDownload(
+    page,
+    () => downloadBtn.click({ timeout: 3000 }),
+    {
+      timeout: 60000,
+      maxRetries: 2,
+      retryDelay: 3000
+    }
+  );
 
   const rawName =
     download.suggestedFilename() || `video-detail-${Date.now()}.csv`;
@@ -311,30 +333,63 @@ function calcDataDate(dayOffset) {
  * @param {import('playwright').Page} page
  * @param {{ tag: string, saveDir: string, shopName?: string, daysToExport?: number }} options
  */
-async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExport = 1, exportBatchId = null }) {
+async function downloadVideoSelfDetail(page, {
+  tag,
+  saveDir,
+  shopName,
+  daysToExport = 1,
+  exportBatchId = null,
+  accountEmail = "",
+  targetDates = null,
+  targetKinds = null
+}) {
   const startedAll = Date.now();
   logStep(tag, `视频下载开始，目标店铺: ${shopName || "(未指定)"}，循环天数: ${daysToExport}`);
+
+  const dateSet = Array.isArray(targetDates) && targetDates.length > 0 ? new Set(targetDates) : null;
+  const kindSet = Array.isArray(targetKinds) && targetKinds.length > 0 ? new Set(targetKinds) : null;
+  if (kindSet && !kindSet.has("video")) {
+    logStep(tag, "补跑目标不包含视频，跳过视频下载");
+    return { savePath: null, dataDate: null, allResults: [], failures: [], targetCount: 0 };
+  }
 
   await gotoVideoSelf(page, tag);
 
   const results = [];
+  let targetCount = 0;
 
   for (let offset = 0; offset < daysToExport; offset++) {
     logStep(tag, `--- 第 ${offset + 1}/${daysToExport} 轮（offset=${offset}）---`);
 
-    const { ok: datePicked, dataDate } = await selectDateRangeYesterday(page, tag, offset);
-
     const expectedDate = calcDataDate(offset);
+    if (dateSet && !dateSet.has(expectedDate)) {
+      logStep(tag, `跳过非补跑目标日期: ${expectedDate}`);
+      continue;
+    }
+    targetCount += 1;
+
+    const { ok: datePicked, dataDate } = await selectDateRangeYesterday(page, tag, offset);
+    const item = {
+      runId: exportBatchId,
+      accountEmail,
+      shopName: shopName || "unknown",
+      kind: "video",
+      dataDate: expectedDate,
+      expectedDate
+    };
+    await markRunning(item);
     const dateMatch = datePicked && dataDate === expectedDate;
     if (!datePicked || !dataDate) {
       const error = `视频日期选择失败：未能选择或解析日期，预期 ${expectedDate} (offset=${offset})`;
       logWarn(tag, error);
+      await markFailed(item, error);
       results.push({ savePath: null, dataDate: dataDate || null, expectedDate, dateMatch: false, error });
       continue;
     }
     if (!dateMatch) {
       const error = `视频日期选择不符：日历选中 ${dataDate} ≠ 预期 ${expectedDate} (offset=${offset})`;
       logWarn(tag, error);
+      await markFailed(item, error);
       results.push({ savePath: null, dataDate, expectedDate, dateMatch: false, error });
       continue;
     }
@@ -346,10 +401,19 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
     const targetDir = shopName
       ? path.join(saveDir, safeShopDirName(shopName), "视频明细")
       : saveDir;
-    const savePath = await clickDownloadAndSave(page, tag, targetDir, {
-      exportLabel: "视频明细",
-      exportBatchId
-    });
+    let savePath;
+    try {
+      savePath = await clickDownloadAndSave(page, tag, targetDir, {
+        exportLabel: "视频明细",
+        exportBatchId
+      });
+    } catch (error) {
+      const msg = error?.message || String(error);
+      logWarn(tag, `视频明细下载失败: ${msg}`);
+      await markFailed(item, msg);
+      results.push({ savePath: null, dataDate: expectedDate, expectedDate, dateMatch: false, error: msg });
+      continue;
+    }
 
     const dateToWrite = expectedDate;
     try {
@@ -358,6 +422,7 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
     } catch (e) {
       logWarn(tag, `写入「数据日期」列失败: ${e.message || e}`);
     }
+    await markSuccess(item, savePath);
 
     results.push({ savePath, dataDate: dateToWrite, dateMatch });
 
@@ -367,7 +432,7 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
     }
   }
 
-  logStep(tag, `视频下载流程完成，成功 ${results.filter((r) => r.savePath && r.dateMatch !== false).length}/${daysToExport} 天`, startedAll);
+  logStep(tag, `视频下载流程完成，成功 ${results.filter((r) => r.savePath && r.dateMatch !== false).length}/${targetCount || daysToExport} 天`, startedAll);
   const failures = results
     .filter((r) => r.dateMatch === false || !r.savePath)
     .map((r) => ({
@@ -381,9 +446,10 @@ async function downloadVideoSelfDetail(page, { tag, saveDir, shopName, daysToExp
         savePath: firstSuccess?.savePath || null,
         dataDate: firstSuccess?.dataDate || null,
         allResults: results,
-        failures
+        failures,
+        targetCount
       }
-    : { savePath: null, dataDate: null, allResults: [], failures };
+    : { savePath: null, dataDate: null, allResults: [], failures, targetCount };
 }
 
 module.exports = {

@@ -39,7 +39,7 @@ const SLIDER_DRAG_DURATION_MS = numberFromEnv("SHOP_SLIDER_DURATION_MS", 1100);
 const SLIDER_MAX_RETRY = numberFromEnv("SHOP_SLIDER_MAX_RETRY", 5);
 
 // 登录总超时（毫秒）
-const LOGIN_TIMEOUT_MS = numberFromEnv("SHOP_LOGIN_TIMEOUT_MS", 120 * 1000);
+const LOGIN_TIMEOUT_MS = numberFromEnv("SHOP_LOGIN_TIMEOUT_MS", 300 * 1000);
 
 // 选店/切店后等待页面 load 事件（毫秒），再跳转明细页等后续步骤
 const DOM_LOAD_TIMEOUT_MS = numberFromEnv(

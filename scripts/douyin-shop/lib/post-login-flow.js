@@ -59,6 +59,9 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
   const sn = shopName || "unknown";
   const daysToExport = options.daysToExport || 1;
   const exportBatchId = options.exportBatchId || null;
+  const accountEmail = options.accountEmail || "";
+  const targetDates = Array.isArray(options.targetDates) ? options.targetDates : null;
+  const targetKinds = Array.isArray(options.targetKinds) ? options.targetKinds : null;
 
   let videoPaths = [];
   let graphicPaths = [];
@@ -66,6 +69,8 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
   let graphicError;
   let videoDateMismatches = [];
   let graphicDateMismatches = [];
+  let videoTargetCount = targetKinds && !targetKinds.includes("video") ? 0 : daysToExport;
+  let graphicTargetCount = targetKinds && !targetKinds.includes("graphic") ? 0 : daysToExport;
   const allFailures = [];
 
   try {
@@ -74,7 +79,10 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       saveDir: paths.dataDir,
       shopName: sn,
       daysToExport,
-      exportBatchId
+      exportBatchId,
+      accountEmail,
+      targetDates,
+      targetKinds
     });
     if (result.failures && result.failures.length) {
       allFailures.push(...result.failures);
@@ -87,6 +95,7 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       videoDateMismatches = result.allResults
         .filter((r) => r.dateMatch === false)
         .map((r) => r.dataDate || r.expectedDate || "unknown");
+      videoTargetCount = result.targetCount ?? daysToExport;
     } else if (result.savePath) {
       videoPaths = [result.savePath];
     }
@@ -107,7 +116,10 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       saveDir: paths.dataDir,
       shopName: sn,
       daysToExport,
-      exportBatchId
+      exportBatchId,
+      accountEmail,
+      targetDates,
+      targetKinds
     });
     if (result.failures && result.failures.length) {
       allFailures.push(...result.failures);
@@ -120,6 +132,7 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       graphicDateMismatches = result.allResults
         .filter((r) => r.dateMatch === false)
         .map((r) => r.dataDate || r.expectedDate || "unknown");
+      graphicTargetCount = result.targetCount ?? daysToExport;
     } else if (result.savePath) {
       graphicPaths = [result.savePath];
     }
@@ -134,7 +147,7 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     if (shot) console.error(`[${shopTag}] 失败截图: ${shot}`);
   }
 
-  const ok = videoPaths.length === daysToExport && graphicPaths.length === daysToExport;
+  const ok = videoPaths.length === videoTargetCount && graphicPaths.length === graphicTargetCount;
   const parts = [videoError, graphicError].filter(Boolean);
 
   const videoDaysOk = videoError ? 0 : videoPaths.length;
@@ -155,8 +168,8 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
   }
 
   console.log(
-    `[${shopTag}] ─── 导出汇总: 视频 ${videoDaysOk}/${daysToExport}天 ${videoDaysOk === daysToExport ? '✓' : '✗'} | ` +
-    `图文 ${graphicDaysOk}/${daysToExport}天 ${graphicDaysOk === daysToExport ? '✓' : '✗'}` +
+    `[${shopTag}] ─── 导出汇总: 视频 ${videoDaysOk}/${videoTargetCount}天 ${videoDaysOk === videoTargetCount ? '✓' : '✗'} | ` +
+    `图文 ${graphicDaysOk}/${graphicTargetCount}天 ${graphicDaysOk === graphicTargetCount ? '✓' : '✗'}` +
     (!dateOk ? ` | ⚠ ${dateMismatchWarn.join('; ')}` : '') +
     (videoError ? ` | 视频错误: ${videoError}` : '') +
     (graphicError ? ` | 图文错误: ${graphicError}` : '') +
@@ -169,6 +182,8 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     videoDays: videoDaysOk,
     graphicDays: graphicDaysOk,
     daysToExport,
+    videoTargetCount,
+    graphicTargetCount,
     videoPath: videoPaths[0] || null,
     graphicPath: graphicPaths[0] || null,
     videoError,
@@ -310,7 +325,10 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
     const round = await downloadCurrentShop(page, tag, paths, {
       shopNameHint: pendingShopHint,
       daysToExport,
-      exportBatchId: options.exportBatchId || null
+      exportBatchId: options.exportBatchId || null,
+      accountEmail: options.accountEmail || "",
+      targetDates: options.targetDates || null,
+      targetKinds: options.targetKinds || null
     });
     if (round.shopName) {
       processed.add(round.shopName);
@@ -331,6 +349,8 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
       videoDays: round.videoDays,
       graphicDays: round.graphicDays,
       daysToExport: round.daysToExport,
+      videoTargetCount: round.videoTargetCount,
+      graphicTargetCount: round.graphicTargetCount,
       videoError: round.videoError,
       graphicError: round.graphicError,
       failures: round.failures || []
@@ -355,8 +375,8 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
       );
     } else {
       const detail = [
-        round.videoError ? `视频 ✗ ${round.videoError}` : `视频 ${round.videoDays}/${round.daysToExport}天 ✓`,
-        round.graphicError ? `图文 ✗ ${round.graphicError}` : `图文 ${round.graphicDays}/${round.daysToExport}天 ✓`
+        round.videoError ? `视频 ✗ ${round.videoError}` : `视频 ${round.videoDays}/${round.videoTargetCount}天 ✓`,
+        round.graphicError ? `图文 ✗ ${round.graphicError}` : `图文 ${round.graphicDays}/${round.graphicTargetCount}天 ✓`
       ].join(" | ");
       const failList = (round.failures && round.failures.length)
         ? ` | 表单失败项: [${round.failures.map((f) => f.step).join(', ')}]`
@@ -412,11 +432,13 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
     `\n[${tag}] ========== 多店铺循环结束: 共 ${result.downloads.length} 家店铺 ==========`
   );
   for (const d of result.downloads) {
-    const videoIcon = d.videoDays === d.daysToExport ? '✓' : '✗';
-    const graphicIcon = d.graphicDays === d.daysToExport ? '✓' : '✗';
+    const videoTargetCount = d.videoTargetCount ?? d.daysToExport;
+    const graphicTargetCount = d.graphicTargetCount ?? d.daysToExport;
+    const videoIcon = d.videoDays === videoTargetCount ? '✓' : '✗';
+    const graphicIcon = d.graphicDays === graphicTargetCount ? '✓' : '✗';
     console.log(
-      `  [${d.shopName || "unknown"}] 视频 ${d.videoDays}/${d.daysToExport}天 ${videoIcon}` +
-      ` | 图文 ${d.graphicDays}/${d.daysToExport}天 ${graphicIcon}` +
+      `  [${d.shopName || "unknown"}] 视频 ${d.videoDays}/${videoTargetCount}天 ${videoIcon}` +
+      ` | 图文 ${d.graphicDays}/${graphicTargetCount}天 ${graphicIcon}` +
       (d.videoError ? ` | 视频问题: ${d.videoError}` : '') +
       (d.graphicError ? ` | 图文问题: ${d.graphicError}` : '')
     );

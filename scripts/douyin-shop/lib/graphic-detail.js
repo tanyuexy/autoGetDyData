@@ -2,13 +2,21 @@ const path = require("path");
 const fs = require("fs/promises");
 
 const {
-  pickLatestSelectableCalendarDay
+  pickLatestSelectableCalendarDay,
+  retryableDownload,
+  retryableGoto
 } = require("./page-utils");
 const { appendDataDateColumn } = require("./merge-shop-exports");
+const {
+  markFailed,
+  markRunning,
+  markSuccess
+} = require("./export-item-store");
 
 const GRAPHIC_URL =
   process.env.SHOP_GRAPHIC_URL ||
   "https://compass.jinritemai.com/shop/graphic/graphic-analysis";
+const GRAPHIC_READY_TIMEOUT_MS = Number(process.env.SHOP_GRAPHIC_READY_TIMEOUT_MS || 60000);
 
 function logStep(tag, msg, started) {
   const dur = started ? ` (+${Date.now() - started}ms)` : "";
@@ -134,14 +142,31 @@ async function gotoGraphic(page, tag) {
   const base = GRAPHIC_URL.replace(/\/$/, "");
   if (!url.startsWith(base)) {
     logStep(tag, `跳转图文分析页: ${GRAPHIC_URL}`);
-    await page.goto(GRAPHIC_URL, {
+    await retryableGoto(page, GRAPHIC_URL, {
       waitUntil: "domcontentloaded",
-      timeout: 20000
+      timeout: 45000,
+      maxRetries: 2,
+      baseBackoff: 2500,
+      expectedUrlRe: /compass\.jinritemai\.com\/shop\/graphic\/graphic-analysis/
     });
   } else {
     logStep(tag, "当前已在图文分析页路径");
   }
-  await waitForGraphicPageReady(page, tag, 25000);
+  let ready = await waitForGraphicPageReady(page, tag, GRAPHIC_READY_TIMEOUT_MS);
+  if (!ready) {
+    logWarn(tag, "图文分析页主体未就绪，重试一次导航");
+    await retryableGoto(page, GRAPHIC_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 45000,
+      maxRetries: 1,
+      baseBackoff: 2500,
+      expectedUrlRe: /compass\.jinritemai\.com\/shop\/graphic\/graphic-analysis/
+    });
+    ready = await waitForGraphicPageReady(page, tag, GRAPHIC_READY_TIMEOUT_MS);
+  }
+  if (!ready) {
+    throw new Error(`图文分析页主体未就绪（${GRAPHIC_READY_TIMEOUT_MS}ms）`);
+  }
   logStep(tag, "gotoGraphic 完成", started);
 }
 
@@ -161,17 +186,15 @@ async function clickGraphicDownloadAndSave(page, tag, saveDir, options = {}) {
   await btn.waitFor({ state: "visible", timeout: 12000 });
 
   logStep(tag, "点击图文「下载明细」");
-  const downloadPromise = page.waitForEvent("download", { timeout: 60000 });
-  await btn.click({ timeout: 3000 });
-
-  let download;
-  try {
-    download = await downloadPromise;
-  } catch (error) {
-    throw new Error(
-      `图文点击「下载明细」后 60s 内未触发下载：${error.message || error}`
-    );
-  }
+  const download = await retryableDownload(
+    page,
+    () => btn.click({ timeout: 3000 }),
+    {
+      timeout: 60000,
+      maxRetries: 2,
+      retryDelay: 3000
+    }
+  );
 
   const rawName =
     download.suggestedFilename() || `graphic-detail-${Date.now()}.csv`;
@@ -206,30 +229,63 @@ function calcDataDate(dayOffset) {
  * @param {import('playwright').Page} page
  * @param {{ tag: string, saveDir: string, shopName?: string, daysToExport?: number }} options
  */
-async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExport = 1, exportBatchId = null }) {
+async function downloadGraphicDetail(page, {
+  tag,
+  saveDir,
+  shopName,
+  daysToExport = 1,
+  exportBatchId = null,
+  accountEmail = "",
+  targetDates = null,
+  targetKinds = null
+}) {
   const startedAll = Date.now();
   logStep(tag, `图文明细下载开始，店铺: ${shopName || "(未指定)"}，循环天数: ${daysToExport}`);
+
+  const dateSet = Array.isArray(targetDates) && targetDates.length > 0 ? new Set(targetDates) : null;
+  const kindSet = Array.isArray(targetKinds) && targetKinds.length > 0 ? new Set(targetKinds) : null;
+  if (kindSet && !kindSet.has("graphic")) {
+    logStep(tag, "补跑目标不包含图文，跳过图文明细下载");
+    return { savePath: null, dataDate: null, allResults: [], failures: [], targetCount: 0 };
+  }
 
   await gotoGraphic(page, tag);
 
   const results = [];
+  let targetCount = 0;
 
   for (let offset = 0; offset < daysToExport; offset++) {
     logStep(tag, `--- 图文明细第 ${offset + 1}/${daysToExport} 轮（offset=${offset}）---`);
 
-    const { ok: datePicked, dataDate } = await selectGraphicNaturalDayYesterday(page, tag, offset);
-
     const expectedDate = calcDataDate(offset);
+    if (dateSet && !dateSet.has(expectedDate)) {
+      logStep(tag, `跳过非补跑目标日期: ${expectedDate}`);
+      continue;
+    }
+    targetCount += 1;
+
+    const { ok: datePicked, dataDate } = await selectGraphicNaturalDayYesterday(page, tag, offset);
+    const item = {
+      runId: exportBatchId,
+      accountEmail,
+      shopName: shopName || "unknown",
+      kind: "graphic",
+      dataDate: expectedDate,
+      expectedDate
+    };
+    await markRunning(item);
     const dateMatch = datePicked && dataDate === expectedDate;
     if (!datePicked || !dataDate) {
       const error = `图文日期选择失败：未能选择或解析日期，预期 ${expectedDate} (offset=${offset})`;
       logWarn(tag, error);
+      await markFailed(item, error);
       results.push({ savePath: null, dataDate: dataDate || null, expectedDate, dateMatch: false, error });
       continue;
     }
     if (!dateMatch) {
       const error = `图文日期选择不符：日历选中 ${dataDate} ≠ 预期 ${expectedDate} (offset=${offset})`;
       logWarn(tag, error);
+      await markFailed(item, error);
       results.push({ savePath: null, dataDate, expectedDate, dateMatch: false, error });
       continue;
     }
@@ -239,9 +295,18 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExpor
     const targetDir = shopName
       ? path.join(saveDir, safeShopDirName(shopName), "图文明细")
       : saveDir;
-    const savePath = await clickGraphicDownloadAndSave(page, tag, targetDir, {
-      exportBatchId
-    });
+    let savePath;
+    try {
+      savePath = await clickGraphicDownloadAndSave(page, tag, targetDir, {
+        exportBatchId
+      });
+    } catch (error) {
+      const msg = error?.message || String(error);
+      logWarn(tag, `图文明细下载失败: ${msg}`);
+      await markFailed(item, msg);
+      results.push({ savePath: null, dataDate: expectedDate, expectedDate, dateMatch: false, error: msg });
+      continue;
+    }
 
     const dateToWrite = expectedDate;
     try {
@@ -250,6 +315,7 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExpor
     } catch (e) {
       logWarn(tag, `写入「数据日期」列失败: ${e.message || e}`);
     }
+    await markSuccess(item, savePath);
 
     results.push({ savePath, dataDate: dateToWrite, dateMatch });
 
@@ -258,7 +324,7 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExpor
     }
   }
 
-  logStep(tag, `图文明细下载完成，成功 ${results.filter((r) => r.savePath && r.dateMatch !== false).length}/${daysToExport} 天`, startedAll);
+  logStep(tag, `图文明细下载完成，成功 ${results.filter((r) => r.savePath && r.dateMatch !== false).length}/${targetCount || daysToExport} 天`, startedAll);
   const failures = results
     .filter((r) => r.dateMatch === false || !r.savePath)
     .map((r) => ({
@@ -272,9 +338,10 @@ async function downloadGraphicDetail(page, { tag, saveDir, shopName, daysToExpor
         savePath: firstSuccess?.savePath || null,
         dataDate: firstSuccess?.dataDate || null,
         allResults: results,
-        failures
+        failures,
+        targetCount
       }
-    : { savePath: null, dataDate: null, allResults: [], failures };
+    : { savePath: null, dataDate: null, allResults: [], failures, targetCount };
 }
 
 module.exports = {

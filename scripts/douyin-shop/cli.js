@@ -17,6 +17,7 @@ const {
   buildRemainingTargetsResolver,
   printResultSummary
 } = require("./lib/index-helpers");
+const { listFailedItems, closeExportItemStore } = require("./lib/export-item-store");
 
 let activeBrowser = null;
 let shuttingDown = false;
@@ -44,7 +45,7 @@ function parseArgs(argv) {
     args[0] && !args[0].includes("@") ? String(args[0]).toLowerCase() : "login";
   const positional = args[0] && !args[0].includes("@") ? args.slice(1) : args;
 
-  if (command === "merge" || command === "feishu-sync") {
+  if (command === "merge" || command === "feishu-sync" || command === "retry-failed") {
     return { command, accounts: [] };
   }
 
@@ -88,6 +89,116 @@ function createExportBatchId() {
     .slice(0, 19);
 }
 
+function parseDataDate(dataDate) {
+  const match = String(dataDate || "").trim().match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function startOfToday() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function offsetFromDataDate(dataDate) {
+  const date = parseDataDate(dataDate);
+  if (!date) return null;
+  const yesterday = startOfToday();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const diff = Math.round((yesterday.getTime() - date.getTime()) / 86400000);
+  return diff >= 0 ? diff : null;
+}
+
+function uniq(values) {
+  return [...new Set(values.map((v) => String(v || "").trim()).filter(Boolean))];
+}
+
+function getLatestResultsByAccount(results) {
+  const latest = new Map();
+  for (const item of Array.isArray(results) ? results : []) {
+    if (!item?.account) continue;
+    latest.set(item.account, item);
+  }
+  return [...latest.values()];
+}
+
+async function getRetryableFailedItems(runId, options = {}) {
+  const failedItems = await listFailedItems({ runId });
+  const retryableItems = failedItems;
+
+  if (options.logSummary !== false && failedItems.length > 0) {
+    console.log(
+      `抖店失败项检查：runId=${runId}，失败 ${failedItems.length} 条，将全部纳入补跑`
+    );
+  }
+
+  return { failedItems, retryableItems };
+}
+
+async function runFailedShopExportRetry(accounts, options = {}) {
+  const requestedRunId = options.runId || process.env.SHOP_RETRY_RUN_ID;
+  const failedItems = options.failedItems || (await listFailedItems({ runId: requestedRunId }));
+  if (failedItems.length === 0) {
+    console.log("没有找到需要补跑的抖店失败项");
+    return [];
+  }
+
+  const runId = failedItems[0].runId;
+  const targetShopNames = uniq(failedItems.map((item) => item.shopName));
+  const targetDates = uniq(failedItems.map((item) => item.dataDate));
+  const targetKinds = uniq(failedItems.map((item) => item.kind));
+  const offsets = targetDates.map(offsetFromDataDate).filter((n) => Number.isFinite(n));
+  const daysToExport = offsets.length ? Math.max(...offsets) + 1 : 1;
+
+  console.log(
+    `抖店失败项补跑：runId=${runId}，店铺 ${targetShopNames.length} 个，日期 ${targetDates.join(", ")}，类型 ${targetKinds.join(", ")}`
+  );
+
+  const browser = await chromium.launch({
+    headless: HEADLESS,
+    args: ["--start-maximized"]
+  });
+  activeBrowser = browser;
+
+  const results = [];
+  const processedNames = new Set();
+  const remainingTargets = buildRemainingTargetsResolver(targetShopNames, processedNames);
+
+  try {
+    for (let i = 0; i < accounts.length; i += 1) {
+      const account = accounts[i];
+      const remaining = remainingTargets();
+      if (remaining.length === 0) {
+        console.log(`失败项目标店铺均已补跑 (${processedNames.size}/${targetShopNames.length})，提前结束`);
+        break;
+      }
+
+      console.log(
+        `\n========== 失败项补跑 ${i + 1}/${accounts.length}: ${account.email} | 剩余店铺 ${remaining.length}/${targetShopNames.length} ==========`
+      );
+      const result = await runOne(browser, account, {
+        processedNames,
+        daysToExport,
+        exportBatchId: runId,
+        accountEmail: account.email,
+        selectedShopNames: targetShopNames,
+        targetDates,
+        targetKinds
+      });
+      results.push(result);
+      collectProcessedNamesIntoSet(result, processedNames);
+    }
+  } finally {
+    await browser.close();
+    activeBrowser = null;
+  }
+
+  if (options.printSummary !== false) {
+    printResultSummary(results);
+  }
+  return results;
+}
+
 async function runOne(browser, account, options = {}) {
   if (!account?.email || !account?.password) {
     throw new Error("账号 email/password 缺失");
@@ -121,12 +232,27 @@ async function runOne(browser, account, options = {}) {
   }
 }
 
+async function resetAccountDataDir(account) {
+  const paths = getAccountPaths(account?.email || "");
+  await fs.rm(paths.dataDir, { recursive: true, force: true });
+  await fs.mkdir(paths.dataDir, { recursive: true });
+  console.log(`[${account.email}] 已清空历史导出目录: ${paths.dataDir}`);
+}
+
+async function resetAccountsDataDirs(accounts) {
+  for (const account of accounts) {
+    if (!account?.email) continue;
+    await resetAccountDataDir(account);
+  }
+}
+
 async function runShopSyncFeishu(accounts, targetShopNames = []) {
   const preferredList =
     targetShopNames.length > 0
       ? targetShopNames
       : await loadPreferredShopNames();
   console.log("抖店同步飞书：开始登录拉取 → 校验 → 合并 → 同步飞书");
+  await resetAccountsDataDirs(accounts);
 
   const browser = await chromium.launch({
     headless: HEADLESS,
@@ -169,6 +295,7 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
         processedNames,
         daysToExport,
         exportBatchId,
+        accountEmail: account.email,
         selectedShopNames: preferredList
       });
       results.push(result);
@@ -179,14 +306,26 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
     activeBrowser = null;
   }
 
-  const failed = results.filter((r) => !r.ok);
+  const { retryableItems } = await getRetryableFailedItems(exportBatchId);
+  if (retryableItems.length > 0) {
+    console.log("检测到可自动补跑的抖店失败项，开始自动补跑 1 次…");
+    const retryResults = await runFailedShopExportRetry(accounts, {
+      runId: exportBatchId,
+      failedItems: retryableItems,
+      printSummary: false
+    });
+    results.push(...retryResults);
+  }
+
+  const latestResults = getLatestResultsByAccount(results);
+  const failed = latestResults.filter((r) => !r.ok);
   if (failed.length > 0) {
     throw new Error(
       `抖店登录拉取失败账号：${failed.map((item) => `${item.account}: ${item.error}`).join("；")}`
     );
   }
 
-  const processedAccountEmails = results.map((r) => r.account).filter(Boolean);
+  const processedAccountEmails = latestResults.map((r) => r.account).filter(Boolean);
   const validation = await validateShopExportFiles({
     daysToExport,
     exportBatchId,
@@ -217,7 +356,7 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
     );
   }
 
-  printResultSummary(results);
+  printResultSummary(latestResults);
 
   console.log("抖店数据拉取、文件校验、汇总校验均通过，开始同步飞书表格…");
   execSync("node scripts/run.js feishu:sync-shop", {
@@ -228,6 +367,12 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
 
 async function main() {
   const { command, accounts } = parseArgs(process.argv);
+
+  if (command === "retry-failed") {
+    await runFailedShopExportRetry(getDefaultAccounts());
+    return;
+  }
+
   const targetShopNames = await resolveTargetShopNames();
 
   if (command === "merge") {
@@ -267,6 +412,7 @@ async function main() {
   console.log(
     `目标店铺优先级名单 (${preferredList.length}): ${preferredList.join(", ") || "(空)"}`
   );
+  await resetAccountsDataDirs(accounts);
 
   const browser = await chromium.launch({
     headless: HEADLESS,
@@ -312,6 +458,7 @@ async function main() {
       processedNames,
       daysToExport,
       exportBatchId,
+      accountEmail: account.email,
       selectedShopNames: preferredList
     });
     results.push(result);
@@ -321,6 +468,20 @@ async function main() {
 
   await browser.close();
   activeBrowser = null;
+
+  const { retryableItems } = await getRetryableFailedItems(exportBatchId);
+  if (retryableItems.length > 0) {
+    console.log("检测到可自动补跑的抖店失败项，开始自动补跑 1 次…");
+    const retryResults = await runFailedShopExportRetry(accounts, {
+      runId: exportBatchId,
+      failedItems: retryableItems,
+      printSummary: false
+    });
+    results.push(...retryResults);
+    for (const result of retryResults) {
+      collectProcessedNamesIntoSet(result, processedNames);
+    }
+  }
 
   await mergeAllShopExportsToData({
     daysToExport,
@@ -341,10 +502,14 @@ async function main() {
     );
   }
 
-  printResultSummary(results);
+  printResultSummary(getLatestResultsByAccount(results));
 }
 
-main().catch((error) => {
-  console.error("脚本执行失败:", error);
-  process.exitCode = 1;
-});
+main()
+  .catch((error) => {
+    console.error("脚本执行失败:", error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await closeExportItemStore().catch(() => {});
+  });

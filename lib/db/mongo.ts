@@ -51,5 +51,11 @@ export async function ensureMongoIndexes(): Promise<void> {
       { key: { taskId: 1 }, name: "taskId_unique", unique: true },
       { key: { namespace: 1, status: 1 }, name: "namespace_status" },
     ]),
+    db.collection("shop_export_items").createIndexes([
+      { key: { key: 1 }, name: "key_unique", unique: true },
+      { key: { runId: 1, status: 1 }, name: "run_status" },
+      { key: { shopName: 1, kind: 1, dataDate: 1 }, name: "shop_kind_date" },
+      { key: { updatedAt: -1 }, name: "updatedAt" },
+    ]),
   ]);
 }

@@ -17,8 +17,151 @@ const {
   STAGES,
   detectStage,
   isAuthenticatedStage,
-  waitForStage
+  retryableGoto
 } = require("./page-utils");
+
+const PAGE_ACTIVITY_TRACKERS = new WeakMap();
+const LOGIN_STAGE_TIMEOUT_MS = Number(process.env.SHOP_LOGIN_STAGE_TIMEOUT_MS || 12000);
+const LOGIN_STAGE_MAX_WAIT_MS = Number(
+  process.env.SHOP_LOGIN_STAGE_MAX_WAIT_MS || Math.max(LOGIN_TIMEOUT_MS, 5 * 60 * 1000)
+);
+const LOGIN_FORM_FIELDS_TIMEOUT_MS = Number(
+  process.env.SHOP_LOGIN_FORM_FIELDS_TIMEOUT_MS || 20000
+);
+const LOGIN_NETWORK_IDLE_GRACE_MS = Number(
+  process.env.SHOP_LOGIN_NETWORK_IDLE_GRACE_MS || 12000
+);
+
+function getPageActivityTracker(page) {
+  const existing = PAGE_ACTIVITY_TRACKERS.get(page);
+  if (existing) return existing;
+
+  const tracker = {
+    inflight: 0,
+    lastActivityAt: Date.now(),
+  };
+  const markActivity = () => {
+    tracker.lastActivityAt = Date.now();
+  };
+  const onRequest = () => {
+    tracker.inflight += 1;
+    markActivity();
+  };
+  const onRequestDone = () => {
+    tracker.inflight = Math.max(0, tracker.inflight - 1);
+    markActivity();
+  };
+  const onDomEvent = () => {
+    markActivity();
+  };
+
+  page.on("request", onRequest);
+  page.on("requestfinished", onRequestDone);
+  page.on("requestfailed", onRequestDone);
+  page.on("response", onDomEvent);
+  page.on("domcontentloaded", onDomEvent);
+  page.on("load", onDomEvent);
+  page.on("framenavigated", onDomEvent);
+
+  PAGE_ACTIVITY_TRACKERS.set(page, tracker);
+  return tracker;
+}
+
+function getPageActivitySnapshot(page) {
+  const tracker = getPageActivityTracker(page);
+  return {
+    inflight: tracker.inflight,
+    idleMs: Date.now() - tracker.lastActivityAt,
+  };
+}
+
+function isPageStillActive(page, idleGraceMs = LOGIN_NETWORK_IDLE_GRACE_MS) {
+  const snapshot = getPageActivitySnapshot(page);
+  return snapshot.inflight > 0 || snapshot.idleMs < idleGraceMs;
+}
+
+async function waitForStageWithActivity(page, targets, options = {}) {
+  const timeoutMs = options.timeoutMs ?? LOGIN_STAGE_TIMEOUT_MS;
+  const maxWaitMs = options.maxWaitMs ?? Math.max(timeoutMs, LOGIN_STAGE_MAX_WAIT_MS);
+  const intervalMs = options.intervalMs ?? 350;
+  const idleGraceMs = options.idleGraceMs ?? LOGIN_NETWORK_IDLE_GRACE_MS;
+  const tag = options.tag || "login";
+  const softDeadline = Date.now() + timeoutMs;
+  const hardDeadline = Date.now() + maxWaitMs;
+  let last = null;
+  let extendedLogged = false;
+
+  while (Date.now() < hardDeadline) {
+    last = await detectStage(page);
+    if (targets.includes(last.stage)) return last;
+
+    if (Date.now() >= softDeadline) {
+      const snapshot = getPageActivitySnapshot(page);
+      if (snapshot.inflight <= 0 && snapshot.idleMs >= idleGraceMs) break;
+      if (!extendedLogged) {
+        console.log(
+          `[${tag}] 阶段等待超过 ${timeoutMs}ms，但页面仍有活动（inflight=${snapshot.inflight}, idle=${snapshot.idleMs}ms），继续等待`
+        );
+        extendedLogged = true;
+      }
+    }
+
+    await page.waitForTimeout(intervalMs);
+  }
+
+  return last || { stage: STAGES.UNKNOWN, url: page.url() || "" };
+}
+
+async function waitForLoginFormFields(page, tag, options = {}) {
+  const timeoutMs = options.timeoutMs ?? LOGIN_FORM_FIELDS_TIMEOUT_MS;
+  const maxWaitMs = options.maxWaitMs ?? Math.max(timeoutMs, LOGIN_STAGE_MAX_WAIT_MS);
+  const intervalMs = options.intervalMs ?? 300;
+  const idleGraceMs = options.idleGraceMs ?? LOGIN_NETWORK_IDLE_GRACE_MS;
+  const softDeadline = Date.now() + timeoutMs;
+  const hardDeadline = Date.now() + maxWaitMs;
+  let extendedLogged = false;
+
+  const emailInput = page
+    .locator(
+      'input[placeholder="请输入邮箱"], input[placeholder*="邮箱"], input[type="email"]'
+    )
+    .first();
+  const passwordInput = page
+    .locator('input[type="password"], input[placeholder="密码"]')
+    .first();
+
+  while (Date.now() < hardDeadline) {
+    const emailVisible = await emailInput.isVisible({ timeout: 250 }).catch(() => false);
+    const passwordVisible = await passwordInput.isVisible({ timeout: 250 }).catch(() => false);
+    if (emailVisible && passwordVisible) {
+      return { emailInput, passwordInput };
+    }
+
+    if (Date.now() >= softDeadline) {
+      const snapshot = getPageActivitySnapshot(page);
+      if (snapshot.inflight <= 0 && snapshot.idleMs >= idleGraceMs) {
+        const stage = await detectStage(page);
+        throw new Error(
+          `登录表单未出现：stage=${stage.stage}，等待 ${timeoutMs}ms 后页面空闲（idle=${snapshot.idleMs}ms）`
+        );
+      }
+      if (!extendedLogged) {
+        console.log(
+          `[${tag}] 登录表单字段等待超过 ${timeoutMs}ms，但页面仍有活动（inflight=${snapshot.inflight}, idle=${snapshot.idleMs}ms），继续等待`
+        );
+        extendedLogged = true;
+      }
+    }
+
+    await page.waitForTimeout(intervalMs);
+  }
+
+  const stage = await detectStage(page);
+  const snapshot = getPageActivitySnapshot(page);
+  throw new Error(
+    `登录表单未出现：stage=${stage.stage}，已达最大等待 ${maxWaitMs}ms（inflight=${snapshot.inflight}, idle=${snapshot.idleMs}ms）`
+  );
+}
 
 function getAccountPaths(email) {
   const safeName = String(email).replace(/[\\/:*?"<>|]+/g, "_");
@@ -75,19 +218,7 @@ async function clearAndFill(input, value) {
  * 填写邮箱 + 密码；填完回读校验，发现串行写入到同一框就清空重填。
  */
 async function fillCredentials(page, email, password) {
-  // 用严格 placeholder 匹配，避免把"请输入邮箱"错匹成别的 input。
-  const emailInput = page
-    .locator(
-      'input[placeholder="请输入邮箱"], input[placeholder*="邮箱"], input[type="email"]'
-    )
-    .first();
-  await emailInput.waitFor({ state: "visible", timeout: 6000 });
-
-  // type=password 是最可靠的密码框识别方式；兜底再加上 placeholder。
-  const passwordInput = page
-    .locator('input[type="password"], input[placeholder="密码"]')
-    .first();
-  await passwordInput.waitFor({ state: "visible", timeout: 6000 });
+  const { emailInput, passwordInput } = await waitForLoginFormFields(page, email);
 
   // 先把焦点打到 email 上一次性写入（不在填写中途切换焦点）
   await clearAndFill(emailInput, email);
@@ -294,10 +425,27 @@ async function isLoggedIn(page) {
 }
 
 async function waitForLoginSettled(page, timeoutMs = 15000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
+  const softDeadline = Date.now() + timeoutMs;
+  const hardDeadline = Date.now() + Math.max(timeoutMs, LOGIN_STAGE_MAX_WAIT_MS);
+  let extendedLogged = false;
+
+  while (Date.now() < hardDeadline) {
     if (await isShopPickerVisible(page)) return true;
     if (await isLoggedIn(page)) return true;
+
+    if (Date.now() >= softDeadline) {
+      const snapshot = getPageActivitySnapshot(page);
+      if (snapshot.inflight <= 0 && snapshot.idleMs >= LOGIN_NETWORK_IDLE_GRACE_MS) {
+        return false;
+      }
+      if (!extendedLogged) {
+        console.log(
+          `[login] 登录落地等待超过 ${timeoutMs}ms，但页面仍有活动（inflight=${snapshot.inflight}, idle=${snapshot.idleMs}ms），继续等待`
+        );
+        extendedLogged = true;
+      }
+    }
+
     await page.waitForTimeout(400);
   }
   return false;
@@ -324,20 +472,27 @@ async function saveStorageState(context, paths) {
  * 返回 true 表示 cookie 仍然有效，可以直接进入后续流程；false 表示需要走账号密码登录。
  */
 async function tryReuseCookieLogin(page, tag) {
+  getPageActivityTracker(page);
   const hasCookies = await page.context().cookies().then((cs) => cs.length > 0).catch(() => false);
   if (!hasCookies) return false;
 
   const probeUrl = SHOP_HOME_URL || SHOP_LOGIN_URL;
   console.log(`[${tag}] 检测到已有 cookie，尝试直连 ${probeUrl}`);
   try {
-    await page.goto(probeUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+    await retryableGoto(page, probeUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 45000,
+      maxRetries: 2,
+      baseBackoff: 2500,
+      expectedUrlRe: /jinritemai\.com/
+    });
   } catch (error) {
     console.warn(`[${tag}] 直连工作台失败: ${error.message || error}`);
     return false;
   }
 
   // 给 SPA 一点时间决定跳转与渲染（失效时可能先停在 home URL 再出登录表单）
-  const settled = await waitForStage(
+  const settled = await waitForStageWithActivity(
     page,
     [
       STAGES.LOGIN_FORM,
@@ -348,7 +503,7 @@ async function tryReuseCookieLogin(page, tag) {
       STAGES.FXG_WORKSPACE,
       STAGES.CAPTCHA
     ],
-    { timeoutMs: 10000, intervalMs: 320 }
+    { timeoutMs: 10000, maxWaitMs: 90000, intervalMs: 320, tag }
   );
   console.log(`[${tag}] cookie 直连后阶段=${settled.stage} url=${settled.url}`);
   return isAuthenticatedStage(settled.stage);
@@ -371,13 +526,15 @@ async function runShopLogin(context, account, options = {}) {
       : new Set(options.processedNames || []);
   const daysToExport = options.daysToExport || 1;
   const exportBatchId = options.exportBatchId || null;
+  const accountEmail = options.accountEmail || email;
   const selectedShopNames = Array.isArray(options.selectedShopNames)
     ? options.selectedShopNames.map((name) => String(name || "").trim()).filter(Boolean)
     : [];
-  const postLoginOptions = { processedNames, daysToExport, exportBatchId, selectedShopNames };
+  const postLoginOptions = { processedNames, daysToExport, exportBatchId, accountEmail, selectedShopNames };
 
   const page = await context.newPage();
   const tag = email;
+  getPageActivityTracker(page);
 
   try {
     const t0 = Date.now();
@@ -392,10 +549,16 @@ async function runShopLogin(context, account, options = {}) {
     }
 
     console.log(`[${tag}] 打开抖店登录页 ${SHOP_LOGIN_URL}`);
-    await page.goto(SHOP_LOGIN_URL, { waitUntil: "domcontentloaded" });
+    await retryableGoto(page, SHOP_LOGIN_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 45000,
+      maxRetries: 2,
+      baseBackoff: 2500,
+      expectedUrlRe: /jinritemai\.com\/login/
+    });
     // 抖店页面长连接/埋点会让 networkidle 几乎永远触发不到，
     // 等到「登录表单 / 选店页 / 工作台 / 滑块」任一阶段出现即可。
-    const preFormStage = await waitForStage(
+    const preFormStage = await waitForStageWithActivity(
       page,
       [
         STAGES.LOGIN_FORM,
@@ -406,7 +569,7 @@ async function runShopLogin(context, account, options = {}) {
         STAGES.FXG_WORKSPACE,
         STAGES.CAPTCHA
       ],
-      { timeoutMs: 8000 }
+      { timeoutMs: 12000, maxWaitMs: 120000, intervalMs: 350, tag }
     );
     console.log(
       `[${tag}] 登录页阶段识别: stage=${preFormStage.stage} url=${preFormStage.url}`
@@ -485,7 +648,7 @@ async function runShopLogin(context, account, options = {}) {
 
     // 点击后：预期进入「滑块 / 选店 / 罗盘 / 工作台」任一阶段
     console.log(`[${tag}] 检查点击登录后的页面阶段`);
-    const afterClickStage = await waitForStage(
+    const afterClickStage = await waitForStageWithActivity(
       page,
       [
         STAGES.CAPTCHA,
@@ -495,7 +658,7 @@ async function runShopLogin(context, account, options = {}) {
         STAGES.COMPASS_OTHER,
         STAGES.FXG_WORKSPACE
       ],
-      { timeoutMs: 3500, intervalMs: 180 }
+      { timeoutMs: 3500, maxWaitMs: 90000, intervalMs: 180, tag }
     );
     console.log(`[${tag}] 点击后阶段: ${afterClickStage.stage}`);
 

@@ -66,6 +66,8 @@ const SHOP_TITLE_SELECTORS = [
 ];
 
 const SWITCH_MODAL_ROOT = "#ecom-login-account-modal";
+const DROPDOWN_READY_TIMEOUT_MS = 6000;
+const SWITCH_ENTRY_READY_TIMEOUT_MS = 7500;
 
 function nowLog(tag, msg) {
   // eslint-disable-next-line no-console
@@ -226,7 +228,7 @@ async function openUserDropdown(page, tag) {
         return false;
       },
       null,
-      { timeout: 4000, polling: 100 }
+      { timeout: DROPDOWN_READY_TIMEOUT_MS, polling: 100 }
     )
     .then(() => true)
     .catch(() => false);
@@ -253,7 +255,7 @@ async function openUserDropdown(page, tag) {
             return r.width > 0 && r.height > 0;
           },
           null,
-          { timeout: 2500, polling: 100 }
+          { timeout: Math.max(4000, Math.round(DROPDOWN_READY_TIMEOUT_MS / 2)), polling: 100 }
         )
         .catch(() => {});
     }
@@ -299,7 +301,7 @@ async function clickSwitchEntryAndWaitModal(page, tag) {
         return false;
       },
       null,
-      { timeout: 4000, polling: 100 }
+      { timeout: SWITCH_ENTRY_READY_TIMEOUT_MS, polling: 100 }
     )
     .then(() => true)
     .catch(() => false);
@@ -326,7 +328,10 @@ async function clickSwitchEntryAndWaitModal(page, tag) {
     } catch {
       // 忽略
     }
-    warnLog(tag, '下拉中没有"切换数据视角"入口（可能当前页面不支持）');
+    warnLog(
+      tag,
+      `下拉中没有"切换数据视角"入口（等待 ${SWITCH_ENTRY_READY_TIMEOUT_MS}ms 后仍未出现，可能当前页面不支持）`
+    );
     return false;
   }
 

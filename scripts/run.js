@@ -48,6 +48,10 @@ const ROUTES = {
     script: "scripts/douyin-shop/cli.js",
     argv: ["sync-feishu"]
   },
+  "shop:retry-failed": {
+    script: "scripts/douyin-shop/cli.js",
+    argv: ["retry-failed"]
+  },
 
   "feishu:auth": {
     script: "scripts/feishu/cli.js",

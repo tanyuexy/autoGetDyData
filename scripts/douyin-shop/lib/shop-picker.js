@@ -57,7 +57,38 @@ async function readShopItems(page) {
     const name = (await nameLoc.textContent().catch(() => "")) || "";
     results.push({ index: i, name: name.trim(), locator: item });
   }
-  return results;
+  if (results.some((item) => item.name)) return results;
+
+  const fallbackNames = await page
+    .evaluate(() => {
+      const text = document.body?.innerText || "";
+      const names = [];
+      for (const rawLine of text.split(/\n+/)) {
+        const line = rawLine.trim();
+        if (!line || /请选择店铺|抖音电商|关联平台|正常营业|官方旗舰店\s+正常/.test(line)) continue;
+        const match = line.match(/^[\u4e00-\u9fa5A-Za-z0-9（）()·-]{2,40}(?:官方旗舰店|旗舰店|专营店|药房)$/);
+        if (match) names.push(match[0]);
+      }
+      return [...new Set(names)];
+    })
+    .catch(() => []);
+
+  return fallbackNames.map((name, index) => ({
+    index,
+    name,
+    locator: page.getByText(name, { exact: true }).first()
+  }));
+}
+
+async function waitForShopItems(page, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = [];
+  while (Date.now() < deadline) {
+    last = await readShopItems(page);
+    if (last.some((item) => item.name && item.locator)) return last;
+    await page.waitForTimeout(500);
+  }
+  return last;
 }
 
 /**
@@ -119,14 +150,14 @@ async function selectShopIfPicker(page, options = {}) {
     return { picked: false };
   }
 
-  // 等列表真正渲染出来（至少一个 roleItem 可见）
+  // 等列表真正渲染出来（至少一个 roleItem 或文本兜底店铺名可见）
   await page
     .locator('[class*="roleItem"]')
     .first()
     .waitFor({ state: "visible", timeout: 5000 })
     .catch(() => {});
 
-  const items = await readShopItems(page);
+  const items = await waitForShopItems(page, 60000);
   const availableNames = items.map((it) => it.name).filter(Boolean);
   console.log(
     `[${tag}] 店铺选择页展示 ${items.length} 个店铺，前 5 个: ${availableNames
@@ -208,6 +239,7 @@ module.exports = {
   loadPreferredShopNames,
   isShopPickerVisible,
   readShopItems,
+  waitForShopItems,
   pickShopByPreference,
   selectShopIfPicker
 };

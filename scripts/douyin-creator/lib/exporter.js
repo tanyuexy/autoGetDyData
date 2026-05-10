@@ -637,80 +637,6 @@ function validateExportedPostListXlsx(filePath, accountName, start, end) {
   );
 }
 
-async function gatherPostListPublishedText(page) {
-  const selectors = [
-    "table",
-    "[role='table']",
-    "[class*='table']",
-    "[class*='Table']",
-    "[class*='list']",
-    "[class*='List']",
-    "[class*='row']",
-    "[class*='Row']"
-  ];
-  const chunks = [];
-  const seen = new Set();
-
-  const pushChunk = (text) => {
-    const normalized = String(text || "")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (!normalized) return;
-    const key = normalized.slice(0, 300);
-    if (seen.has(key)) return;
-    seen.add(key);
-    chunks.push(normalized);
-  };
-
-  for (const selector of selectors) {
-    const locator = page.locator(selector);
-    const count = Math.min(await locator.count().catch(() => 0), 8);
-    for (let i = 0; i < count; i += 1) {
-      const item = locator.nth(i);
-      if (!(await item.isVisible({ timeout: 300 }).catch(() => false))) continue;
-      pushChunk(await item.textContent({ timeout: 800 }).catch(() => ""));
-    }
-  }
-
-  if (chunks.length === 0) {
-    pushChunk(await page.locator("body").textContent({ timeout: 1500 }).catch(() => ""));
-  }
-
-  return chunks.join(" ");
-}
-
-async function waitForPostListRefresh(page, accountName, startYmd, endYmd) {
-  await page
-    .locator("[class*='loading'], [class*='spin'], [aria-busy='true']")
-    .first()
-    .waitFor({ state: "hidden", timeout: 8000 })
-    .catch(() => {});
-  await page.waitForTimeout(1200);
-
-  const tableText = await gatherPostListPublishedText(page);
-  if (!tableText) {
-    return;
-  }
-
-  const ymds = collectYmdsFromDateDisplayText(tableText, startYmd);
-  if (ymds.size === 0) {
-    return;
-  }
-
-  const startDay = new Date(`${startYmd}T00:00:00`);
-  const endDay = new Date(`${endYmd}T00:00:00`);
-  const outOfRange = [...ymds].filter((ymd) => {
-    const d = new Date(`${ymd}T00:00:00`);
-    return d < startDay || d > endDay;
-  });
-  if (outOfRange.length > 0) {
-    console.warn(
-      `账号 [${accountName}] 投稿列表首屏存在范围外日期 ${outOfRange.join(", ")}，继续等待并最终以导出文件校验为准。`
-    );
-    await page.waitForTimeout(2000);
-  }
-}
-
 async function saveAuth(context, paths, accountName) {
   const cookies = await context.cookies();
   await context.storageState({ path: paths.storageStatePath });
@@ -750,12 +676,6 @@ async function exportPostListData(page, paths, accountName) {
 
   await page.waitForTimeout(800);
   const dateRange = await setPostListDateRange(page, accountName);
-  await waitForPostListRefresh(
-    page,
-    accountName,
-    dateRange.startYmd,
-    dateRange.endYmd
-  );
 
   let exportBtn = page.getByRole("button", { name: /导出/ }).first();
   const roleBtnVisible = await exportBtn

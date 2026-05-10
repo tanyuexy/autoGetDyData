@@ -57,10 +57,16 @@ async function hasCaptcha(page) {
 async function hasShopPicker(page) {
   const title = page.locator("text=请选择店铺").first();
   if (await isVisibleFast(title, 500)) return true;
+  const bodyHit = await page
+    .evaluate(() => /请选择店铺|子账号/.test(document.body?.innerText || ""))
+    .catch(() => false);
+  if (bodyHit) return true;
   const roleList = page.locator('[class*="roleList"]').first();
   if (await isVisibleFast(roleList, 400)) return true;
   const roleItem = page.locator('[class*="roleItem"]').first();
-  return isVisibleFast(roleItem, 400);
+  if (await isVisibleFast(roleItem, 400)) return true;
+  const introName = page.locator('[class*="introName"]').first();
+  return isVisibleFast(introName, 400);
 }
 
 async function hasLoginForm(page) {
@@ -178,7 +184,12 @@ async function retryableGoto(page, url, opts = {}) {
     } catch (error) {
       const netErr = isNetworkError(error);
       const isLast = attempt >= maxRetries;
-      const curUrl = (await page.url().catch(() => "")) || "";
+      let curUrl = "";
+      try {
+        curUrl = page.url() || "";
+      } catch {
+        curUrl = "";
+      }
 
       if (opts.expectedUrlRe && opts.expectedUrlRe.test(curUrl)) {
         console.warn(
