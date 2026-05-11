@@ -460,8 +460,57 @@ function formatFeishuFailureStatus(errorText) {
   return `创建失败: ${raw}`.slice(0, 200);
 }
 
+function isCartLimitErrorText(text) {
+  return /购物车限额/.test(String(text || "").trim());
+}
+
+function getDatePartsInChina(input) {
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = Number((parts.find((part) => part.type === "year") || {}).value || NaN);
+  const month = Number((parts.find((part) => part.type === "month") || {}).value || NaN);
+  const day = Number((parts.find((part) => part.type === "day") || {}).value || NaN);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return null;
+  }
+
+  return { year, month, day };
+}
+
+function diffScheduleDaysFromTodayInChina(scheduleAt) {
+  if (!scheduleAt) return null;
+  const scheduleParts = getDatePartsInChina(scheduleAt);
+  const todayParts = getDatePartsInChina(new Date());
+  if (!scheduleParts || !todayParts) return null;
+
+  const scheduleDayUtc = Date.UTC(scheduleParts.year, scheduleParts.month - 1, scheduleParts.day);
+  const todayDayUtc = Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day);
+  return Math.round((scheduleDayUtc - todayDayUtc) / 86400000);
+}
+
+function shouldSkipFeishuFailureWriteback(task, errorText) {
+  if (!isCartLimitErrorText(errorText)) return false;
+  return diffScheduleDaysFromTodayInChina(task?.payload?.scheduleAt) === 1;
+}
+
 async function markFeishuFailed(task, errorText) {
   if (!task.feishuRecordId) return;
+  if (shouldSkipFeishuFailureWriteback(task, errorText)) {
+    appendTaskLog(
+      task.taskId || task.id,
+      "info",
+      `[feishu-writeback] 跳过回写 record ${task.feishuRecordId} (${task.accountName}): 购物车限额且计划发布时间为次日`
+    );
+    return;
+  }
   const child = spawn(
     process.execPath,
     [
