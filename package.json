@@ -4,9 +4,11 @@
   "main": "index.js",
   "scripts": {
     "dev": "next dev",
+    "dev:all": "node scripts/dev-all.js",
     "build": "next build",
     "start": "next start",
-    "worker": "node scripts/workers/task-worker.js"
+    "worker": "node scripts/workers/task-worker.js",
+    "worker:dev": "node --watch scripts/workers/task-worker.js"
   },
   "keywords": [],
   "author": "",

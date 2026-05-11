@@ -75,6 +75,55 @@ function parseSelectedShopNamesFromEnv() {
     .filter(Boolean);
 }
 
+function parseTargetDatesFromEnv() {
+  const raw = process.env.SHOP_EXPORT_TARGET_DATES || "";
+  return raw
+    .split(",")
+    .map((s) => String(s || "").trim())
+    .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s));
+}
+
+function formatDateYmd(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function calcDaysToExportFromTargetDates(targetDates) {
+  const offsets = (Array.isArray(targetDates) ? targetDates : [])
+    .map(offsetFromDataDate)
+    .filter((n) => Number.isFinite(n));
+  return offsets.length ? Math.max(...offsets) + 1 : 1;
+}
+
+async function resolveExportDatePlan() {
+  const targetDates = uniq(parseTargetDatesFromEnv());
+  if (targetDates.length > 0) {
+    const daysToExport = calcDaysToExportFromTargetDates(targetDates);
+    console.log(
+      `使用手动选择的导出日期范围：${targetDates[0]} ~ ${targetDates[targetDates.length - 1]}，共 ${targetDates.length} 天`
+    );
+    return { daysToExport, targetDates };
+  }
+
+  let daysToExport = 1;
+  try {
+    daysToExport = await calcDaysToExport();
+  } catch (e) {
+    console.warn(`读取备份表失败（使用默认值 1 天）: ${e.message}`);
+  }
+
+  const targetDatesByRule = [];
+  for (let offset = daysToExport - 1; offset >= 0; offset -= 1) {
+    const d = new Date();
+    d.setDate(d.getDate() - 1 - offset);
+    d.setHours(0, 0, 0, 0);
+    targetDatesByRule.push(formatDateYmd(d));
+  }
+  return { daysToExport, targetDates: targetDatesByRule };
+}
+
 async function resolveTargetShopNames() {
   const selected = parseSelectedShopNamesFromEnv();
   if (selected.length > 0) return selected;
@@ -421,12 +470,7 @@ async function main() {
   activeBrowser = browser;
 
   // 读取飞书备份表最后日期，计算需要循环导出多少天
-  let daysToExport = 1;
-  try {
-    daysToExport = await calcDaysToExport();
-  } catch (e) {
-    console.warn(`读取备份表失败（不影响登录，使用默认值 1 天）: ${e.message}`);
-  }
+  const { daysToExport, targetDates } = await resolveExportDatePlan();
 
   const exportBatchId = createExportBatchId();
   console.log(`抖店本次导出批次: ${exportBatchId}`);
@@ -454,13 +498,14 @@ async function main() {
       } ==========`
     );
 
-    const result = await runOne(browser, account, {
-      processedNames,
-      daysToExport,
-      exportBatchId,
-      accountEmail: account.email,
-      selectedShopNames: preferredList
-    });
+      const result = await runOne(browser, account, {
+        processedNames,
+        daysToExport,
+        exportBatchId,
+        accountEmail: account.email,
+        selectedShopNames: preferredList,
+        targetDates,
+      });
     results.push(result);
 
     collectProcessedNamesIntoSet(result, processedNames);

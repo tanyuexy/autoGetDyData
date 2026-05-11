@@ -2,6 +2,7 @@ const {
   TARGET_URL,
   LOGIN_VERIFY_METHOD,
   LOGIN_WAIT_TIMEOUT_MS,
+  LOGIN_PAGE_GOTO_TIMEOUT_MS,
   LOGIN_REMIND_INTERVAL_MS,
   SMS_REMIND_INTERVAL_MS
 } = require("./env");
@@ -169,8 +170,12 @@ async function waitForManualLoginFlow(
   accountName,
   reason,
   timeoutMs = LOGIN_WAIT_TIMEOUT_MS,
-  resendEveryMs = LOGIN_REMIND_INTERVAL_MS
+  resendEveryMs = LOGIN_REMIND_INTERVAL_MS,
+  options = {}
 ) {
+  const enableReminders = options.enableReminders !== false;
+  const sendNotifications = options.sendNotifications !== false;
+  const onLoggedIn = typeof options.onLoggedIn === "function" ? options.onLoggedIn : null;
   console.log(`账号 [${accountName}] 等待手动完成登录（扫码 + 验证）。`);
   const smsVerifyMode = LOGIN_VERIFY_METHOD === "sms";
   const receiveSmsCodeMode = LOGIN_VERIFY_METHOD === "receive_sms_code";
@@ -198,6 +203,9 @@ async function waitForManualLoginFlow(
     }
 
     if (step === "logged_in") {
+      if (onLoggedIn) {
+        await onLoggedIn(page);
+      }
       return;
     }
 
@@ -205,22 +213,26 @@ async function waitForManualLoginFlow(
       if (step === "identity_verify" || step === "sms_panel") {
         await handleSmsVerificationIfPresent(page, paths, accountName, {
           alwaysTrySmsEntry: true,
-          autoClickSentButton: true
+          autoClickSentButton: true,
+          sendNotifications
         });
       }
     } else if (receiveSmsCodeMode) {
       if (step === "identity_verify" || step === "receive_sms_code_panel") {
         await handleReceiveSmsCodeIfPresent(page, paths, accountName, {
-          alwaysTryReceiveEntry: true
+          alwaysTryReceiveEntry: true,
+          sendNotifications
         });
       }
     } else {
       await handleFaceVerificationIfPresent(page, paths, accountName, {
-        skipFaceVerify: false
+        skipFaceVerify: false,
+        sendNotifications
       });
       await handleSmsVerificationIfPresent(page, paths, accountName, {
         alwaysTrySmsEntry: false,
-        autoClickSentButton: false
+        autoClickSentButton: false,
+        sendNotifications
       });
     }
 
@@ -252,7 +264,7 @@ async function waitForManualLoginFlow(
       !inSmsNotifyStage &&
       !inReceiveOtpStage &&
       now - lastGeneralNotifyAt >= resendEveryMs;
-    if (reachedSmsNotifyTime || reachedGeneralNotifyTime) {
+    if (enableReminders && (reachedSmsNotifyTime || reachedGeneralNotifyTime)) {
       console.log(`账号 [${accountName}] 仍未登录，重新截图并发送提醒邮件。`);
       await resendLoginReminderByStage(page, paths, accountName, reason);
       if (inSmsNotifyStage) {
@@ -269,17 +281,43 @@ async function waitForManualLoginFlow(
 }
 
 async function openTargetAndEnsureLogin(page, paths, accountName, options) {
-  const { hasStoredAuth, forceManualLogin, manualLoginReason } = options;
-  await page.goto(TARGET_URL, { waitUntil: "domcontentloaded" });
+  const {
+    hasStoredAuth,
+    forceManualLogin,
+    manualLoginReason,
+    sendLoginAlerts = true,
+    onLoggedIn = null
+  } = options;
+  await page.goto(TARGET_URL, {
+    waitUntil: "domcontentloaded",
+    timeout: LOGIN_PAGE_GOTO_TIMEOUT_MS
+  });
   await page.waitForLoadState("networkidle").catch(() => {});
   await page.waitForTimeout(1200);
 
   if (forceManualLogin) {
     console.log(`账号 [${accountName}] 当前无有效登录态，需手动扫码并完成验证。`);
     const reason = manualLoginReason || "需要手动登录目标账号";
-    await notifyLoginRequired(page, paths, accountName, reason);
-    await waitForManualLoginFlow(page, paths, accountName, reason);
-    await page.goto(TARGET_URL, { waitUntil: "domcontentloaded" });
+    if (sendLoginAlerts) {
+      await notifyLoginRequired(page, paths, accountName, reason);
+    }
+    await waitForManualLoginFlow(
+      page,
+      paths,
+      accountName,
+      reason,
+      LOGIN_WAIT_TIMEOUT_MS,
+      LOGIN_REMIND_INTERVAL_MS,
+      {
+        enableReminders: sendLoginAlerts,
+        sendNotifications: sendLoginAlerts,
+        onLoggedIn
+      }
+    );
+    await page.goto(TARGET_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: LOGIN_PAGE_GOTO_TIMEOUT_MS
+    });
     await page.waitForLoadState("networkidle").catch(() => {});
     await page.waitForTimeout(900);
     return;
@@ -293,9 +331,26 @@ async function openTargetAndEnsureLogin(page, paths, accountName, options) {
   const reason = hasStoredAuth
     ? "cookies/storageState 失效或已过期"
     : "本地 cookies/storageState 不存在";
-  await notifyLoginRequired(page, paths, accountName, reason);
-  await waitForManualLoginFlow(page, paths, accountName, reason);
-  await page.goto(TARGET_URL, { waitUntil: "domcontentloaded" });
+  if (sendLoginAlerts) {
+    await notifyLoginRequired(page, paths, accountName, reason);
+  }
+  await waitForManualLoginFlow(
+    page,
+    paths,
+    accountName,
+    reason,
+    LOGIN_WAIT_TIMEOUT_MS,
+    LOGIN_REMIND_INTERVAL_MS,
+    {
+      enableReminders: sendLoginAlerts,
+      sendNotifications: sendLoginAlerts,
+      onLoggedIn
+    }
+  );
+  await page.goto(TARGET_URL, {
+    waitUntil: "domcontentloaded",
+    timeout: LOGIN_PAGE_GOTO_TIMEOUT_MS
+  });
   await page.waitForLoadState("networkidle").catch(() => {});
   await page.waitForTimeout(900);
 }
@@ -308,4 +363,3 @@ module.exports = {
   notifyLoginRequired,
   waitForManualLoginFlow,
 };
-

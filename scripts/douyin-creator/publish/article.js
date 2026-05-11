@@ -2,7 +2,7 @@ const path = require("path");
 const { chromium } = require("playwright");
 const { ensureDir, fileExists } = require("../../common/fs");
 const { getAccountPaths } = require("../lib/accounts");
-const { BROWSER_VIEWPORT, HEADLESS } = require("../lib/env");
+const { PUBLISH_BROWSER_VIEWPORT, HEADLESS } = require("../lib/env");
 const { attachQrDataUrlSniffer } = require("../lib/qr");
 const {
   MATERIALS_DIR,
@@ -13,12 +13,31 @@ const {
   setScheduleIfNeeded,
   ensureLoggedIn,
   clickPublishButton,
+  scrollPublishFormToBottom,
+  optimizePublishPageForViewing,
 } = require("./utils");
 const { selectCartAndLinkForArticle } = require("./product-link");
 
 let activeBrowser = null;
 let activeContext = null;
 let shuttingDown = false;
+
+function logStage(index, text) {
+  console.log(`[阶段 ${index}] ${text}`);
+}
+
+function shouldSaveStepDebug(options) {
+  return (
+    options.debugSteps === true ||
+    options.debugSteps === "true" ||
+    process.env.CREATOR_PUBLISH_DEBUG_STEPS === "true"
+  );
+}
+
+async function saveStepDebug(page, accountName, tag, options) {
+  if (!shouldSaveStepDebug(options)) return;
+  await saveDebugArtifacts(page, accountName, `step-${tag}`).catch(() => {});
+}
 
 async function shutdown(signal) {
   if (shuttingDown) return;
@@ -82,7 +101,13 @@ async function selectCoverIfNeeded(page, coverImageKey) {
 
 async function selectMusic(page) {
   console.log("选择音乐...");
-  const musicAction = page.locator('span:has-text("选择音乐")').last();
+  const guideOk = page.locator('button:has-text("我知道了")').first();
+  if (await guideOk.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await guideOk.click().catch(() => {});
+    await page.waitForTimeout(500);
+  }
+
+  const musicAction = page.locator('span:has-text("选择音乐"), button:has-text("选择音乐")').last();
   if (!(await musicAction.isVisible().catch(() => false))) {
     console.log("未找到选择音乐按钮，跳过");
     return;
@@ -99,36 +124,62 @@ async function selectMusic(page) {
   await hotTab.click();
   await page.waitForTimeout(3000);
 
-  const songNames = page.locator('.semi-tabs-pane-active .song-name-oRge4d');
+  const songNames = page.locator('.semi-tabs-pane-active [class*="song-name"], [class*="song-name"]');
   const count = await songNames.count().catch(() => 0);
   if (count === 0) {
     console.log("热门榜无歌曲，跳过");
     return;
   }
 
-  const randomIdx = Math.floor(Math.random() * count);
-  const selectedName = await songNames.nth(randomIdx).textContent();
-  console.log(`随机选择音乐: [${randomIdx}] ${selectedName}`);
+  const startIdx = Math.floor(Math.random() * count);
+  for (let offset = 0; offset < Math.min(count, 8); offset += 1) {
+    const idx = (startIdx + offset) % count;
+    const song = songNames.nth(idx);
+    const selectedName = (await song.textContent().catch(() => ""))?.trim();
+    console.log(`尝试选择音乐: [${idx}] ${selectedName || "未命名音乐"}`);
 
-  const targetCard = songNames.nth(randomIdx).locator('xpath=./ancestor::div[contains(@class, "card-wrapper")]');
-  await targetCard.hover().catch(() => {});
-  await page.waitForTimeout(1500);
+    const card = song.locator('xpath=./ancestor::*[contains(@class, "card-wrapper")][1]');
+    const target = (await card.count().catch(() => 0)) > 0 ? card.first() : song;
+    await target.scrollIntoViewIfNeeded().catch(() => {});
+    await target.hover().catch(() => {});
+    await page.waitForTimeout(900);
 
-  const useBtn = targetCard.locator('button:has-text("使用")').first();
-  if (await useBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await useBtn.click();
-    await page.waitForTimeout(2000);
-    console.log("已选择音乐并关闭面板");
-  } else {
-    await targetCard.click();
-    await page.waitForTimeout(1000);
-    const confirmBtn = page.locator('button:has-text("确定")').last();
-    if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    const clickedUse = await song.evaluate((node) => {
+      const cardEl = node.closest('[class*="card-wrapper"]');
+      const buttons = Array.from(cardEl?.querySelectorAll('button, [role="button"]') || []);
+      const use = buttons.find((button) => (button.textContent || "").trim() === "使用");
+      if (!use) return false;
+      use.scrollIntoView({ block: "center", inline: "center" });
+      use.click();
+      return true;
+    }).catch(() => false);
+
+    if (clickedUse) {
+      await page.waitForTimeout(2500);
+      console.log(`已选择音乐: ${selectedName || `第 ${idx + 1} 首`}`);
+      return;
+    }
+
+    const useBtn = target.locator('button:has-text("使用")').first();
+    if (await useBtn.isVisible({ timeout: 1200 }).catch(() => false)) {
+      await useBtn.click();
+      await page.waitForTimeout(2500);
+      console.log(`已选择音乐: ${selectedName || `第 ${idx + 1} 首`}`);
+      return;
+    }
+
+    await target.click().catch(() => {});
+    await page.waitForTimeout(800);
+    const confirmBtn = page.locator('button:has-text("确定"), span:has-text("确定")').last();
+    if (await confirmBtn.isVisible({ timeout: 1200 }).catch(() => false)) {
       await confirmBtn.click();
       await page.waitForTimeout(2000);
-      console.log("已选择音乐（后备方案）");
+      console.log(`已选择音乐（后备方案）: ${selectedName || `第 ${idx + 1} 首`}`);
+      return;
     }
   }
+
+  console.log("音乐列表已遍历多首，仍未找到可点击的使用按钮，跳过音乐");
 }
 
 async function runPublishArticle(options) {
@@ -153,12 +204,15 @@ async function runPublishArticle(options) {
 
   const browser = await chromium.launch({
     headless: HEADLESS,
-    args: ["--start-maximized"],
+    args: [
+      "--start-maximized",
+      `--window-size=${PUBLISH_BROWSER_VIEWPORT.width},${PUBLISH_BROWSER_VIEWPORT.height}`,
+    ],
   });
   activeBrowser = browser;
 
   const context = await browser.newContext({
-    viewport: BROWSER_VIEWPORT,
+    viewport: PUBLISH_BROWSER_VIEWPORT,
     storageState: paths.storageStatePath,
   });
   activeContext = context;
@@ -170,40 +224,60 @@ async function runPublishArticle(options) {
     console.log(`开始图文发布准备: ${accountName}`);
     console.log(`  [选项] productLink=${JSON.stringify(String(options.productLink || ""))} isAiContent=${JSON.stringify(options.isAiContent)} title=${JSON.stringify(options.title)}`);
 
+    logStage(1, "检查登录状态");
     await ensureLoggedIn(page, accountName, paths);
+    await saveStepDebug(page, accountName, "01-login", options);
 
+    logStage(2, "进入图文发布页");
     await page.goto(ARTICLE_POST_URL, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(3000);
+    await optimizePublishPageForViewing(page);
     await page.evaluate(() => { window.scrollTo(0, 0); document.body?.scrollIntoView?.(); }).catch(() => {});
+    await saveStepDebug(page, accountName, "02-open-post-page", options);
 
+    logStage(3, `上传图文素材: ${imageKeys.length} 张`);
     await uploadImages(page, imageKeys, accountName);
-    await fillTitleAndDescription(
-      page,
-      String(options.title || ""),
-      String(options.desc || "")
-    );
+    await saveStepDebug(page, accountName, "03-upload-images", options);
+    logStage(4, "校验并设置定时发布");
+    await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
+    await saveStepDebug(page, accountName, "04-schedule", options);
+    logStage(5, "设置购物车商品链接");
     await selectCartAndLinkForArticle(
       page,
       String(options.productLink || ""),
       String(options.productTitle || ""),
       String(options.approvalNumber || "")
     );
+    await saveStepDebug(page, accountName, "05-product-link", options);
+    logStage(6, "填写标题、正文与话题");
+    await fillTitleAndDescription(
+      page,
+      String(options.title || ""),
+      String(options.desc || "")
+    );
+    await saveStepDebug(page, accountName, "06-title-description-topics", options);
+    logStage(7, "设置自主声明");
     await selectSelfDeclaration(page, options.isAiContent === true || options.isAiContent === "true");
+    await saveStepDebug(page, accountName, "07-self-declaration", options);
+    logStage(8, "选择配乐");
     await selectMusic(page);
+    await saveStepDebug(page, accountName, "08-music", options);
+    logStage(9, "处理封面设置");
     await selectCoverIfNeeded(page, String(options.coverImageKey || ""));
-    await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
+    await scrollPublishFormToBottom(page);
+    await saveStepDebug(page, accountName, "09-cover", options);
 
     const publishEnabled = options.publishEnabled !== "false" && options.publishEnabled !== false;
     const publishWaitSec = Number(options.publishWaitSec) || 3;
 
     if (publishEnabled) {
-      console.log("图文发布表单填写完成，点击发布...");
+      logStage(10, "点击发布按钮");
       await clickPublishButton(page);
     } else {
-      console.log("图文发布表单填写完成（未点击发布，publishEnabled=false）");
+      logStage(10, "跳过点击发布（publishEnabled=false）");
     }
 
-    console.log(`停留 ${publishWaitSec}s 后完成。`);
+    logStage(11, `发布后停留 ${publishWaitSec}s`);
     await page.waitForTimeout(publishWaitSec * 1000);
   } catch (error) {
     await saveDebugArtifacts(page, accountName, "run-failed").catch(() => {});

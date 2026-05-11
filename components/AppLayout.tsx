@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Layout, Menu, theme, Button } from "antd";
 import {
   VideoCameraOutlined,
@@ -60,6 +60,7 @@ const TERMINAL_SIZE = { w: 720, h: 460 };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [todayText, setTodayText] = useState("");
 
   const {
     terminalOpen,
@@ -83,6 +84,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   } = theme.useToken();
 
   const selectedKey = pathname || "/creator";
+
+  useEffect(() => {
+    setTodayText(
+      new Intl.DateTimeFormat("zh-CN", {
+        timeZone: "Asia/Shanghai",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date())
+    );
+  }, []);
 
   function onMouseDownDrag(e: React.MouseEvent) {
     if (terminalMinimized) return;
@@ -119,7 +131,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         collapsed={collapsed}
         onCollapse={setCollapsed}
         theme="light"
-        width={248}
+        width={180}
         trigger={
           <div className="sider-trigger">
             {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
@@ -163,9 +175,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           </div>
-          <div className={`sider-date ${collapsed ? "collapsed" : ""}`} style={{ marginLeft: "auto" }}>
-            {new Date().toLocaleDateString("zh-CN")}
-          </div>
+          {/* <div className={`sider-date ${collapsed ? "collapsed" : ""}`} style={{ marginLeft: "auto" }}>
+            <span suppressHydrationWarning>{todayText}</span>
+          </div> */}
         </div>
 
         <Menu

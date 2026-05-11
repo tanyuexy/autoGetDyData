@@ -78,6 +78,10 @@ const ROUTES = {
   "feishu:mark-task-published": {
     script: "scripts/feishu/mark-task-published.js",
     argv: []
+  },
+  "feishu:write-task-created-status": {
+    script: "scripts/feishu/write-task-created-status.js",
+    argv: []
   }
 };
 

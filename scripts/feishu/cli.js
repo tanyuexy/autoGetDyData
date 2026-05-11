@@ -95,7 +95,7 @@ function printHelp() {
   - insert: 自动检查/刷新 token 后插入一条多维表格记录
   - insert-xlsx: 读取 xlsx 第一行作为字段名，按行写入飞书多维表格（追加）
   - sync-data-xlsx: 未指定 --file 时，在指定目录下按 FEISHU_BITABLE_PROFILE 选取文件名前缀（creator=抖创、shop=抖店）匹配且「修改时间最新」的 xlsx；可用 --file 覆盖；默认先清空当前飞书表全部记录再批量写入；可用 --keep-rows N 保留「列出记录」接口顺序下的前 N 条，仅删除之后的记录再写入（不清空整张表）
-  - sync-data-xlsx-shop: 抖店汇总表同步到 feishu.shop 表；默认读取 ${SHOP_DEFAULT_XLSX_RELATIVE}（列为数据来源、所属店铺、作品名、日期、增加销售额；飞书会忽略本地表中无对应字段的列）；缺列时仍可映射：作品标题→作品名、用户支付金额→增加销售额、数据日期→日期；默认在表格末尾追加记录（不删除已有行）；加 --replace 则与 sync-data-xlsx 相同先删后写（可用 --keep-rows）
+  - sync-data-xlsx-shop: 抖店汇总表同步到 feishu.shop 表；默认读取 ${SHOP_DEFAULT_XLSX_RELATIVE}（列为数据来源、所属店铺、作品名、日期、成交类型、增加销售额；飞书会忽略本地表中无对应字段的列）；缺列时仍可映射：作品标题→作品名、用户支付金额→增加销售额、数据日期→日期；默认在表格末尾追加记录（不删除已有行）；加 --replace 则与 sync-data-xlsx 相同先删后写（可用 --keep-rows）
   - backup-bitable: 从飞书多维表格拉取当前表全部记录并导出为 xlsx（默认各一份固定文件名，覆盖写入）：data/抖创-飞书表备份.xlsx、data/抖店-飞书表备份.xlsx；此类文件名不会被 sync-data-xlsx 的「按前缀选最新 xlsx」选中；未传 --profiles 时默认 creator,shop
 `);
 }
@@ -460,9 +460,10 @@ function normalizeDedupAmount(value) {
 function makeShopDedupKey(fields) {
   const title = normalizeDedupKey(fields && fields["作品名"]);
   const date = normalizeDedupDate(fields && fields["日期"]);
+  const dealType = normalizeDedupKey(fields && fields["成交类型"]);
   const amount = normalizeDedupAmount(fields && fields["增加销售额"]);
-  if (!title || !date || !amount) return "";
-  return `${title}|${date}|${amount}`;
+  if (!title || !date || !dealType || !amount) return "";
+  return `${title}|${date}|${dealType}|${amount}`;
 }
 
 function extractComparableText(value) {
@@ -1282,11 +1283,11 @@ async function run() {
       return;
     }
 
-    // === 去重：追加模式下对比飞书表已有记录，按 作品名+日期+增加销售额 去重 ===
+    // === 去重：追加模式下对比飞书表已有记录，按 作品名+日期+成交类型+增加销售额 去重 ===
     let recordsToCreate = normalizedRecords;
     let dedupSkipped = 0;
     if (!replaceMode && recordsToCreate.length > 0) {
-      const DEDUP_FIELDS = ["作品名", "日期", "增加销售额"];
+      const DEDUP_FIELDS = ["作品名", "日期", "成交类型", "增加销售额"];
       const existing = await listAllBitableRecords(
         config,
         tokenRecord.accessToken,
@@ -1321,7 +1322,7 @@ async function run() {
             ? `dry-run（replace）：将保留飞书表前 ${keepLeadingRows} 条，删除其余记录后批量写入；预览前 3 行:`
             : "dry-run（replace）：将清空飞书表全部记录后批量写入；预览前 3 行:";
       } else if (dedupSkipped > 0) {
-        dryMsg = `dry-run（追加+去重）：多维表格中已有 ${dedupSkipped} 条记录（按 作品名+日期+增加销售额 匹配），跳过；新增 ${recordsToCreate.length} 条；预览前 3 行:`;
+        dryMsg = `dry-run（追加+去重）：多维表格中已有 ${dedupSkipped} 条记录（按 作品名+日期+成交类型+增加销售额 匹配），跳过；新增 ${recordsToCreate.length} 条；预览前 3 行:`;
       } else {
         dryMsg =
           "dry-run（追加）：将在表格末尾批量新增记录（不删除已有行）；预览前 3 行:";
@@ -1331,7 +1332,7 @@ async function run() {
         console.log(`- 行 ${record.rowNumber}:`, JSON.stringify(record.fields));
       });
       if (dedupSkipped > 0) {
-        console.log(`去重: 飞书表中已存在 ${dedupSkipped} 条重复记录（按 作品名+日期+增加销售额），已排除`);
+        console.log(`去重: 飞书表中已存在 ${dedupSkipped} 条重复记录（按 作品名+日期+成交类型+增加销售额），已排除`);
       }
       const droppedEntries = Object.entries(droppedValueStats);
       if (droppedEntries.length) {
@@ -1378,7 +1379,7 @@ async function run() {
     } else {
       if (dedupSkipped > 0) {
         console.log(
-          `追加模式（去重）：飞书表中已有 ${dedupSkipped} 条重复（按 作品名+日期+增加销售额），跳过。准备新增 ${recordsToCreate.length} 条…`
+          `追加模式（去重）：飞书表中已有 ${dedupSkipped} 条重复（按 作品名+日期+成交类型+增加销售额），跳过。准备新增 ${recordsToCreate.length} 条…`
         );
       } else {
         console.log("追加模式：不删除已有记录，仅在末尾批量新增…");

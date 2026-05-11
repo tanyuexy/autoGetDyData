@@ -9,7 +9,9 @@ import {
   DatePicker,
   Form,
   Input,
+  Modal,
   Popconfirm,
+  Popover,
   Radio,
   Select,
   Space,
@@ -31,6 +33,9 @@ type TaskStatus = "pending" | "queued" | "running" | "success" | "failed" | "can
 
 const TERMINABLE_TASK_STATUSES = new Set<TaskStatus>(["pending", "running"]);
 
+/** 表格「操作」列：link 按钮默认 padding 较大，收一点横向间距 */
+const TASK_TABLE_OP_LINK_STYLE = { paddingInline: 1 } as const;
+
 function isTerminableTask(task: PublishTask) {
   return TERMINABLE_TASK_STATUSES.has(task.status);
 }
@@ -42,6 +47,12 @@ type TaskPayload =
       title?: string;
       description?: string;
       scheduleAt?: string | null;
+      productTitle?: string;
+      approvalNumber?: string;
+      isAiContent?: boolean;
+      productLink?: string;
+      publishEnabled?: boolean;
+      publishWaitSec?: number;
     }
   | {
       type: "article";
@@ -51,6 +62,11 @@ type TaskPayload =
       scheduleAt?: string | null;
       coverImageKey?: string;
       productLink?: string;
+      productTitle?: string;
+      approvalNumber?: string;
+      isAiContent?: boolean;
+      publishEnabled?: boolean;
+      publishWaitSec?: number;
     };
 
 type PublishTask = {
@@ -63,6 +79,17 @@ type PublishTask = {
   lastError?: string;
   taskId?: string;
 };
+
+type EditTaskState = {
+  id: string;
+  title: string;
+  description: string;
+  productLink: string;
+  productTitle: string;
+  approvalNumber: string;
+  isAiContent: boolean;
+  scheduleAt: string | null;
+} | null;
 
 export default function CreatorPublishPage() {
   const { message } = App.useApp();
@@ -89,6 +116,9 @@ export default function CreatorPublishPage() {
   const [scheduleAt, setScheduleAt] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<{ name: string }[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [editingTask, setEditingTask] = useState<PublishTask | null>(null);
+  const [editState, setEditState] = useState<EditTaskState>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const terminableSelectedRowKeys = useMemo(() => {
     const selected = new Set(selectedRowKeys);
@@ -384,25 +414,215 @@ export default function CreatorPublishPage() {
     setImporting(false);
   }
 
+  function openEditTask(task: PublishTask) {
+    setEditingTask(task);
+    setEditState({
+      id: task.id,
+      title: String(task.payload.title || ""),
+      description: String(task.payload.description || ""),
+      productLink: String(task.payload.productLink || ""),
+      productTitle: String(task.payload.productTitle || ""),
+      approvalNumber: String(task.payload.approvalNumber || "不包含广审内容"),
+      isAiContent: task.payload.isAiContent === true,
+      scheduleAt: task.payload.scheduleAt || null,
+    });
+  }
+
+  function closeEditTask() {
+    setEditingTask(null);
+    setEditState(null);
+    setSavingEdit(false);
+  }
+
+  async function handleSaveEditTask() {
+    if (!editingTask || !editState) return;
+    setSavingEdit(true);
+    try {
+      const res = await fetch("/api/creator/publish/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update",
+          id: editingTask.id,
+          payload: {
+            title: editState.title.trim(),
+            description: editState.description.trim(),
+            productLink: editState.productLink.trim() || undefined,
+            productTitle: editState.productTitle.trim() || undefined,
+            approvalNumber: editState.approvalNumber.trim() || undefined,
+            isAiContent: editState.isAiContent,
+            scheduleAt: editState.scheduleAt,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "保存失败");
+      message.success("任务已更新");
+      closeEditTask();
+      await fetchTasks();
+    } catch (e: any) {
+      message.error(e.message || "保存失败");
+    }
+    setSavingEdit(false);
+  }
+
+  function renderMultilineText(value?: string, lines = 2) {
+    if (!value) return "-";
+    return (
+      <div
+        title={value}
+        style={{
+          display: "-webkit-box",
+          WebkitBoxOrient: "vertical",
+          WebkitLineClamp: lines,
+          overflow: "hidden",
+          whiteSpace: "normal",
+          wordBreak: "break-word",
+          lineHeight: 1.5,
+          textAlign: "left",
+          color: "rgba(15,23,42,.88)",
+        }}
+      >
+        {value}
+      </div>
+    );
+  }
+
+  function renderHoverPreview(value?: string, placeholder = "-") {
+    if (!value) return placeholder;
+    return (
+      <Popover
+        trigger="hover"
+        placement="topLeft"
+        styles={{ root: { maxWidth: 420 } }}
+        content={
+          <div
+            style={{
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              maxWidth: 380,
+              lineHeight: 1.6,
+            }}
+          >
+            {value}
+          </div>
+        }
+      >
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: 22,
+            color: "#2563eb",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            fontSize: 12,
+          }}
+        >
+          {placeholder}
+        </span>
+      </Popover>
+    );
+  }
+
   const columns = [
-    { title: "账号", dataIndex: "accountName", align: "center" as const, ellipsis: true },
+    {
+      title: "账号",
+      dataIndex: "accountName",
+      align: "center" as const,
+      width: 128,
+      render: (value: string) => renderMultilineText(value, 2),
+    },
     {
       title: "类型",
       align: "center" as const,
-      width: 48,
+      width: 56,
       render: (_: any, r: PublishTask) => (r.payload.type === "video" ? "视频" : "图文"),
+    },
+    {
+      title: "标题",
+      width: 60,
+      align: "center" as const,
+      render: (_: any, r: PublishTask) => renderMultilineText(r.payload.title || "", 2),
+    },
+    {
+      title: "正文",
+      width: 78,
+      align: "center" as const,
+      render: (_: any, r: PublishTask) => renderHoverPreview(r.payload.description || "", "查看正文"),
     },
     {
       title: "定时",
       align: "center" as const,
-      width: 120,
+      width: 104,
       render: (_: any, r: PublishTask) =>
         r.payload.scheduleAt ? dayjs(r.payload.scheduleAt).format("MM-DD HH:mm") : "立即",
     },
     {
+      title: "挂车链接",
+      width: 84,
+      align: "center" as const,
+      render: (_: any, r: PublishTask) => {
+        const link = r.payload.productLink || "";
+        if (!link) return "-";
+        return (
+          <Popover
+            trigger="hover"
+            placement="topLeft"
+            styles={{ root: { maxWidth: 420 } }}
+            content={
+              <div
+                style={{
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-all",
+                  maxWidth: 380,
+                  lineHeight: 1.6,
+                }}
+              >
+                <a href={link} target="_blank" rel="noreferrer">
+                  {link}
+                </a>
+              </div>
+            }
+          >
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: 22,
+                color: "#2563eb",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                fontSize: 12,
+              }}
+            >
+              查看链接
+            </span>
+          </Popover>
+        );
+      },
+    },
+    {
+      title: "AI内容",
+      width: 70,
+      align: "center" as const,
+      render: (_: any, r: PublishTask) => (
+        <Tag color={r.payload.isAiContent ? "processing" : "default"}>
+          {r.payload.isAiContent ? "是" : "否"}
+        </Tag>
+      ),
+    },
+    {
+      title: "广审批文号",
+      width: 112,
+      render: (_: any, r: PublishTask) => renderMultilineText(r.payload.approvalNumber || "", 2),
+    },
+    {
       title: "状态",
       dataIndex: "status",
-      width: 64,
+      width: 72,
       align: "center" as const,
       render: (s: TaskStatus) => {
         const map: Record<TaskStatus, { color: string; text: string }> = {
@@ -419,30 +639,36 @@ export default function CreatorPublishPage() {
     },
     {
       title: "错误",
-      align: "center" as const,
+      align: "left" as const,
+      onCell: () => ({
+        style: {
+          minWidth: 180,
+        },
+      }),
       render: (_: any, r: PublishTask) =>
         r.lastError ? (
-          <Typography.Text type="danger" ellipsis={{ tooltip: r.lastError }} style={{ maxWidth: 240 }}>
-            {r.lastError}
+          <Typography.Text type="danger">
+            {renderMultilineText(r.lastError, 2)}
           </Typography.Text>
         ) : null,
     },
     {
       title: "更新时间",
       dataIndex: "updatedAt",
-      width: 100,
+      width: 92,
       align: "center" as const,
       render: (v: string) => dayjs(v).format("MM-DD HH:mm"),
     },
     {
       title: "操作",
-      width: 180,
+      width: 140 ,
       align: "center" as const,
       render: (_: any, r: PublishTask) => (
-        <Space size={0} >
+        <Space size={0} wrap>
           <Button
             size="small"
             type="link"
+            style={TASK_TABLE_OP_LINK_STYLE}
             disabled={!r.taskId}
             onClick={() => {
               if (r.taskId) {
@@ -456,15 +682,26 @@ export default function CreatorPublishPage() {
           <Button
             size="small"
             type="link"
+            style={TASK_TABLE_OP_LINK_STYLE}
             disabled={r.status !== "failed" && r.status !== "cancelled" && r.status !== "success" || isNamespaceBusy("creator-publish")}
             onClick={() => handleRetryTask(r)}
           >
             重试
           </Button>
+          <Button
+            size="small"
+            type="link"
+            style={TASK_TABLE_OP_LINK_STYLE}
+            disabled={r.status === "running"}
+            onClick={() => openEditTask(r)}
+          >
+            编辑
+          </Button>
           {r.status === "pending" && (
             <Button
               size="small"
               type="link"
+              style={TASK_TABLE_OP_LINK_STYLE}
               onClick={() => handleRunNow(r)}
             >
               执行
@@ -485,7 +722,7 @@ export default function CreatorPublishPage() {
             placement="top"
             onConfirm={() => handleDeleteTask(r)}
           >
-            <Button size="small" type="link" danger>
+            <Button size="small" type="link" danger style={TASK_TABLE_OP_LINK_STYLE}>
               删除
             </Button>
           </Popconfirm>
@@ -497,7 +734,8 @@ export default function CreatorPublishPage() {
   const runningCount = tasks.filter((t) => t.status === "running").length;
 
   const formContent = (
-    <Space orientation="vertical" size={6} style={{ width: "100%" }}>
+    <div style={{ width: "100%" }}>
+      <Space orientation="vertical" size={6} style={{ width: "100%" }}>
       <Button
         type="primary"
         onClick={handleImportFromFeishu}
@@ -684,50 +922,62 @@ export default function CreatorPublishPage() {
           </Form>
         </Space>
       </Card>
-    </Space>
+      </Space>
+    </div>
   );
 
     const taskListContent = (
       <>
-        <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
-          {selectedRowKeys.length > 0 && (
-            <>
-              <Button
-                type="primary"
-                size="small"
-                onClick={handleStartTasks}
-              >
-                启动任务 ({selectedRowKeys.length})
-              </Button>
-              <Popconfirm
-                title="确认终止选中任务？"
-                description={`将终止 ${terminableSelectedRowKeys.length} 个选中的待执行/执行中任务，其他状态会被忽略`}
-                okText="终止"
-                cancelText="取消"
-                okButtonProps={{ danger: true }}
-                onConfirm={handleKillSelected}
-              >
-                <Button danger size="small" disabled={terminableSelectedRowKeys.length === 0}>
-                  终止选中 ({terminableSelectedRowKeys.length})
-                </Button>
-              </Popconfirm>
-              <Popconfirm
-                title="确认批量删除？"
-                description={`将删除 ${selectedRowKeys.length} 个任务，此操作不可恢复`}
-                okText="删除"
-                cancelText="取消"
-                okButtonProps={{ danger: true }}
-                onConfirm={handleBatchDelete}
-              >
-                <Button danger size="small">
-                  删除选中 ({selectedRowKeys.length})
-                </Button>
-              </Popconfirm>
-            </>
-          )}
+        <div
+          style={{
+            marginBottom: 8,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 6,
+            flexWrap: "wrap",
+          }}
+        >
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            长文本支持悬浮查看，标题/文号/错误最多显示两行
+          </Text>
+          <Space size={4} wrap>
+          <Button
+            type="primary"
+            size="small"
+            disabled={selectedRowKeys.length === 0}
+            onClick={handleStartTasks}
+          >
+            启动任务 ({selectedRowKeys.length})
+          </Button>
+          <Popconfirm
+            title="确认终止选中任务？"
+            description={`将终止 ${terminableSelectedRowKeys.length} 个选中的待执行/执行中任务，其他状态会被忽略`}
+            okText="终止"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            onConfirm={handleKillSelected}
+          >
+            <Button danger size="small" disabled={terminableSelectedRowKeys.length === 0}>
+              终止选中 ({terminableSelectedRowKeys.length})
+            </Button>
+          </Popconfirm>
+          <Popconfirm
+            title="确认批量删除？"
+            description={`将删除 ${selectedRowKeys.length} 个任务，此操作不可恢复`}
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            onConfirm={handleBatchDelete}
+          >
+            <Button danger size="small" disabled={selectedRowKeys.length === 0}>
+              删除选中 ({selectedRowKeys.length})
+            </Button>
+          </Popconfirm>
           <Button onClick={fetchTasks} loading={loadingTasks} size="small">
             刷新任务
           </Button>
+          </Space>
         </div>
         <Table
         rowKey="id"
@@ -736,13 +986,110 @@ export default function CreatorPublishPage() {
         loading={loadingTasks}
         dataSource={tasks}
         columns={columns as any}
+        tableLayout="fixed"
         pagination={{ pageSize: 20, showSizeChanger: false }}
-        scroll={{ y: "calc(100vh - 220px)" }}
+        scroll={{ x: 1180, y: "calc(100vh - 220px)" }}
         rowSelection={{
           selectedRowKeys,
           onChange: setSelectedRowKeys,
         }}
+        style={{ width: "100%" }}
+        onRow={() => ({
+          style: {
+            verticalAlign: "top",
+          },
+        })}
       />
+      <Modal
+        title="编辑任务"
+        open={Boolean(editingTask && editState)}
+        onCancel={closeEditTask}
+        onOk={handleSaveEditTask}
+        confirmLoading={savingEdit}
+        okText="保存"
+        cancelText="取消"
+        destroyOnHidden
+        centered
+        width={560}
+        styles={{
+          body: {
+            paddingTop: 12,
+            paddingBottom: 12,
+            maxHeight: "calc(100vh - 180px)",
+            overflowY: "auto",
+            overflowX: "hidden",
+          },
+        }}
+        style={{ top: 24 }}
+      >
+        {editingTask && editState ? (
+          <Form
+            layout="vertical"
+            colon={false}
+            requiredMark={false}
+            style={{ marginBottom: 0 }}
+          >
+            <Form.Item label="账号" style={{ marginBottom: 10 }}>
+              <Input value={editingTask.accountName} disabled />
+            </Form.Item>
+            <Form.Item label="类型" style={{ marginBottom: 10 }}>
+              <Input value={editingTask.payload.type === "video" ? "视频" : "图文"} disabled />
+            </Form.Item>
+            <Form.Item label="标题" style={{ marginBottom: 10 }}>
+              <Input
+                value={editState.title}
+                onChange={(e) => setEditState((prev) => prev ? { ...prev, title: e.target.value } : prev)}
+              />
+            </Form.Item>
+            <Form.Item label="正文" style={{ marginBottom: 10 }}>
+              <Input.TextArea
+                value={editState.description}
+                onChange={(e) => setEditState((prev) => prev ? { ...prev, description: e.target.value } : prev)}
+                autoSize={{ minRows: 4, maxRows: 8 }}
+              />
+            </Form.Item>
+            <Form.Item label="挂车链接" style={{ marginBottom: 10 }}>
+              <Input
+                value={editState.productLink}
+                onChange={(e) => setEditState((prev) => prev ? { ...prev, productLink: e.target.value } : prev)}
+              />
+            </Form.Item>
+            <Form.Item label="商品标题" style={{ marginBottom: 10 }}>
+              <Input
+                value={editState.productTitle}
+                onChange={(e) => setEditState((prev) => prev ? { ...prev, productTitle: e.target.value } : prev)}
+              />
+            </Form.Item>
+            <Form.Item label="广审批文号" style={{ marginBottom: 10 }}>
+              <Input
+                value={editState.approvalNumber}
+                onChange={(e) => setEditState((prev) => prev ? { ...prev, approvalNumber: e.target.value } : prev)}
+              />
+            </Form.Item>
+            <Form.Item label="AI内容" style={{ marginBottom: 10 }}>
+              <Switch
+                checked={editState.isAiContent}
+                onChange={(checked) => setEditState((prev) => prev ? { ...prev, isAiContent: checked } : prev)}
+                checkedChildren="是"
+                unCheckedChildren="否"
+              />
+            </Form.Item>
+            <Form.Item label="定时发布时间" style={{ marginBottom: 0 }}>
+              <DatePicker
+                showTime={{ format: "HH:mm", minuteStep: 5 }}
+                format="YYYY-MM-DD HH:mm"
+                allowClear
+                placeholder="不填则立即执行"
+                value={editState.scheduleAt ? dayjs(editState.scheduleAt) : null}
+                onChange={(v) =>
+                  setEditState((prev) => prev ? { ...prev, scheduleAt: v ? v.toISOString() : null } : prev)
+                }
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
+          </Form>
+        ) : null}
+      </Modal>
       </>
     );
 
@@ -769,10 +1116,10 @@ export default function CreatorPublishPage() {
         items={tabItems}
         size="small"
         style={{ width: "100%" }}
+        tabBarStyle={{ marginBottom: 12 }}
         onChange={(key) => {
           if (key === "tasks") fetchTasks();
         }}
       />
     );
   }
-

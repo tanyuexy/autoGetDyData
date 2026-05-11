@@ -393,7 +393,7 @@ async function clickReceiveOtpEntry(page) {
 }
 
 async function handleFaceVerificationIfPresent(page, paths, accountName, options = {}) {
-  const { skipFaceVerify = false } = options;
+  const { skipFaceVerify = false, sendNotifications = true } = options;
   if (skipFaceVerify) {
     return false;
   }
@@ -428,23 +428,29 @@ async function handleFaceVerificationIfPresent(page, paths, accountName, options
     return true;
   }
 
-  const screenshotPath = await captureFaceQrScreenshot(page, paths, accountName);
-  await sendFaceVerifyEmail({
-    accountName,
-    screenshotPath,
-    reason: "检测到手机刷脸验证弹窗"
-  }).catch((error) => {
-    console.error(
-      `账号 [${accountName}] 发送刷脸验证邮件失败:`,
-      error.message || error
-    );
-  });
+  if (sendNotifications) {
+    const screenshotPath = await captureFaceQrScreenshot(page, paths, accountName);
+    await sendFaceVerifyEmail({
+      accountName,
+      screenshotPath,
+      reason: "检测到手机刷脸验证弹窗"
+    }).catch((error) => {
+      console.error(
+        `账号 [${accountName}] 发送刷脸验证邮件失败:`,
+        error.message || error
+      );
+    });
+  }
   faceNotifySentByAccount.add(accountName);
   return true;
 }
 
 async function handleSmsVerificationIfPresent(page, paths, accountName, options = {}) {
-  const { alwaysTrySmsEntry = false, autoClickSentButton = false } = options;
+  const {
+    alwaysTrySmsEntry = false,
+    autoClickSentButton = false,
+    sendNotifications = true
+  } = options;
   const identityVisible = await page
     .locator("text=身份验证")
     .first()
@@ -478,7 +484,7 @@ async function handleSmsVerificationIfPresent(page, paths, accountName, options 
   const { maskedPhone, smsContent, smsTarget } = await readSmsVerifyInfoFromPage(page);
 
   const notifyKey = `${accountName}:${maskedPhone}:${smsContent}:${smsTarget}`;
-  if (!smsNotifySentByAccount.has(notifyKey)) {
+  if (sendNotifications && !smsNotifySentByAccount.has(notifyKey)) {
     await sendSmsVerifyEmail({
       accountName,
       maskedPhone,
@@ -501,7 +507,7 @@ async function handleSmsVerificationIfPresent(page, paths, accountName, options 
 }
 
 async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options = {}) {
-  const { alwaysTryReceiveEntry = false } = options;
+  const { alwaysTryReceiveEntry = false, sendNotifications = true } = options;
   const identityVisible = await page
     .locator("text=身份验证")
     .first()
@@ -526,7 +532,7 @@ async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options =
   loginStageHintByAccount.set(accountName, "当前处于接收短信验证码阶段");
   const { maskedPhone } = await readReceiveOtpInfoFromPage(page);
   const notifyKey = `${accountName}:${maskedPhone}`;
-  if (!receiveOtpNotifySentByAccount.has(notifyKey)) {
+  if (sendNotifications && !receiveOtpNotifySentByAccount.has(notifyKey)) {
     await sendReceiveOtpEmail({
       accountName,
       maskedPhone,
@@ -545,7 +551,7 @@ async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options =
 
   const now = Date.now();
   const lastResendAt = otpLastResendAtByAccount.get(accountName) || 0;
-  if (now - lastResendAt >= OTP_RESEND_INTERVAL_MS) {
+  if (sendNotifications && now - lastResendAt >= OTP_RESEND_INTERVAL_MS) {
     otpLastResendAtByAccount.set(accountName, now);
     const hasResendButton = await hasReceiveOtpResendButton(page);
     if (!hasResendButton) {
@@ -629,4 +635,3 @@ module.exports = {
   handleSmsVerificationIfPresent,
   handleReceiveSmsCodeIfPresent
 };
-

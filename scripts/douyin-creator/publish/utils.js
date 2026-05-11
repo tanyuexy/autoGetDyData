@@ -4,7 +4,13 @@ const { PUBLISH_DEBUG_DIR, saveDebugArtifacts } = require("./debug");
 const { waitVisible, setTextLikeInput } = require("./dom");
 const { fillTitleAndDescription } = require("./editor");
 const { selectSelfDeclaration, setScheduleIfNeeded } = require("./publish-form");
-const { ensureLoggedIn, clickPublishButton } = require("./runtime");
+const {
+  ensureLoggedIn,
+  closeCreatorGuides,
+  scrollPublishFormToBottom,
+  optimizePublishPageForViewing,
+  clickPublishButton,
+} = require("./runtime");
 
 const MATERIALS_DIR = path.resolve(
   process.env.CREATOR_MATERIALS_DIR ||
@@ -28,5 +34,8 @@ module.exports = {
   selectSelfDeclaration,
   setScheduleIfNeeded,
   ensureLoggedIn,
+  closeCreatorGuides,
+  scrollPublishFormToBottom,
+  optimizePublishPageForViewing,
   clickPublishButton,
 };

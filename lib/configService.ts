@@ -13,6 +13,19 @@ function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigDa
     creatorPublish: {
       publishEnabled: data?.creatorPublish?.publishEnabled ?? true,
       publishWaitSec: data?.creatorPublish?.publishWaitSec ?? 3,
+      automation: {
+        enabled: data?.creatorPublish?.automation?.enabled ?? false,
+        mode: data?.creatorPublish?.automation?.mode ?? "weekly",
+        weekly: {
+          days: data?.creatorPublish?.automation?.weekly?.days ?? [1, 2, 3, 4, 5],
+          times: data?.creatorPublish?.automation?.weekly?.times ?? ["09:00"],
+        },
+        interval: {
+          days: data?.creatorPublish?.automation?.interval?.days ?? [1, 2, 3, 4, 5],
+          everyMinutes: data?.creatorPublish?.automation?.interval?.everyMinutes ?? 60,
+          anchorAt: data?.creatorPublish?.automation?.interval?.anchorAt ?? null,
+        },
+      },
     },
     feishu: {
       shop: data?.feishu?.shop || { appToken: "", tableId: "" },

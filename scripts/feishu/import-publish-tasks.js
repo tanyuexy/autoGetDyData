@@ -5,13 +5,15 @@
  *   node scripts/feishu/import-publish-tasks.js
  *
  * 筛选规则:
- *   - 已创建任务 != "是"（飞书侧未标记完成）
+ *   - 审批 == "通过"（只导入审核通过的行）
+ *   - 已创建任务 为空或 "否"（只导入飞书侧未创建的行）
  *   - 备注 != "示例"（跳过示例行）
  *   - 必须有 所属店铺 + 视频/图文内容（核心字段）
  *   - Mongo 去重：如果 creator_publish_tasks 中已有相同 feishuRecordId 的任务则跳过
  *
  * 注意：
- *   - 导入时不再回写飞书。发布成功后由 mark-task-published.js 回写。
+ *   - 导入创建失败时，会将失败原因回写到飞书「已创建任务」列。
+ *   - 发布成功后由 mark-task-published.js 回写「已创建任务=是」。
  */
 require("dotenv").config();
 
@@ -20,7 +22,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { MongoClient } = require("mongodb");
 const { readBitable } = require("./lib/readBitable");
-const { downloadAttachment } = require("./lib/bitable");
+const { downloadAttachment, updateBitableRecord } = require("./lib/bitable");
 const { loadFeishuBitableConfigForProfile } = require("./lib/config");
 const { getValidAccessToken } = require("./lib/oauth");
 
@@ -111,8 +113,30 @@ function inferType(attachments) {
   return hasVideo ? "video" : "article";
 }
 
+function parseScheduleAt(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+
+  const numericTs = Number(raw);
+  if (Number.isFinite(numericTs) && numericTs > 0) {
+    const d = new Date(numericTs);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  const d = new Date(String(raw).trim());
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function formatImportErrorStatus(error) {
+  const raw = error && error.message ? error.message : String(error || "未知错误");
+  return `创建失败: ${raw}`.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
 async function main() {
   console.log("[import-publish-tasks] 开始从飞书读取任务表...");
+  const autoStart = process.argv.includes("--auto-start");
+  if (autoStart) {
+    console.log("[import-publish-tasks] 已启用 auto-start，新导入任务将直接进入队列");
+  }
 
   const { client, db } = await getMongoDb();
 
@@ -127,11 +151,13 @@ async function main() {
   // 筛选待处理的行
   const pending = records.filter((r) => {
     const f = r.fields;
+    const approval = String(f["审批"] || "").trim();
+    if (approval !== "通过") return false;
     const remark = String(f["备注"] || "").trim();
     if (remark === "示例") return false;
-    // 排除已创建的行（status == "是"）
+    // 只允许空值或“否”，其余状态（如“是”“是/否”）都跳过
     const status = String(f["已创建任务"] || "").trim();
-    if (status === "是") return false;
+    if (status !== "" && status !== "否") return false;
     // 本地去重：已有相同 record_id 的任务
     if (existingIds.has(r.record_id || "")) return false;
     const shop = f["所属店铺"];
@@ -167,8 +193,8 @@ async function main() {
     const productLink = Array.isArray(linkField) ? (linkField[0]?.link || "") : "";
     const productNameField = f["挂车产品名"];
     const productTitle = Array.isArray(productNameField)
-      ? (productNameField[0]?.text || "还少胶囊")
-      : "还少胶囊";
+      ? (productNameField[0]?.text || "")
+      : "";
     // 标题：来自「标题（可为空）」字段，可为空
     const title = String(f["标题（可为空）"] || "").trim();
     // 正文：第一行为描述，其余行为话题标签
@@ -177,16 +203,12 @@ async function main() {
     const fullDescription = [description, hashtags].filter(Boolean).join("\n\n");
     const isAiContent = String(f["ai内容"] || "").trim() === "是";
     const scheduleRaw = f["计划发布时间"];
-    const scheduleTs = Number(scheduleRaw) || 0;
-    const scheduleAt = scheduleTs > 0
-      ? (scheduleTs <= Date.now() ? null : new Date(scheduleTs).toISOString())
-      : null;
+    const scheduleAt = parseScheduleAt(scheduleRaw);
     const type = inferType(attachments);
 
     console.log(`\n  处理: ${accountName} | ${type} | "${title}"`);
     console.log("    计划发布时间原始值:", scheduleRaw);
     console.log("    计划发布时间原始值类型:", Array.isArray(scheduleRaw) ? "array" : typeof scheduleRaw);
-    console.log("    计划发布时间 Number() 后:", scheduleTs);
     console.log("    计划发布时间解析结果 scheduleAt:", scheduleAt);
 
     try {
@@ -218,17 +240,21 @@ async function main() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         accountName,
-        status: "pending",
+        status: autoStart ? "queued" : "pending",
         feishuRecordId: record.record_id || "",
         payload: {
           type,
           title,
           description: fullDescription,
-          productTitle,
-          approvalNumber: "不包含广审内容",
           isAiContent,
-          productLink,
           scheduleAt,
+          ...(productLink
+            ? {
+                productTitle: productTitle || "还少胶囊",
+                approvalNumber: "不包含广审内容",
+                productLink,
+              }
+            : {}),
           ...(type === "video"
             ? { videoFileKey: downloaded[0] }
             : { imagesFileKeys: downloaded }),
@@ -252,6 +278,17 @@ async function main() {
       createdCount++;
     } catch (e) {
       console.log(`    ❌ 失败: ${e.message}`);
+      try {
+        await updateBitableRecord(
+          feishuCfg,
+          accessToken,
+          record.record_id,
+          { 已创建任务: formatImportErrorStatus(e) }
+        );
+        console.log("    ↺ 已回写飞书已创建任务列为失败原因");
+      } catch (writebackError) {
+        console.log(`    ⚠️ 回写飞书失败: ${writebackError.message}`);
+      }
       failedCount++;
     }
   }

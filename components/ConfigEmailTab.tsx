@@ -16,6 +16,20 @@ interface Props {
   onLogin?: (email: string) => void;
 }
 
+function formatShortDateTime(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
 export default function ConfigEmailTab({ emails: initial, onChange, onLogin }: Props) {
   const { message } = App.useApp();
   const [emails, setEmails] = useState<EmailEntry[]>(initial || []);
@@ -209,14 +223,7 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin }: P
       width: 130,
       render: (_: any, row: EmailEntry) => {
         const acc = accountMap.get(row.email);
-        if (!acc?.lastLoginAt) return "-";
-        const d = new Date(acc.lastLoginAt);
-        return d.toLocaleString("zh-CN", {
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-        });
+        return formatShortDateTime(acc?.lastLoginAt);
       },
     },
     {

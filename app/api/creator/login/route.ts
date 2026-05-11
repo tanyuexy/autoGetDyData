@@ -29,7 +29,10 @@ export async function POST(request: NextRequest) {
     const taskId = generateTaskIdWithTime("creator-login");
     await enqueueTask(taskId, "node", ["scripts/run.js", "creator:login", accountName], {
       namespace: "login",
-      env: { HEADLESS: headless },
+      env: {
+        HEADLESS: headless,
+        CREATOR_LOGIN_MODE: mode,
+      },
     });
 
     return NextResponse.json({ taskId });

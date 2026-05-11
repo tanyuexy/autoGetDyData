@@ -161,6 +161,35 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ ok: true, task: next });
     }
 
+    if (action === "update") {
+      const existing = (await readCreatorPublishTasks()).find((t) => t.id === id);
+      if (!existing) return NextResponse.json({ error: "task not found" }, { status: 404 });
+      if (existing.status === "running") {
+        return NextResponse.json({ error: "执行中的任务不能编辑" }, { status: 400 });
+      }
+
+      const payloadPatch = body.payload || {};
+      if (payloadPatch.type && payloadPatch.type !== existing.payload.type) {
+        return NextResponse.json({ error: "不允许修改任务类型" }, { status: 400 });
+      }
+
+      const nextPayload = {
+        ...existing.payload,
+        title: String(payloadPatch.title || "").trim(),
+        description: String(payloadPatch.description || "").trim(),
+        productLink: payloadPatch.productLink ? String(payloadPatch.productLink).trim() : undefined,
+        productTitle: payloadPatch.productTitle ? String(payloadPatch.productTitle).trim() : undefined,
+        approvalNumber: payloadPatch.approvalNumber ? String(payloadPatch.approvalNumber).trim() : undefined,
+        isAiContent: payloadPatch.isAiContent === true,
+        scheduleAt: payloadPatch.scheduleAt || null,
+      };
+
+      const next = await patchCreatorPublishTask(id, {
+        payload: nextPayload as CreatorPublishTask["payload"],
+      });
+      return NextResponse.json({ ok: true, task: next });
+    }
+
     if (action === "delete") {
       const tasks = await readCreatorPublishTasks();
       const idx = tasks.findIndex((t) => t.id === id);

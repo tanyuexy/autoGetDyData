@@ -2,7 +2,7 @@ const path = require("path");
 const { chromium } = require("playwright");
 const { ensureDir, fileExists } = require("../../common/fs");
 const { getAccountPaths } = require("../lib/accounts");
-const { BROWSER_VIEWPORT, HEADLESS } = require("../lib/env");
+const { PUBLISH_BROWSER_VIEWPORT, HEADLESS } = require("../lib/env");
 const { attachQrDataUrlSniffer } = require("../lib/qr");
 const {
   MATERIALS_DIR,
@@ -11,6 +11,7 @@ const {
   selectSelfDeclaration,
   setScheduleIfNeeded,
   ensureLoggedIn,
+  optimizePublishPageForViewing,
   clickPublishButton,
 } = require("./utils");
 const {
@@ -23,6 +24,10 @@ const { selectCartAndLinkForVideo } = require("./product-link");
 let activeBrowser = null;
 let activeContext = null;
 let shuttingDown = false;
+
+function logStage(index, text) {
+  console.log(`[阶段 ${index}] ${text}`);
+}
 
 async function shutdown(signal) {
   if (shuttingDown) return;
@@ -122,12 +127,15 @@ async function runPublishVideo(options) {
 
   const browser = await chromium.launch({
     headless: HEADLESS,
-    args: ["--start-maximized"],
+    args: [
+      "--start-maximized",
+      `--window-size=${PUBLISH_BROWSER_VIEWPORT.width},${PUBLISH_BROWSER_VIEWPORT.height}`,
+    ],
   });
   activeBrowser = browser;
 
   const context = await browser.newContext({
-    viewport: BROWSER_VIEWPORT,
+    viewport: PUBLISH_BROWSER_VIEWPORT,
     storageState: paths.storageStatePath,
   });
   activeContext = context;
@@ -138,36 +146,45 @@ async function runPublishVideo(options) {
     attachQrDataUrlSniffer(page);
     logVideoPublishStart(accountName, options);
 
+    logStage(1, "检查登录状态");
     await ensureLoggedIn(page, accountName, paths);
 
+    logStage(2, "进入视频发布页");
     await gotoVideoPublishPage(page);
+    await optimizePublishPageForViewing(page);
 
+    logStage(3, `上传视频素材: ${videoKey}`);
     await uploadVideo(page, videoKey, accountName);
+    logStage(4, "选择推荐封面");
     await selectFirstAiCover(page);
-    await fillTitleAndDescription(
-      page,
-      String(options.title || ""),
-      String(options.desc || "")
-    );
+    logStage(5, "校验并设置定时发布");
+    await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
+    logStage(6, "设置购物车商品链接");
     await selectCartAndLinkForVideo(
       page,
       String(options.productLink || ""),
       String(options.productTitle || ""),
       String(options.approvalNumber || "")
     );
+    logStage(7, "填写标题、正文与话题");
+    await fillTitleAndDescription(
+      page,
+      String(options.title || ""),
+      String(options.desc || "")
+    );
+    logStage(8, "设置自主声明");
     await selectSelfDeclaration(page, options.isAiContent === true || options.isAiContent === "true");
-    await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
 
     const { publishEnabled, publishWaitSec } = resolveVideoPublishControls(options);
 
     if (publishEnabled) {
-      console.log("视频发布表单填写完成，点击发布...");
+      logStage(9, "点击发布按钮");
       await clickPublishButton(page);
     } else {
-      console.log("视频发布表单填写完成（未点击发布，publishEnabled=false）");
+      logStage(9, "跳过点击发布（publishEnabled=false）");
     }
 
-    console.log(`停留 ${publishWaitSec}s 后完成。`);
+    logStage(10, `发布后停留 ${publishWaitSec}s`);
     await page.waitForTimeout(publishWaitSec * 1000);
   } catch (error) {
     await saveDebugArtifacts(page, accountName, "run-failed").catch(() => {});

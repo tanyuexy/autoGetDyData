@@ -5,7 +5,12 @@ require("dotenv").config();
 const path = require("path");
 const { spawn } = require("child_process");
 const { MongoClient } = require("mongodb");
-const { appendTaskDone, appendTaskLog } = require("../common/task-log-store");
+const {
+  appendTaskDone,
+  appendTaskLog,
+  ensureTaskLogMeta,
+  readLastTaskError
+} = require("../common/task-log-store");
 
 const projectRoot = path.resolve(__dirname, "../..");
 const WORKER_ID = process.env.WORKER_ID || `task-worker-${process.pid}`;
@@ -118,6 +123,156 @@ async function claimJob(job) {
 async function readConfig() {
   const db = await getDb();
   return (await db.collection("app_config").findOne({ _id: "default" })) || {};
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function formatMinute(date) {
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function formatDateSlot(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}-${pad2(date.getHours())}.${pad2(date.getMinutes())}`;
+}
+
+function normalizeWeeklyTimes(times) {
+  return Array.from(
+    new Set(
+      (Array.isArray(times) ? times : [])
+        .map((item) => String(item || "").trim())
+        .filter((item) => /^\d{2}:\d{2}$/.test(item))
+    )
+  );
+}
+
+function getCreatorPublishAutomation(config) {
+  const automation = config?.creatorPublish?.automation;
+  if (!automation || automation.enabled !== true) return null;
+  const mode = automation.mode === "interval" ? "interval" : "weekly";
+  return {
+    enabled: true,
+    mode,
+    weekly: {
+      days: Array.isArray(automation.weekly?.days)
+        ? automation.weekly.days
+            .map((item) => Number(item))
+            .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6)
+        : [],
+      times: normalizeWeeklyTimes(automation.weekly?.times),
+    },
+    interval: {
+      days: Array.isArray(automation.interval?.days)
+        ? automation.interval.days
+            .map((item) => Number(item))
+            .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6)
+        : [],
+      everyMinutes: Math.max(1, Number(automation.interval?.everyMinutes) || 0),
+      anchorAt: automation.interval?.anchorAt
+        ? String(automation.interval.anchorAt)
+        : null,
+    },
+  };
+}
+
+function getDueAutomationSlot(automation, now) {
+  if (!automation || automation.enabled !== true) return null;
+
+  if (automation.mode === "weekly") {
+    const day = now.getDay();
+    const minute = formatMinute(now);
+    if (!automation.weekly.days.includes(day)) return null;
+    if (!automation.weekly.times.includes(minute)) return null;
+    const slot = formatDateSlot(now);
+    return {
+      slotKey: `creator-publish:auto:weekly:${slot}`,
+      taskId: `creator-publish-auto-weekly-${slot}`,
+      reason: `weekly day=${day} time=${minute}`,
+    };
+  }
+
+  const everyMinutes = Math.max(1, Number(automation.interval.everyMinutes) || 0);
+  if (!everyMinutes) return null;
+  const day = now.getDay();
+  if (!automation.interval.days.includes(day)) return null;
+  const anchor = automation.interval.anchorAt ? new Date(automation.interval.anchorAt) : now;
+  if (Number.isNaN(anchor.getTime())) return null;
+  const elapsedMs = now.getTime() - anchor.getTime();
+  if (elapsedMs < 0) return null;
+  const intervalMs = everyMinutes * 60 * 1000;
+  const bucket = Math.floor(elapsedMs / intervalMs);
+  const bucketStart = new Date(anchor.getTime() + bucket * intervalMs);
+  if (
+    now.getFullYear() !== bucketStart.getFullYear() ||
+    now.getMonth() !== bucketStart.getMonth() ||
+    now.getDate() !== bucketStart.getDate() ||
+    now.getHours() !== bucketStart.getHours() ||
+    now.getMinutes() !== bucketStart.getMinutes()
+  ) {
+    return null;
+  }
+  const slot = formatDateSlot(bucketStart);
+  return {
+    slotKey: `creator-publish:auto:interval:${everyMinutes}:${slot}`,
+    taskId: `creator-publish-auto-interval-${everyMinutes}m-${slot}`,
+    reason: `interval every=${everyMinutes}m slot=${slot}`,
+  };
+}
+
+async function tryClaimAutomationSlot(slotKey) {
+  const db = await getDb();
+  const now = new Date();
+  const result = await db.collection("automation_state").updateOne(
+    { _id: slotKey },
+    {
+      $setOnInsert: {
+        _id: slotKey,
+        createdAt: now,
+        workerId: WORKER_ID,
+      },
+    },
+    { upsert: true }
+  );
+  return result.upsertedCount === 1;
+}
+
+async function enqueueCreatorPublishAutomationJob(taskId, reason) {
+  const db = await getDb();
+  const now = new Date();
+  await db.collection("task_jobs").replaceOne(
+    { taskId },
+    {
+      taskId,
+      namespace: "creator-publish",
+      status: "queued",
+      command: "node",
+      args: ["scripts/run.js", "feishu:import-publish-tasks", "--auto-start"],
+      cwd: projectRoot,
+      env: { HEADLESS: String(process.env.HEADLESS === "true" || process.env.HEADLESS === "1") },
+      timeoutMs: PUBLISH_TIMEOUT_MS,
+      interactive: false,
+      createdAt: now,
+      updatedAt: now,
+      automationReason: reason,
+    },
+    { upsert: true }
+  );
+  appendTaskLog(taskId, "info", `自动调度触发，准备从飞书导入并执行任务 (${reason})`);
+}
+
+async function processCreatorPublishAutomation() {
+  const config = await readConfig();
+  const automation = getCreatorPublishAutomation(config);
+  if (!automation) return;
+
+  const now = new Date();
+  const due = getDueAutomationSlot(automation, now);
+  if (!due) return;
+  if (!(await tryClaimAutomationSlot(due.slotKey))) return;
+
+  await enqueueCreatorPublishAutomationJob(due.taskId, due.reason);
+  console.log(`[task-worker] creator-publish automation triggered: ${due.reason}`);
 }
 
 async function readQueuedTasks() {
@@ -273,16 +428,58 @@ async function markFeishuPublished(task) {
   child.unref();
 }
 
+function formatFeishuFailureStatus(errorText) {
+  const raw = String(errorText || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "创建失败: 未知错误";
+  return `创建失败: ${raw}`.slice(0, 200);
+}
+
+async function markFeishuFailed(task, errorText) {
+  if (!task.feishuRecordId) return;
+  const child = spawn(
+    process.execPath,
+    [
+      path.join(projectRoot, "scripts/run.js"),
+      "feishu:write-task-created-status",
+      task.feishuRecordId,
+      formatFeishuFailureStatus(errorText),
+      task.accountName || "",
+    ],
+    {
+      cwd: projectRoot,
+      stdio: "ignore",
+      detached: true,
+      env: { ...process.env },
+    }
+  );
+  child.unref();
+}
+
 async function startTask(task) {
   const runtimeTaskId = generateRuntimeTaskId(task.id);
   const claimed = await claimTask(task, runtimeTaskId);
   if (!claimed) return false;
 
   const args = await buildRunArgs(task);
+  let headless = String(process.env.HEADLESS === "true" || process.env.HEADLESS === "1");
+  try {
+    const cfg = await readConfig();
+    headless = String(cfg.headless === true);
+  } catch { }
+  ensureTaskLogMeta(
+    runtimeTaskId,
+    {
+      taskId: runtimeTaskId,
+      namespace: "creator-publish",
+      accountName: task.accountName,
+      target: task.id,
+    },
+    new Date().toISOString()
+  );
   appendTaskLog(runtimeTaskId, "info", `worker=${WORKER_ID} starting task=${task.id}`);
   const child = spawn(process.execPath, args, {
     cwd: projectRoot,
-    env: { ...process.env },
+    env: { ...process.env, HEADLESS: headless },
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32",
   });
@@ -353,16 +550,25 @@ async function startTask(task) {
     }
 
     const ok = code === 0;
-    appendTaskDone(runtimeTaskId, code ?? -1, `Process exited with code ${code ?? -1}`);
     const latest = await readTask(task.id);
-    if (latest?.status !== "cancelled") {
+    const wasCancelled = latest?.status === "cancelled";
+    appendTaskDone(
+      runtimeTaskId,
+      code ?? -1,
+      wasCancelled ? "用户手动终止" : `Process exited with code ${code ?? -1}`
+    );
+    const lastError = ok
+      ? undefined
+      : readLastTaskError(runtimeTaskId) || `退出码 ${code ?? -1}`;
+    if (!wasCancelled) {
       await patchTask(task.id, {
         status: ok ? "success" : "failed",
-        lastError: ok ? undefined : `退出码 ${code ?? -1}`,
+        lastError,
       });
     }
     await removeRuntimeProcess(runtimeTaskId);
-    if (ok && latest?.status !== "cancelled") await markFeishuPublished(task);
+    if (ok && !wasCancelled) await markFeishuPublished(task);
+    if (!ok && !wasCancelled) await markFeishuFailed(task, lastError);
   });
 
   child.on("error", async (error) => {
@@ -375,6 +581,7 @@ async function startTask(task) {
       await patchTask(task.id, { status: "failed", lastError: error.message });
     }
     await removeRuntimeProcess(runtimeTaskId);
+    if (latest?.status !== "cancelled") await markFeishuFailed(task, error.message);
   });
 
   return true;
@@ -462,9 +669,14 @@ async function startJob(job) {
     }
 
     const ok = code === 0;
-    appendTaskDone(job.taskId, code ?? -1, `Process exited with code ${code ?? -1}`);
     const latest = await readJob(job.taskId);
-    if (latest?.status !== "cancelled") {
+    const wasCancelled = latest?.status === "cancelled";
+    appendTaskDone(
+      job.taskId,
+      code ?? -1,
+      wasCancelled ? "用户手动终止" : `Process exited with code ${code ?? -1}`
+    );
+    if (!wasCancelled) {
       await patchJob(job.taskId, {
         status: ok ? "success" : "failed",
         finishedAt: new Date(),
@@ -543,6 +755,7 @@ async function processQueuedJobs() {
 }
 
 async function tick() {
+  await processCreatorPublishAutomation();
   await processQueuedJobs();
   await reconcileStaleRunningTasks();
 

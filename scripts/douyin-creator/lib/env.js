@@ -33,6 +33,10 @@ const ACCOUNTS_DIR = (() => {
 
 const DEFAULT_ALERT_TO = "2895845213@qq.com";
 const BROWSER_VIEWPORT = { width: 1600, height: 1200 };
+const PUBLISH_BROWSER_VIEWPORT = {
+  width: Number(process.env.PUBLISH_BROWSER_WIDTH) || 1800,
+  height: Number(process.env.PUBLISH_BROWSER_HEIGHT) || 1400,
+};
 
 const LOGIN_WAIT_TIMEOUT_MS = millisecondsFromEnvSecOrMs(
   "LOGIN_WAIT_TIMEOUT_SEC",
@@ -67,6 +71,11 @@ const OTP_EMAIL_MAX_AGE_MS = millisecondsFromEnvSecOrMs(
 const OTP_RESEND_INTERVAL_MS = millisecondsFromEnvSecOrMs(
   "OTP_RESEND_INTERVAL_SEC",
   "OTP_RESEND_INTERVAL_MS",
+  5 * 60
+);
+const LOGIN_PAGE_GOTO_TIMEOUT_MS = millisecondsFromEnvSecOrMs(
+  "LOGIN_PAGE_GOTO_TIMEOUT_SEC",
+  "LOGIN_PAGE_GOTO_TIMEOUT_MS",
   5 * 60
 );
 
@@ -209,6 +218,7 @@ module.exports = {
   ACCOUNTS_DIR,
   DEFAULT_ALERT_TO,
   BROWSER_VIEWPORT,
+  PUBLISH_BROWSER_VIEWPORT,
   LOGIN_WAIT_TIMEOUT_MS,
   LOGIN_REMIND_INTERVAL_MS,
   SMS_REMIND_INTERVAL_MS,
@@ -216,6 +226,7 @@ module.exports = {
   OTP_EMAIL_POLL_INTERVAL_MS,
   OTP_EMAIL_MAX_AGE_MS,
   OTP_RESEND_INTERVAL_MS,
+  LOGIN_PAGE_GOTO_TIMEOUT_MS,
   LOGIN_VERIFY_METHOD,
   HEADLESS,
   getCreatorExportDateStartSpec

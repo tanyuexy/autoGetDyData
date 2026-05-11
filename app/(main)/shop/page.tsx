@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Space, Divider, App, Button, Select, Typography } from "antd";
+import { Space, Divider, App, Button, Select, Typography, DatePicker } from "antd";
+import dayjs, { type Dayjs } from "dayjs";
 import AccountTable from "@/components/AccountTable";
 import { useTaskContext } from "@/contexts/TaskContext";
 import type { ShopAccount } from "@/types";
 
 const { Text } = Typography;
+const { RangePicker } = DatePicker;
 const SHOP_SELECTION_CACHE_KEY = "shop:selectedShopNames";
 
 function readCachedShopSelection() {
@@ -26,6 +28,8 @@ export default function ShopPage() {
   const [shopNames, setShopNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedShopNames, setSelectedShopNamesState] = useState<string[]>([]);
+  const [exportDateRange, setExportDateRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [loadingDateRange, setLoadingDateRange] = useState(false);
   const hasHydratedSelectionRef = useRef(false);
   const isApplyingInitialSelectionRef = useRef(false);
 
@@ -60,6 +64,25 @@ export default function ShopPage() {
   useEffect(() => {
     fetchAccounts();
   }, [fetchAccounts]);
+
+  const fetchDefaultExportRange = useCallback(async () => {
+    setLoadingDateRange(true);
+    try {
+      const res = await fetch("/api/shop/export", { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "加载默认导出日期失败");
+      if (data.startDate && data.endDate) {
+        setExportDateRange([dayjs(data.startDate, "YYYY-MM-DD"), dayjs(data.endDate, "YYYY-MM-DD")]);
+      }
+    } catch (e: any) {
+      message.error(e.message || "加载默认导出日期失败");
+    }
+    setLoadingDateRange(false);
+  }, [message]);
+
+  useEffect(() => {
+    fetchDefaultExportRange();
+  }, [fetchDefaultExportRange]);
 
   useEffect(() => {
     if (done) {
@@ -96,6 +119,10 @@ export default function ShopPage() {
       message.warning("请先选择店铺");
       return;
     }
+    if (action === "export" && (!exportDateRange || !exportDateRange[0] || !exportDateRange[1])) {
+      message.warning("请先选择导出日期范围");
+      return;
+    }
 
     if (action !== "retry-failed") {
       try {
@@ -115,7 +142,15 @@ export default function ShopPage() {
     try {
       await startTask(
         endpoints[action],
-        action === "retry-failed" ? {} : { shopNames: selectedShopNames },
+        action === "retry-failed"
+          ? {}
+          : action === "export"
+            ? {
+                shopNames: selectedShopNames,
+                startDate: exportDateRange?.[0]?.format("YYYY-MM-DD"),
+                endDate: exportDateRange?.[1]?.format("YYYY-MM-DD"),
+              }
+            : { shopNames: selectedShopNames },
         "shop-export"
       );
       message.info("任务已启动");
@@ -159,6 +194,36 @@ export default function ShopPage() {
               value: name,
             }))}
           />
+        </Space>
+
+        <Space wrap style={{ marginBottom: 12 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            导出日期：
+          </Text>
+          {loadingDateRange && !exportDateRange ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              正在加载默认日期...
+            </Text>
+          ) : (
+            <RangePicker
+              value={exportDateRange ?? undefined}
+              onChange={(value) => {
+                if (!value || !value[0] || !value[1]) {
+                  setExportDateRange(null);
+                  return;
+                }
+                setExportDateRange([value[0].startOf("day"), value[1].startOf("day")]);
+              }}
+              allowClear={false}
+              format="YYYY-MM-DD"
+              disabledDate={(current) =>
+                current ? current.isAfter(dayjs().subtract(1, "day").endOf("day")) : false
+              }
+            />
+          )}
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            默认按现有规则带出，可手动调整导出区间
+          </Text>
         </Space>
 
         <div>

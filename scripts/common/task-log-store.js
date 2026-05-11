@@ -182,6 +182,24 @@ function candidateDates(taskId) {
 
 function readTaskLogContent(taskId) {
   for (const date of candidateDates(taskId)) {
+    const exactPath = path.join(getTaskLogsDir(), date, `${String(taskId || "").trim()}.log`);
+    try {
+      const content = fs.readFileSync(exactPath, "utf-8");
+      if (content.trim()) {
+        const firstLine = content.split("\n", 1)[0] || "";
+        return {
+          content,
+          date,
+          filePath: exactPath,
+          meta: parseMetaLine(firstLine),
+        };
+      }
+    } catch {
+      // Try normalized path next.
+    }
+  }
+
+  for (const date of candidateDates(taskId)) {
     const filePath = getTaskLogPath(taskId, date);
     try {
       const content = fs.readFileSync(filePath, "utf-8");

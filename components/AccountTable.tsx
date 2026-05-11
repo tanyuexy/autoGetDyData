@@ -45,6 +45,20 @@ interface ShopProps {
 
 type Props = CreatorProps | ShopProps;
 
+function formatShortDateTime(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
 function AddAccountModal({
   open,
   onOk,
@@ -216,16 +230,7 @@ export default function AccountTable(props: Props) {
         dataIndex: "lastLoginAt",
         key: "lastLoginAt",
         width: 130,
-        render: (_: any, row: CreatorAccount) => {
-          if (!row.lastLoginAt) return "-";
-          const d = new Date(row.lastLoginAt);
-          return d.toLocaleString("zh-CN", {
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-        },
+        render: (_: any, row: CreatorAccount) => formatShortDateTime(row.lastLoginAt),
       },
       {
         title: "操作",
@@ -372,16 +377,7 @@ export default function AccountTable(props: Props) {
       dataIndex: "lastLoginAt",
       key: "lastLoginAt",
       width: 130,
-      render: (_: any, row: ShopAccount) => {
-        if (!row.lastLoginAt) return "-";
-        const d = new Date(row.lastLoginAt);
-        return d.toLocaleString("zh-CN", {
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-      },
+      render: (_: any, row: ShopAccount) => formatShortDateTime(row.lastLoginAt),
     },
   ];
 

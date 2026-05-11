@@ -7,7 +7,7 @@
 const { chromium } = require("playwright");
 const { getAccountPaths } = require("./lib/accounts");
 const { fileExists, ensureDir } = require("../common/fs");
-const { BROWSER_VIEWPORT } = require("./lib/env");
+const { BROWSER_VIEWPORT, LOGIN_PAGE_GOTO_TIMEOUT_MS } = require("./lib/env");
 
 let activeBrowser = null;
 let activeContext = null;
@@ -79,7 +79,7 @@ async function main() {
     "https://creator.douyin.com/creator-micro/data-center/content",
     {
       waitUntil: "domcontentloaded",
-      timeout: 30000
+      timeout: LOGIN_PAGE_GOTO_TIMEOUT_MS
     }
   );
   await page.waitForTimeout(3000);

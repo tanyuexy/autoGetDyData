@@ -101,6 +101,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [terminalMinimized, setTerminalMinimized] = useState(false);
   const connectionsRef = useRef<Map<string, EventSource>>(new Map());
   const logsRef = useRef<Map<string, LogEntry[]>>(new Map());
+  const seenLogKeysRef = useRef<Map<string, Set<string>>>(new Map());
   const activeTasksRef = useRef(activeTasks);
   useEffect(() => {
     activeTasksRef.current = activeTasks;
@@ -246,6 +247,17 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     };
   }
 
+  function buildLogKey(entry: LogEntry) {
+    return `${entry.timestamp || ""}|${entry.level || ""}|${entry.text || ""}`;
+  }
+
+  function resetSeenLogKeys(taskId: string, logs: LogEntry[] = []) {
+    seenLogKeysRef.current.set(
+      taskId,
+      new Set((logs || []).map((entry) => buildLogKey(entry)))
+    );
+  }
+
   function connectSSE(id: string, ns: string) {
     // Close existing connection for this ID if any
     const existing = connectionsRef.current.get(id);
@@ -260,6 +272,12 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     es.addEventListener("log", (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data) as LogEntry;
+        const seen = seenLogKeysRef.current.get(id) || new Set<string>();
+        const key = buildLogKey(data);
+        if (seen.has(key)) return;
+        seen.add(key);
+        seenLogKeysRef.current.set(id, seen);
+
         const current = logsRef.current.get(id) || [];
         current.push(data);
         logsRef.current.set(id, current);
@@ -338,6 +356,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     const data = await res.json();
     const taskId: string = data.taskId;
     logsRef.current.set(taskId, []);
+    resetSeenLogKeys(taskId, []);
 
     setActiveTasks((prev) => {
       const next = new Map(prev);
@@ -397,6 +416,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   function clearLogs() {
     if (activeViewId) {
       logsRef.current.set(activeViewId, []);
+      resetSeenLogKeys(activeViewId, []);
       setActiveTasks((prev) => {
         const next = new Map(prev);
         const st = next.get(activeViewId);
@@ -436,6 +456,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       // Always mark as done — caller confirmed this task completed.
       // Prevents the reconcile poll from overwriting with "日志未包含完成标记".
       logsRef.current.set(taskId, loadedLogs);
+      resetSeenLogKeys(taskId, loadedLogs);
       setActiveTasks((prev) => {
         const next = new Map(prev);
         next.set(taskId, {
@@ -461,6 +482,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       }
       if (!activeTasks.has(taskId) && !logsRef.current.has(taskId)) {
         logsRef.current.set(taskId, []);
+        resetSeenLogKeys(taskId, []);
         setActiveTasks((prev) => {
           const next = new Map(prev);
           next.set(taskId, {
@@ -489,6 +511,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       connectionsRef.current.delete(taskId);
     }
     logsRef.current.delete(taskId);
+    seenLogKeysRef.current.delete(taskId);
     setActiveTasks((prev) => {
       const next = new Map(prev);
       next.delete(taskId);
@@ -505,6 +528,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     if (id) {
       if (!activeTasks.has(id) && !logsRef.current.has(id)) {
         logsRef.current.set(id, []);
+        resetSeenLogKeys(id, []);
         setActiveTasks((prev) => {
           const next = new Map(prev);
           next.set(id, {
@@ -529,6 +553,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     for (const es of connectionsRef.current.values()) es.close();
     connectionsRef.current.clear();
     logsRef.current.clear();
+    seenLogKeysRef.current.clear();
     setActiveTasks(new Map());
     _setActiveViewId(null);
     setRunningTasks([]);

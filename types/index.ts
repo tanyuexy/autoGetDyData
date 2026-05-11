@@ -36,6 +36,19 @@ export interface ConfigData {
   creatorPublish?: {
     publishEnabled?: boolean; // 是否点击发布按钮（默认 true）
     publishWaitSec?: number;  // 发布后停留秒数（默认 3）
+    automation?: {
+      enabled?: boolean;
+      mode?: "weekly" | "interval";
+      weekly?: {
+        days?: number[]; // 0=周日, 1=周一 ... 6=周六
+        times?: string[]; // HH:mm
+      };
+      interval?: {
+        days?: number[]; // 0=周日, 1=周一 ... 6=周六
+        everyMinutes?: number;
+        anchorAt?: string | null; // ISO string
+      };
+    };
   };
   feishu: {
     shop: { baseUrl?: string; appToken: string; tableId: string };

@@ -58,13 +58,20 @@ async function setScheduleIfNeeded(page, scheduleAt) {
   const minTime = new Date(now.getTime() + MIN_OFFSET_MS);
   const maxTime = new Date(now.getTime() + MAX_OFFSET_MS);
 
+  if (d.getTime() <= now.getTime()) {
+    throw new Error(
+      `定时时间不满足平台要求: ${fmtLocal(d)} 已早于当前时间，无法设置定时发布`
+    );
+  }
   if (d.getTime() < minTime.getTime()) {
-    console.log(`⚠️ 定时时间 ${fmtLocal(d)} 不满足最少2小时要求，改为立即发布`);
-    return;
+    throw new Error(
+      `定时时间不满足平台要求: ${fmtLocal(d)} 距当前不足2小时，无法设置定时发布`
+    );
   }
   if (d.getTime() > maxTime.getTime()) {
-    console.log(`⚠️ 定时时间 ${fmtLocal(d)} 超过14天上限，改为立即发布`);
-    return;
+    throw new Error(
+      `定时时间不满足平台要求: ${fmtLocal(d)} 超过14天上限，无法设置定时发布`
+    );
   }
 
   const scheduleToggle = await waitVisible(page, [

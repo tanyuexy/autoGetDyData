@@ -30,18 +30,41 @@ const SHOP_FIELD = "所属店铺";
 /** 与飞书抖店表主数据列一致 */
 const OUT_TITLE = "作品名";
 const OUT_DATE = "日期";
+const OUT_DEAL_TYPE = "成交类型";
 const OUT_PAY = "增加销售额";
 
 const VIDEO_TITLE_COL = "视频标题";
-const VIDEO_PAY_COL = "用户支付金额(元)";
 const GRAPHIC_TITLE_COL = "图文标题";
-const GRAPHIC_PAY_COL = "用户支付金额";
+
+const SALES_AMOUNT_FIELDS = [
+  {
+    type: "用户支付金额",
+    videoColumns: ["用户支付金额(元)", "用户支付金额"],
+    graphicColumns: ["用户支付金额", "用户支付金额(元)"]
+  },
+  {
+    type: "看后搜用户支付金额",
+    videoColumns: ["看后搜用户支付金额(元)", "看后搜用户支付金额"],
+    graphicColumns: ["看后搜用户支付金额", "看后搜用户支付金额(元)"]
+  },
+  {
+    type: "引流店铺页用户支付金额",
+    videoColumns: ["引流店铺页用户支付金额(元)", "引流店铺页用户支付金额"],
+    graphicColumns: ["引流店铺页用户支付金额", "引流店铺页用户支付金额(元)"]
+  },
+  {
+    type: "引流其他用户支付金额",
+    videoColumns: ["引流其他页用户支付金额(元)", "引流其他页用户支付金额"],
+    graphicColumns: ["引流其他页用户支付金额", "引流其他页用户支付金额(元)"]
+  }
+];
 
 const ORDERED_HEADERS = [
   SOURCE_FIELD,
   SHOP_FIELD,
   OUT_TITLE,
   OUT_DATE,
+  OUT_DEAL_TYPE,
   OUT_PAY
 ];
 
@@ -295,33 +318,49 @@ function normalizeDateYMD(value) {
   return "";
 }
 
-function pushVideoRows(allRows, rows, shopName) {
-  for (const row of rows) {
-    const pay = parsePaymentYuan(row[VIDEO_PAY_COL]);
+function readPaymentAmount(row, candidateColumns) {
+  for (const column of candidateColumns) {
+    if (!(column in row)) continue;
+    const value = parsePaymentYuan(row[column]);
+    if (value > 0) return value;
+  }
+  return 0;
+}
+
+function pushSalesRows(allRows, row, shopName, title, candidateGroups) {
+  for (const group of candidateGroups) {
+    const pay = readPaymentAmount(row, group.columns);
     if (pay <= 0) continue;
-    const title = normalizeTitle(row[VIDEO_TITLE_COL]);
     allRows.push({
       [SOURCE_FIELD]: SOURCE_TAG,
       [SHOP_FIELD]: shopName,
       [OUT_TITLE]: title,
       [OUT_DATE]: cellDateText(row),
+      [OUT_DEAL_TYPE]: group.type,
       [OUT_PAY]: pay
     });
   }
 }
 
-function pushGraphicRows(allRows, rows, shopName) {
+function pushVideoRows(allRows, rows, shopName) {
+  const saleGroups = SALES_AMOUNT_FIELDS.map((item) => ({
+    type: item.type,
+    columns: item.videoColumns
+  }));
   for (const row of rows) {
-    const pay = parsePaymentYuan(row[GRAPHIC_PAY_COL]);
-    if (pay <= 0) continue;
+    const title = normalizeTitle(row[VIDEO_TITLE_COL]);
+    pushSalesRows(allRows, row, shopName, title, saleGroups);
+  }
+}
+
+function pushGraphicRows(allRows, rows, shopName) {
+  const saleGroups = SALES_AMOUNT_FIELDS.map((item) => ({
+    type: item.type,
+    columns: item.graphicColumns
+  }));
+  for (const row of rows) {
     const title = normalizeTitle(row[GRAPHIC_TITLE_COL]);
-    allRows.push({
-      [SOURCE_FIELD]: SOURCE_TAG,
-      [SHOP_FIELD]: shopName,
-      [OUT_TITLE]: title,
-      [OUT_DATE]: cellDateText(row),
-      [OUT_PAY]: pay
-    });
+    pushSalesRows(allRows, row, shopName, title, saleGroups);
   }
 }
 
@@ -371,10 +410,10 @@ async function collectShopRows(dataRoot, shopName, options = {}) {
   processLatestFiles(latestVideoFiles, pushVideoRows, "视频", videoDates);
   processLatestFiles(latestGraphicFiles, pushGraphicRows, "图文", graphicDates);
 
-  // 按(作品名, 日期)去重，保留第一条
+  // 按(作品名, 日期, 成交类型)去重，保留第一条
   const deduped = [];
   for (const r of rows) {
-    const key = `${r[OUT_TITLE]}|${r[OUT_DATE]}`;
+    const key = `${r[OUT_TITLE]}|${r[OUT_DATE]}|${r[OUT_DEAL_TYPE]}`;
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(r);
@@ -528,7 +567,8 @@ async function validateShopExportFiles(options = {}) {
 
 /**
  * 扫描 accounts-shop 下各账号 data/<店铺>/视频明细|图文明细 中最近 N 个 xlsx（N=daysToExport），
- * 按(作品名,日期)去重并排序后输出为「数据来源」「所属店铺」「作品名」「日期」「增加销售额」，写入 data/抖店-….
+ * 按(作品名,日期,成交类型)去重并排序后输出为
+ * 「数据来源」「所属店铺」「作品名」「日期」「成交类型」「增加销售额」，写入 data/抖店-….
  */
 async function mergeAllShopExportsToData(options = {}) {
   const allRows = [];
@@ -566,7 +606,8 @@ async function mergeAllShopExportsToData(options = {}) {
     const key = [
       row[SHOP_FIELD],
       row[OUT_TITLE],
-      row[OUT_DATE]
+      row[OUT_DATE],
+      row[OUT_DEAL_TYPE]
     ].join("|");
     if (globalSeen.has(key)) continue;
     globalSeen.add(key);
@@ -581,6 +622,8 @@ async function mergeAllShopExportsToData(options = {}) {
     if (a[SHOP_FIELD] > b[SHOP_FIELD]) return 1;
     if (a[OUT_TITLE] < b[OUT_TITLE]) return -1;
     if (a[OUT_TITLE] > b[OUT_TITLE]) return 1;
+    if (a[OUT_DEAL_TYPE] < b[OUT_DEAL_TYPE]) return -1;
+    if (a[OUT_DEAL_TYPE] > b[OUT_DEAL_TYPE]) return 1;
     return 0;
   });
 
@@ -607,7 +650,7 @@ async function mergeAllShopExportsToData(options = {}) {
   XLSX.writeFile(workbook, outputPath);
 
   console.log(
-    `抖店汇总完成（最近 ${daysToExport} 天文件，共 ${globallyDedupedRows.length} 条，增加销售额>0，去重 ${allRows.length - globallyDedupedRows.length} 条）: ${outputPath}`
+    `抖店汇总完成（最近 ${daysToExport} 天文件，共 ${globallyDedupedRows.length} 条，多成交类型金额>0，去重 ${allRows.length - globallyDedupedRows.length} 条）: ${outputPath}`
   );
 
   const expectedDates = [...expectedDateSet].sort();
@@ -638,6 +681,7 @@ module.exports = {
   SHOP_FIELD,
   OUT_TITLE,
   OUT_DATE,
+  OUT_DEAL_TYPE,
   OUT_PAY,
   SOURCE_TAG,
   parsePaymentYuan,

@@ -60,7 +60,7 @@ async function fillProductEditModal(page, productTitle, approvalNumber) {
 
 async function selectCartAndLinkForVideo(page, productLink, productTitle, approvalNumber) {
   if (!productLink) {
-    console.log("  [跳过] productLink 为空，不设置购物车");
+    console.log("  [跳过] 挂车链接为空，跳过添加标签和购物车");
     return;
   }
   console.log("设置购物车...");
@@ -114,7 +114,10 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
 }
 
 async function selectCartAndLinkForArticle(page, productLink, productTitle, approvalNumber) {
-  if (!productLink) return;
+  if (!productLink) {
+    console.log("  [跳过] 挂车链接为空，跳过添加标签和购物车");
+    return;
+  }
   console.log("设置购物车...");
 
   const anchor = page.locator('#douyin_creator_pc_anchor_jump');
