@@ -53,6 +53,8 @@ export interface CreatorPublishTask {
   taskId?: string; // runtime task id for SSE
   pid?: number; // 子进程 PID，用于崩溃恢复时检测进程是否仍存活
   feishuRecordId?: string; // 飞书行 record_id，用于发布成功后回写状态
+  feishuContentHash?: string; // 飞书内容摘要，用于导入时判断是否需要覆盖本地任务
+  feishuRowNumber?: number; // 飞书当前所在行号，刷新任务时会随飞书位置变化更新
 }
 
 function normalizeTask(item: any): CreatorPublishTask | null {
@@ -117,6 +119,101 @@ export async function patchCreatorPublishTask(
   );
   const doc = await db.collection("creator_publish_tasks").findOne({ id });
   return normalizeTask(doc);
+}
+
+function formatFeishuFailureStatus(errorText: string | undefined): string {
+  const raw = String(errorText || "未知错误");
+  return `创建失败: ${raw}`.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+function isBrowserClosedErrorText(text: string | undefined): boolean {
+  return /Target page, context or browser has been closed/i.test(String(text || "").trim());
+}
+
+function isManualTerminationText(text: string | undefined): boolean {
+  const raw = String(text || "").trim();
+  if (!raw) return false;
+  return (
+    raw === "管理员手动终止" ||
+    raw === "用户手动终止" ||
+    /收到 SIG(?:TERM|INT)/i.test(raw) ||
+    /退出码 143\b/i.test(raw) ||
+    /Process exited with code 143\b/i.test(raw) ||
+    isBrowserClosedErrorText(raw)
+  );
+}
+
+function normalizeTerminationMessage(text: string | undefined, code?: number | null): string | undefined {
+  if (!text && code !== 143) return text;
+  if (code === 143 || isManualTerminationText(text)) {
+    return "管理员手动终止";
+  }
+  return text;
+}
+
+function isCartLimitErrorText(text: string | undefined): boolean {
+  return /购物车限额/.test(String(text || "").trim());
+}
+
+function getDatePartsInChina(input: string | Date): { year: number; month: number; day: number } | null {
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = Number(parts.find((part) => part.type === "year")?.value || NaN);
+  const month = Number(parts.find((part) => part.type === "month")?.value || NaN);
+  const day = Number(parts.find((part) => part.type === "day")?.value || NaN);
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return null;
+  }
+  return { year, month, day };
+}
+
+function diffScheduleDaysFromTodayInChina(scheduleAt: string | null | undefined): number | null {
+  if (!scheduleAt) return null;
+  const scheduleParts = getDatePartsInChina(scheduleAt);
+  const todayParts = getDatePartsInChina(new Date());
+  if (!scheduleParts || !todayParts) return null;
+
+  const scheduleDayUtc = Date.UTC(scheduleParts.year, scheduleParts.month - 1, scheduleParts.day);
+  const todayDayUtc = Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day);
+  return Math.round((scheduleDayUtc - todayDayUtc) / 86400000);
+}
+
+function shouldSkipFeishuFailureWriteback(task: CreatorPublishTask, errorText: string | undefined): boolean {
+  if (!isCartLimitErrorText(errorText)) return false;
+  return diffScheduleDaysFromTodayInChina(task.payload?.scheduleAt) === 1;
+}
+
+function writeBackFeishuFailure(task: CreatorPublishTask, errorText: string | undefined) {
+  if (!task.feishuRecordId) return;
+  if (shouldSkipFeishuFailureWriteback(task, errorText)) {
+    console.log(
+      `[feishu-writeback] 跳过回写 record ${task.feishuRecordId} (${task.accountName}): 购物车限额且计划发布时间为次日`
+    );
+    return;
+  }
+  try {
+    spawnChild(
+      process.execPath,
+      [
+        path.join(process.cwd(), "scripts/run.js"),
+        "feishu:write-task-created-status",
+        task.feishuRecordId,
+        formatFeishuFailureStatus(errorText),
+        task.accountName || "",
+        "异常待修改",
+      ],
+      { stdio: "inherit", detached: true }
+    ).unref();
+  } catch { }
 }
 
 /**
@@ -214,10 +311,12 @@ export async function reconcileStaleRunningCreatorPublishTasks(): Promise<void> 
         continue;
       } catch {
         // PID 已死，进程已退出但 onClose 未执行（崩溃/孤儿）
+        const lastError = "子进程异常退出（PID 已不存在）";
         await patchCreatorPublishTask(task.id, {
           status: "failed",
-          lastError: "子进程异常退出（PID 已不存在）",
+          lastError,
         });
+        writeBackFeishuFailure(task, lastError);
         continue;
       }
     }
@@ -229,12 +328,18 @@ export async function reconcileStaleRunningCreatorPublishTasks(): Promise<void> 
     if (!snap.found || !snap.done) continue;
 
     const ok = snap.exitCode === 0;
+    const rawLastError = ok
+      ? undefined
+      : snap.summary || readLastTaskError(task.taskId) || `退出码 ${snap.exitCode}`;
+    const manualTerminated = !ok && (snap.exitCode === 143 || isManualTerminationText(rawLastError));
+    const lastError = ok ? undefined : normalizeTerminationMessage(rawLastError, snap.exitCode);
     await patchCreatorPublishTask(task.id, {
-      status: ok ? "success" : "failed",
-      lastError: ok
-        ? undefined
-        : snap.summary || readLastTaskError(task.taskId) || `退出码 ${snap.exitCode}`,
+      status: ok ? "success" : manualTerminated ? "cancelled" : "failed",
+      lastError,
     });
+    if (!ok && !manualTerminated) {
+      writeBackFeishuFailure(task, lastError);
+    }
   }
 }
 
@@ -260,10 +365,14 @@ export function attachCreatorPublishTaskRuntime(
       }
       let lastError: string | undefined;
       if (code !== 0) {
-        lastError = readLastTaskError(runtimeTaskId) || `退出码 ${code ?? -1}`;
+        lastError = normalizeTerminationMessage(
+          readLastTaskError(runtimeTaskId) || `退出码 ${code ?? -1}`,
+          code
+        );
       }
+      const manualTerminated = code !== 0 && (code === 143 || isManualTerminationText(lastError));
       await patchCreatorPublishTask(resolvedTarget.id, {
-        status: code === 0 ? "success" : "failed",
+        status: code === 0 ? "success" : manualTerminated ? "cancelled" : "failed",
         lastError,
       });
 
@@ -281,6 +390,8 @@ export function attachCreatorPublishTaskRuntime(
             { stdio: "inherit", detached: true }
           ).unref();
         } catch { }
+      } else if (code !== 0 && !manualTerminated) {
+        writeBackFeishuFailure(resolvedTarget, lastError);
       }
 
       hooks.onClose?.(code);
@@ -291,10 +402,15 @@ export function attachCreatorPublishTaskRuntime(
         hooks.onError?.(error);
         return;
       }
+      const normalizedLastError = normalizeTerminationMessage(error.message || String(error));
+      const manualTerminated = isManualTerminationText(normalizedLastError);
       await patchCreatorPublishTask(resolvedTarget.id, {
-        status: "failed",
-        lastError: error.message || String(error),
+        status: manualTerminated ? "cancelled" : "failed",
+        lastError: normalizedLastError,
       });
+      if (!manualTerminated) {
+        writeBackFeishuFailure(resolvedTarget, normalizedLastError);
+      }
       hooks.onError?.(error);
     },
   };

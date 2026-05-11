@@ -97,6 +97,12 @@ async function setScheduleIfNeeded(page, scheduleAt) {
   const text = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   await setTextLikeInput(input, text);
   await input.press("Enter").catch(() => {});
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active && typeof active.blur === "function") active.blur();
+  }).catch(() => {});
+  await page.waitForTimeout(500);
   console.log(`已设置定时发布时间: ${text}`);
 }
 

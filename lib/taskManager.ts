@@ -347,7 +347,7 @@ export async function killTask(taskId: string): Promise<boolean> {
         $set: {
           status: "cancelled",
           updatedAt: new Date(),
-          lastError: "用户手动终止",
+          lastError: "管理员手动终止",
         },
       }
     );
@@ -360,7 +360,7 @@ export async function killTask(taskId: string): Promise<boolean> {
       $set: {
         status: "cancelled",
         updatedAt: new Date(),
-        lastError: "用户手动终止",
+        lastError: "管理员手动终止",
       },
     }
   );

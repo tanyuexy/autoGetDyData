@@ -1,3 +1,41 @@
+async function dismissBlockingPortals(page) {
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.waitForTimeout(250);
+
+  const datePicker = page.locator('.semi-portal [class*="datepicker"], .semi-portal .semi-datepicker').first();
+  if (await datePicker.isVisible().catch(() => false)) {
+    await page.keyboard.press("Escape").catch(() => {});
+    await page.evaluate(() => {
+      const active = document.activeElement;
+      if (active && typeof active.blur === "function") active.blur();
+      for (const picker of document.querySelectorAll('.semi-portal [class*="datepicker"], .semi-portal .semi-datepicker')) {
+        const portal = picker.closest(".semi-portal");
+        if (portal) portal.style.pointerEvents = "none";
+      }
+    }).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+}
+
+async function clickEvenIfCovered(locator, label) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await locator.click({ timeout: 5000 }).catch(async (error) => {
+    const message = String(error?.message || error || "");
+    if (!/intercepts pointer events|Timeout/i.test(message)) throw error;
+    console.log(`  ${label} 被浮层遮挡，改用 DOM 点击`);
+    const clicked = await locator
+      .evaluate((node) => {
+        const target = node.closest("button, [role='button'], .semi-select") || node;
+        target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+        target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+        target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+        return true;
+      })
+      .catch(() => false);
+    if (!clicked) throw error;
+  });
+}
+
 async function fillProductEditModal(page, productTitle, approvalNumber) {
   const editModal = page.locator('.semi-modal-content').filter({ hasText: '完成编辑' }).first();
   await editModal.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
@@ -70,12 +108,13 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
     console.log("  未找到购物车下拉框，跳过");
     return;
   }
-  await tagSelect.click();
+  await dismissBlockingPortals(page);
+  await clickEvenIfCovered(tagSelect, "购物车下拉框");
   await page.waitForTimeout(1500);
 
   const cartOpt = page.locator('[role="option"]').filter({ hasText: '购物车' }).first();
   if (await cartOpt.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await cartOpt.click();
+    await clickEvenIfCovered(cartOpt, "购物车选项");
     await page.waitForTimeout(2000);
     console.log("  已选择购物车");
   } else {
@@ -97,7 +136,7 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
   } else {
     const addBtn = page.locator('span:has-text("添加链接"), button:has-text("添加链接")').first();
     if (await addBtn.isVisible().catch(() => false)) {
-      await addBtn.click();
+      await clickEvenIfCovered(addBtn, "添加链接按钮");
       await page.waitForTimeout(4000);
     }
   }
@@ -130,11 +169,12 @@ async function selectCartAndLinkForArticle(page, productLink, productTitle, appr
     return;
   }
 
-  await select.click();
+  await dismissBlockingPortals(page);
+  await clickEvenIfCovered(select, "购物车下拉框");
   await page.waitForTimeout(1500);
   const cartOpt = page.locator('[role="option"]').filter({ hasText: '购物车' }).first();
   if (await cartOpt.isVisible().catch(() => false)) {
-    await cartOpt.click();
+    await clickEvenIfCovered(cartOpt, "购物车选项");
     await page.waitForTimeout(2000);
     console.log("  已选择购物车");
   } else {
@@ -163,7 +203,7 @@ async function selectCartAndLinkForArticle(page, productLink, productTitle, appr
     return;
   }
 
-  await targetAddBtn.click();
+  await clickEvenIfCovered(targetAddBtn, "添加链接按钮");
   await page.waitForTimeout(4000);
 
   const limitModal = page.locator('.semi-modal-content').filter({ hasText: '无法添加购物车' }).first();

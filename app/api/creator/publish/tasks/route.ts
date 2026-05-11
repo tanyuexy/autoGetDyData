@@ -8,6 +8,9 @@ import {
   type CreatorPublishPayload,
   type CreatorPublishTask,
 } from "@/lib/creatorPublishStore";
+import { getConfig } from "@/lib/configService";
+
+const { syncPublishTasks } = require("../../../../../scripts/feishu/sync-publish-tasks");
 
 export const maxDuration = 0;
 
@@ -72,6 +75,18 @@ export async function PATCH(req: NextRequest) {
     const action = String(body.action || "").trim();
     const id = String(body.id || "").trim();
 
+    if (action === "refresh-from-feishu") {
+      process.env.PROJECT_CONFIG_JSON = JSON.stringify(await getConfig());
+      const summary = await syncPublishTasks({
+        autoStart: false,
+        allowCreate: false,
+        logger: () => {},
+        summaryPrefix: "[refresh-publish-tasks]",
+      });
+      const tasks = await readCreatorPublishTasks();
+      return NextResponse.json({ ok: true, summary, tasks });
+    }
+
     if (action === "kill-all") {
       const tasks = await readCreatorPublishTasks();
       let killed = 0;
@@ -83,7 +98,7 @@ export async function PATCH(req: NextRequest) {
         }
         task.status = "cancelled";
         task.updatedAt = new Date().toISOString();
-        task.lastError = "用户手动终止";
+        task.lastError = "管理员手动终止";
         killed++;
       }
       await writeCreatorPublishTasks(tasks);
@@ -107,7 +122,7 @@ export async function PATCH(req: NextRequest) {
         }
         task.status = "cancelled";
         task.updatedAt = new Date().toISOString();
-        task.lastError = "用户手动终止";
+        task.lastError = "管理员手动终止";
         killed++;
       }
       await writeCreatorPublishTasks(tasks);

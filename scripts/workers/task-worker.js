@@ -381,6 +381,32 @@ function classifyChildLogLine(line, fallbackLevel) {
   return { level: fallbackLevel, text: raw };
 }
 
+function isBrowserClosedErrorText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return false;
+  return /Target page, context or browser has been closed/i.test(raw);
+}
+
+function isManualTerminationText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return false;
+  return (
+    raw === "管理员手动终止" ||
+    raw === "用户手动终止" ||
+    /收到 SIG(?:TERM|INT)/i.test(raw) ||
+    /退出码 143\b/i.test(raw) ||
+    /Process exited with code 143\b/i.test(raw) ||
+    isBrowserClosedErrorText(raw)
+  );
+}
+
+function normalizeTerminationMessage(text, code) {
+  if (code === 143 || isManualTerminationText(text)) {
+    return "管理员手动终止";
+  }
+  return text;
+}
+
 async function buildRunArgs(task) {
   const cmd = task.payload.type === "video" ? "creator:publish-video" : "creator:publish-article";
   const args = [path.join(projectRoot, "scripts/run.js"), cmd, "--account", task.accountName, "--task", task.id];
@@ -444,6 +470,7 @@ async function markFeishuFailed(task, errorText) {
       task.feishuRecordId,
       formatFeishuFailureStatus(errorText),
       task.accountName || "",
+      "异常待修改",
     ],
     {
       cwd: projectRoot,
@@ -552,36 +579,49 @@ async function startTask(task) {
     const ok = code === 0;
     const latest = await readTask(task.id);
     const wasCancelled = latest?.status === "cancelled";
+    const rawLastError = ok
+      ? undefined
+      : readLastTaskError(runtimeTaskId) || `退出码 ${code ?? -1}`;
+    const manualTerminated = wasCancelled || code === 143 || isManualTerminationText(rawLastError);
+    const normalizedLastError = ok ? undefined : normalizeTerminationMessage(rawLastError, code);
     appendTaskDone(
       runtimeTaskId,
       code ?? -1,
-      wasCancelled ? "用户手动终止" : `Process exited with code ${code ?? -1}`
+      manualTerminated ? "管理员手动终止" : `Process exited with code ${code ?? -1}`
     );
-    const lastError = ok
-      ? undefined
-      : readLastTaskError(runtimeTaskId) || `退出码 ${code ?? -1}`;
     if (!wasCancelled) {
       await patchTask(task.id, {
-        status: ok ? "success" : "failed",
-        lastError,
+        status: ok ? "success" : manualTerminated ? "cancelled" : "failed",
+        lastError: normalizedLastError,
       });
     }
     await removeRuntimeProcess(runtimeTaskId);
     if (ok && !wasCancelled) await markFeishuPublished(task);
-    if (!ok && !wasCancelled) await markFeishuFailed(task, lastError);
+    if (!ok && !manualTerminated) await markFeishuFailed(task, normalizedLastError);
   });
 
   child.on("error", async (error) => {
     clearTimeout(timeout);
     children.delete(runtimeTaskId);
-    appendTaskLog(runtimeTaskId, "error", `Process error: ${error.message}`);
-    appendTaskDone(runtimeTaskId, -1, error.message);
+    const manualTerminated = isManualTerminationText(error.message);
+    const normalizedLastError = normalizeTerminationMessage(error.message, undefined);
+    appendTaskLog(
+      runtimeTaskId,
+      manualTerminated ? "warn" : "error",
+      manualTerminated ? normalizedLastError : `Process error: ${error.message}`
+    );
+    appendTaskDone(runtimeTaskId, -1, manualTerminated ? "管理员手动终止" : error.message);
     const latest = await readTask(task.id);
     if (latest?.status !== "cancelled") {
-      await patchTask(task.id, { status: "failed", lastError: error.message });
+      await patchTask(task.id, {
+        status: manualTerminated ? "cancelled" : "failed",
+        lastError: normalizedLastError,
+      });
     }
     await removeRuntimeProcess(runtimeTaskId);
-    if (latest?.status !== "cancelled") await markFeishuFailed(task, error.message);
+    if (latest?.status !== "cancelled" && !manualTerminated) {
+      await markFeishuFailed(task, normalizedLastError);
+    }
   });
 
   return true;

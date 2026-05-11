@@ -401,7 +401,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         const next = new Map(prev);
         const st = next.get(taskId);
         if (st && !st.done) {
-          next.set(taskId, { ...st, done: true, exitCode: -1, summary: "已手动终止" });
+          next.set(taskId, { ...st, done: true, exitCode: -1, summary: "管理员手动终止" });
         }
         return next;
       });

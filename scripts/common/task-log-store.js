@@ -349,14 +349,19 @@ function readLastTaskError(taskId) {
   const row = readTaskLogContent(taskId);
   if (!row) return undefined;
   const lines = row.content.trim().split("\n");
+  let fallback;
   for (let i = lines.length - 1; i >= 0; i--) {
     const match = lines[i].match(/\[ERROR\] (.*)/);
     if (!match) continue;
     const text = match[1].trim();
     if (/^\s*at\s/.test(text)) continue;
-    return text;
+    if (/^[{}]$/.test(text)) continue;
+    if (/^name:\s*['"]?\w+Error['"]?[,}]?$/i.test(text)) continue;
+    if (/^Call log:\s*$/i.test(text)) continue;
+    if (!fallback && text) fallback = text;
+    if (/脚本执行失败:|Process error:|Timeout|Error:/i.test(text)) return text;
   }
-  return undefined;
+  return fallback;
 }
 
 module.exports = {

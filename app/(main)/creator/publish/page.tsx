@@ -13,6 +13,7 @@ import {
   Popconfirm,
   Popover,
   Radio,
+  Segmented,
   Select,
   Space,
   Switch,
@@ -23,6 +24,7 @@ import {
   Typography,
 } from "antd";
 import dayjs from "dayjs";
+import type { Dayjs } from "dayjs";
 import { useTaskContext } from "@/contexts/TaskContext";
 
 const { Text } = Typography;
@@ -38,6 +40,67 @@ const TASK_TABLE_OP_LINK_STYLE = { paddingInline: 1 } as const;
 
 function isTerminableTask(task: PublishTask) {
   return TERMINABLE_TASK_STATUSES.has(task.status);
+}
+
+/** 「立即」（无定时）排在升序最前；有 scheduleAt 的按时间戳排序 */
+function getPublishTaskScheduleSortValue(task: PublishTask): number {
+  const raw = task.payload.scheduleAt;
+  if (raw == null || !String(raw).trim()) return Number.NEGATIVE_INFINITY;
+  const ms = dayjs(raw).valueOf();
+  return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
+}
+
+const SCHEDULE_SHOW_TIME = { format: "HH:mm" as const, minuteStep: 5 as const };
+
+function scheduleDisabledDate(current: Dayjs | null) {
+  if (!current) return false;
+  return current.isBefore(dayjs().startOf("day"));
+}
+
+function scheduleDisabledTime(current: Dayjs | null) {
+  if (!current || !current.isSame(dayjs(), "day")) return {};
+  const now = dayjs();
+  return {
+    disabledHours: () => Array.from({ length: now.hour() }, (_, i) => i),
+    disabledMinutes: (h: number) =>
+      h === now.hour() ? Array.from({ length: now.minute() + 1 }, (_, i) => i) : [],
+  };
+}
+
+/** 选「定时」时的默认时间：不早于当前时刻 */
+function defaultFutureScheduleIso(): string {
+  const t = dayjs().add(1, "hour").startOf("hour");
+  return (t.isBefore(dayjs()) ? dayjs().add(2, "hour").startOf("hour") : t).toISOString();
+}
+
+function scheduleQuickPresets() {
+  const n = dayjs();
+  return [
+    { label: "30 分钟后", value: n.add(30, "minute").second(0).millisecond(0) },
+    { label: "1 小时后", value: n.add(1, "hour").startOf("hour") },
+    { label: "2 小时后", value: n.add(2, "hour").startOf("hour") },
+    { label: "明天 09:00", value: n.add(1, "day").hour(9).minute(0).second(0) },
+    { label: "明天 12:00", value: n.add(1, "day").hour(12).minute(0).second(0) },
+    { label: "后天 09:00", value: n.add(2, "day").hour(9).minute(0).second(0) },
+  ];
+}
+
+/**
+ * 编辑任务用：某一天内、不早于「现在」的 5 分钟档（下拉选，避免 rc-picker 时间列在选中后强制 syncScroll 导致滚动跳动）。
+ */
+function buildScheduleTimeOptionsForDay(dateTime: Dayjs) {
+  const dayStart = dateTime.startOf("day");
+  const now = dayjs();
+  const opts: { label: string; value: string }[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += 5) {
+      const candidate = dayStart.hour(h).minute(m).second(0).millisecond(0);
+      if (candidate.isBefore(now)) continue;
+      const label = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      opts.push({ label, value: label });
+    }
+  }
+  return opts;
 }
 
 type TaskPayload =
@@ -78,6 +141,7 @@ type PublishTask = {
   payload: TaskPayload;
   lastError?: string;
   taskId?: string;
+  feishuRowNumber?: number;
 };
 
 type EditTaskState = {
@@ -99,6 +163,7 @@ export default function CreatorPublishPage() {
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [refreshingFeishu, setRefreshingFeishu] = useState(false);
 
   const [type, setType] = useState<TaskType>("video");
   const [accountNames, setAccountNames] = useState<string[]>([]);
@@ -119,6 +184,16 @@ export default function CreatorPublishPage() {
   const [editingTask, setEditingTask] = useState<PublishTask | null>(null);
   const [editState, setEditState] = useState<EditTaskState>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [scheduleColumnSortOrder, setScheduleColumnSortOrder] = useState<"ascend" | "descend" | null>(
+    null
+  );
+
+  const editScheduleTimeOptions = useMemo(() => {
+    if (!editState?.scheduleAt) return [];
+    const d = dayjs(editState.scheduleAt);
+    if (!d.isValid()) return [];
+    return buildScheduleTimeOptionsForDay(d);
+  }, [editState?.scheduleAt]);
 
   const terminableSelectedRowKeys = useMemo(() => {
     const selected = new Set(selectedRowKeys);
@@ -414,6 +489,31 @@ export default function CreatorPublishPage() {
     setImporting(false);
   }
 
+  async function handleRefreshTasksFromFeishu() {
+    setRefreshingFeishu(true);
+    try {
+      const res = await fetch("/api/creator/publish/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "refresh-from-feishu" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "刷新失败");
+      setTasks(data.tasks || []);
+      setSelectedRowKeys((prev) => {
+        const ids = new Set((data.tasks || []).map((t: PublishTask) => t.id));
+        return prev.filter((k) => ids.has(k));
+      });
+      const summary = data.summary || {};
+      message.success(
+        `刷新完成：更新 ${summary.updatedCount || 0}，飞书行更新 ${summary.rowUpdatedCount || 0}，无变化 ${summary.unchangedCount || 0}`
+      );
+    } catch (e: any) {
+      message.error(e.message || "刷新失败");
+    }
+    setRefreshingFeishu(false);
+  }
+
   function openEditTask(task: PublishTask) {
     setEditingTask(task);
     setEditState({
@@ -542,9 +642,13 @@ export default function CreatorPublishPage() {
     },
     {
       title: "标题",
-      width: 60,
+      width: 78,
       align: "center" as const,
-      render: (_: any, r: PublishTask) => renderMultilineText(r.payload.title || "", 2),
+      render: (_: any, r: PublishTask) => {
+        const title = String(r.payload.title ?? "").trim();
+        if (!title) return "-";
+        return renderHoverPreview(title, "查看标题");
+      },
     },
     {
       title: "正文",
@@ -554,8 +658,13 @@ export default function CreatorPublishPage() {
     },
     {
       title: "定时",
+      key: "scheduleAt",
       align: "center" as const,
-      width: 104,
+      width: 112,
+      sorter: (a: PublishTask, b: PublishTask) =>
+        getPublishTaskScheduleSortValue(a) - getPublishTaskScheduleSortValue(b),
+      sortOrder: scheduleColumnSortOrder === null ? undefined : scheduleColumnSortOrder,
+      showSorterTooltip: { title: "按定时排序：升序为时间从早到晚，「立即」在最前" },
       render: (_: any, r: PublishTask) =>
         r.payload.scheduleAt ? dayjs(r.payload.scheduleAt).format("MM-DD HH:mm") : "立即",
     },
@@ -636,6 +745,13 @@ export default function CreatorPublishPage() {
         const v = map[s];
         return <Tag color={v.color}>{v.text}</Tag>;
       },
+    },
+    {
+      title: "飞书行",
+      dataIndex: "feishuRowNumber",
+      width: 72,
+      align: "center" as const,
+      render: (v?: number) => (Number.isFinite(v) ? String(v) : "-"),
     },
     {
       title: "错误",
@@ -885,31 +1001,15 @@ export default function CreatorPublishPage() {
               }
             >
               <DatePicker
-                showTime={{ format: "HH:mm", minuteStep: 5 }}
+                showTime={SCHEDULE_SHOW_TIME}
                 format="YYYY-MM-DD HH:mm"
                 allowClear
                 placeholder="选择定时发布时间"
                 value={scheduleAt ? dayjs(scheduleAt) : null}
                 onChange={(v) => setScheduleAt(v ? v.toISOString() : null)}
-                disabledDate={(current) => current && current.isBefore(dayjs().startOf("day"))}
-                disabledTime={(current) => {
-                  if (!current || !current.isSame(dayjs(), "day")) return {};
-                  const now = dayjs();
-                  return {
-                    disabledHours: () => Array.from({ length: now.hour() }, (_, i) => i),
-                    disabledMinutes: (h) =>
-                      h === now.hour()
-                        ? Array.from({ length: now.minute() + 1 }, (_, i) => i)
-                        : [],
-                  };
-                }}
-                presets={[
-                  { label: "1小时后", value: dayjs().add(1, "hour").startOf("hour") },
-                  { label: "2小时后", value: dayjs().add(2, "hour").startOf("hour") },
-                  { label: "明天 09:00", value: dayjs().add(1, "day").hour(9).minute(0).second(0) },
-                  { label: "明天 12:00", value: dayjs().add(1, "day").hour(12).minute(0).second(0) },
-                  { label: "后天 09:00", value: dayjs().add(2, "day").hour(9).minute(0).second(0) },
-                ]}
+                disabledDate={scheduleDisabledDate}
+                disabledTime={scheduleDisabledTime}
+                presets={scheduleQuickPresets()}
                 style={{ width: "100%" }}
               />
             </Form.Item>
@@ -939,7 +1039,7 @@ export default function CreatorPublishPage() {
           }}
         >
           <Text type="secondary" style={{ fontSize: 12 }}>
-            长文本支持悬浮查看，标题/文号/错误最多显示两行
+            标题、正文等可悬浮查看完整内容；广审批文号、错误最多显示两行
           </Text>
           <Space size={4} wrap>
           <Button
@@ -974,7 +1074,7 @@ export default function CreatorPublishPage() {
               删除选中 ({selectedRowKeys.length})
             </Button>
           </Popconfirm>
-          <Button onClick={fetchTasks} loading={loadingTasks} size="small">
+          <Button onClick={handleRefreshTasksFromFeishu} loading={refreshingFeishu} size="small">
             刷新任务
           </Button>
           </Space>
@@ -988,7 +1088,12 @@ export default function CreatorPublishPage() {
         columns={columns as any}
         tableLayout="fixed"
         pagination={{ pageSize: 20, showSizeChanger: false }}
-        scroll={{ x: 1180, y: "calc(100vh - 220px)" }}
+        scroll={{ x: 1260, y: "calc(100vh - 220px)" }}
+        onChange={(_pagination, _filters, sorter, extra) => {
+          if (extra.action !== "sort") return;
+          const s = Array.isArray(sorter) ? sorter[0] : sorter;
+          setScheduleColumnSortOrder((s?.order ?? null) as "ascend" | "descend" | null);
+        }}
         rowSelection={{
           selectedRowKeys,
           onChange: setSelectedRowKeys,
@@ -1074,18 +1179,127 @@ export default function CreatorPublishPage() {
                 unCheckedChildren="否"
               />
             </Form.Item>
-            <Form.Item label="定时发布时间" style={{ marginBottom: 0 }}>
-              <DatePicker
-                showTime={{ format: "HH:mm", minuteStep: 5 }}
-                format="YYYY-MM-DD HH:mm"
-                allowClear
-                placeholder="不填则立即执行"
-                value={editState.scheduleAt ? dayjs(editState.scheduleAt) : null}
-                onChange={(v) =>
-                  setEditState((prev) => prev ? { ...prev, scheduleAt: v ? v.toISOString() : null } : prev)
-                }
-                style={{ width: "100%" }}
-              />
+            <Form.Item
+              label="定时发布时间"
+              style={{ marginBottom: 0 }}
+              help={
+                <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>
+                  选「立即执行」尽快跑任务；定时时先选日期，时间用下拉（可搜索、无滚轮跳动）；亦可点下方快捷时间
+                </span>
+              }
+            >
+              <Space orientation="vertical" size={10} style={{ width: "100%" }}>
+                <Segmented
+                  block
+                  value={editState.scheduleAt ? "scheduled" : "immediate"}
+                  onChange={(v) => {
+                    if (v === "immediate") {
+                      setEditState((prev) => (prev ? { ...prev, scheduleAt: null } : prev));
+                    } else {
+                      setEditState((prev) => {
+                        if (!prev) return prev;
+                        if (prev.scheduleAt) return prev;
+                        return { ...prev, scheduleAt: defaultFutureScheduleIso() };
+                      });
+                    }
+                  }}
+                  options={[
+                    { label: "立即执行", value: "immediate" },
+                    { label: "定时发布", value: "scheduled" },
+                  ]}
+                />
+                {editState.scheduleAt ? (
+                  <>
+                    <Space.Compact block>
+                      <DatePicker
+                        style={{ width: "52%" }}
+                        format="YYYY-MM-DD"
+                        allowClear={false}
+                        placeholder="日期"
+                        value={dayjs(editState.scheduleAt).isValid() ? dayjs(editState.scheduleAt) : null}
+                        onChange={(d) => {
+                          setEditState((prev) => {
+                            if (!prev?.scheduleAt || !d) return prev;
+                            const cur = dayjs(prev.scheduleAt);
+                            if (!cur.isValid()) return { ...prev, scheduleAt: defaultFutureScheduleIso() };
+                            let merged = d.hour(cur.hour()).minute(cur.minute()).second(0).millisecond(0);
+                            if (merged.isBefore(dayjs())) {
+                              const opts = buildScheduleTimeOptionsForDay(merged);
+                              if (opts.length > 0) {
+                                const [hs, ms] = opts[0].value.split(":");
+                                merged = d
+                                  .hour(parseInt(hs, 10))
+                                  .minute(parseInt(ms, 10))
+                                  .second(0)
+                                  .millisecond(0);
+                              } else {
+                                merged = dayjs(defaultFutureScheduleIso());
+                              }
+                            }
+                            return { ...prev, scheduleAt: merged.toISOString() };
+                          });
+                        }}
+                        disabledDate={scheduleDisabledDate}
+                        getPopupContainer={() => document.body}
+                        styles={{ popup: { root: { zIndex: 1100 } } }}
+                      />
+                      <Select
+                        style={{ width: "48%" }}
+                        placeholder="时间"
+                        allowClear={false}
+                        showSearch={{ optionFilterProp: "label" }}
+                        getPopupContainer={() => document.body}
+                        popupMatchSelectWidth={false}
+                        listHeight={280}
+                        options={editScheduleTimeOptions}
+                        notFoundContent="所选日期暂无可选时刻，请换一天"
+                        value={
+                          dayjs(editState.scheduleAt).isValid()
+                            ? dayjs(editState.scheduleAt).format("HH:mm")
+                            : undefined
+                        }
+                        onChange={(hm) => {
+                          if (!hm) return;
+                          const parts = hm.split(":");
+                          const hh = parseInt(parts[0], 10);
+                          const mm = parseInt(parts[1], 10);
+                          if (!Number.isFinite(hh) || !Number.isFinite(mm)) return;
+                          setEditState((prev) => {
+                            if (!prev?.scheduleAt) return prev;
+                            const cur = dayjs(prev.scheduleAt);
+                            if (!cur.isValid()) return { ...prev, scheduleAt: defaultFutureScheduleIso() };
+                            const merged = cur.hour(hh).minute(mm).second(0).millisecond(0);
+                            if (merged.isBefore(dayjs())) return prev;
+                            return { ...prev, scheduleAt: merged.toISOString() };
+                          });
+                        }}
+                        styles={{ popup: { root: { zIndex: 1100 } } }}
+                      />
+                    </Space.Compact>
+                    <div>
+                      <Text type="secondary" style={{ fontSize: 11, marginBottom: 4, display: "block" }}>
+                        快捷时间
+                      </Text>
+                      <Space size={[6, 6]} wrap>
+                        {scheduleQuickPresets().map((p) => (
+                          <Button
+                            key={p.label}
+                            size="small"
+                            type="default"
+                            onClick={() =>
+                              setEditState((prev) =>
+                                prev ? { ...prev, scheduleAt: p.value.toISOString() } : prev
+                              )
+                            }
+                          >
+                            {p.label}
+                          </Button>
+                        ))}
+                      </Space>
+                    </div>
+                  </>
+                ) : null}
+              </Space>
             </Form.Item>
           </Form>
         ) : null}

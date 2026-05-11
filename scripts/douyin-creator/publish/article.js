@@ -113,7 +113,20 @@ async function selectMusic(page) {
     return;
   }
 
-  await musicAction.click();
+  await musicAction.scrollIntoViewIfNeeded().catch(() => {});
+  await musicAction.click({ timeout: 5000 }).catch(async (error) => {
+    const message = String(error?.message || error || "");
+    if (!/intercepts pointer events|Timeout/i.test(message)) throw error;
+    console.log("选择音乐按钮被页面浮层遮挡，改用 DOM 点击");
+    const clicked = await musicAction
+      .evaluate((node) => {
+        const target = node.closest("button, [role='button']") || node;
+        target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+        return true;
+      })
+      .catch(() => false);
+    if (!clicked) throw error;
+  });
   await page.waitForTimeout(3000);
 
   const hotTab = page.locator('div[role="tab"]:has-text("热门榜")').first();

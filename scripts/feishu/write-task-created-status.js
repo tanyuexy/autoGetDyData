@@ -1,8 +1,8 @@
 /**
- * 回写飞书任务表的「已创建任务」列
+ * 回写飞书任务表字段，可写「已创建任务」并可选联动更新「审批」
  *
  * 用法:
- *   node scripts/feishu/write-task-created-status.js <recordId> <statusText> [accountName]
+ *   node scripts/feishu/write-task-created-status.js <recordId> <statusText> [accountName] [approvalText]
  */
 require("dotenv").config();
 
@@ -21,6 +21,7 @@ async function main() {
   const recordId = String(process.argv[2] || "").trim();
   const statusText = normalizeStatusText(process.argv[3] || "");
   const accountName = String(process.argv[4] || "").trim() || "?";
+  const approvalText = normalizeStatusText(process.argv[5] || "");
 
   if (!recordId) {
     console.error("[write-task-created-status] 缺少 recordId 参数");
@@ -34,12 +35,17 @@ async function main() {
   const cfg = loadFeishuBitableConfigForProfile("task");
   const tokenCache = await getValidAccessToken(cfg);
 
-  await updateBitableRecord(cfg, tokenCache.accessToken, recordId, {
+  const fields = {
     已创建任务: statusText,
-  });
+  };
+  if (approvalText) {
+    fields.审批 = approvalText;
+  }
+
+  await updateBitableRecord(cfg, tokenCache.accessToken, recordId, fields);
 
   console.log(
-    `[write-task-created-status] ✓ 已回写飞书 record ${recordId} (${accountName}): 已创建任务=${statusText}`
+    `[write-task-created-status] ✓ 已回写飞书 record ${recordId} (${accountName}): 已创建任务=${statusText}${approvalText ? `, 审批=${approvalText}` : ""}`
   );
 }
 
