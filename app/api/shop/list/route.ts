@@ -1,16 +1,20 @@
+import fs from "fs";
+import path from "path";
 import { NextResponse } from "next/server";
+import {
+  SHOP_KEY_COOKIE_PATTERNS,
+  analyzeStorageState,
+  mergeVerificationIntoAnalysis,
+  readLastVerified,
+} from "@/lib/cookie-checker";
 import { getConfig } from "@/lib/configService";
 
 export async function GET() {
   try {
-    const path = require("path");
-    const fs = require("fs");
-    const { analyzeStorageState, SHOP_KEY_COOKIE_PATTERNS, readLastVerified } = require("@/app/lib/cookie-checker");
-
     const config = await getConfig();
     const emails: { email: string; password: string }[] = config.emails || [];
     const shopNames = Array.isArray(config.accounts)
-      ? config.accounts.map((s: any) => String(s || "").trim()).filter(Boolean)
+      ? config.accounts.map((s: unknown) => String(s || "").trim()).filter(Boolean)
       : [];
 
     const ACCOUNTS_DIR = (() => {
@@ -33,16 +37,8 @@ export async function GET() {
         const analysis = analyzeStorageState(storagePath, SHOP_KEY_COOKIE_PATTERNS, 14);
         const hasStorage = analysis.status !== "missing";
 
-        // 最近 24h 内浏览器验证结果，覆盖 cookie 静态分析结果
         const lastVerified = readLastVerified(accountDir);
-
-        let cookieStatus = hasStorage ? analysis.status : "missing";
-        let cookieDetail: string | null = hasStorage ? analysis.detail : null;
-
-        if (lastVerified.verifiedAt && lastVerified.status) {
-          cookieStatus = lastVerified.status;
-          cookieDetail = lastVerified.detail || analysis.detail;
-        }
+        const { cookieStatus, cookieDetail } = mergeVerificationIntoAnalysis(analysis, lastVerified);
 
         return {
           email: entry.email,

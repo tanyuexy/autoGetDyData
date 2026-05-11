@@ -24,7 +24,8 @@ const {
   listAllBitableRecords,
   listAllBitableRecordIds,
   batchDeleteBitableRecords,
-  batchCreateBitableRecords
+  batchCreateBitableRecords,
+  batchUpdateBitableRecords
 } = require("./lib/bitable");
 
 const DEFAULT_XLSX_FIELD_ALIASES = {
@@ -87,6 +88,7 @@ function printHelp() {
   node scripts/feishu/cli.js backup-bitable [--dir ./data] [--profiles creator,shop] [--dry-run]
 
 说明:
+  - OAuth token 默认写入 storage/feishu/token-cache.json（可用 FEISHU_OAUTH_TOKEN_CACHE 覆盖）；若仅有旧路径 scripts/feishu/token-cache.json，首次运行会自动复制到新路径
   - 多维表格 appToken/tableId：优先读环境变量 FEISHU_BITABLE_*；未设置时读 Mongo app_config 的 feishu.<profile>（默认 profile=shop，抖创同步可设 FEISHU_BITABLE_PROFILE=creator 并在 Mongo 配置 feishu.creator）
   - auth-url: 生成 OAuth 授权地址（默认自动拉起浏览器，可用 --no-open 关闭）
   - feishu:callback: 启动本地回调服务，自动 exchange 并保存 token
@@ -95,7 +97,7 @@ function printHelp() {
   - insert: 自动检查/刷新 token 后插入一条多维表格记录
   - insert-xlsx: 读取 xlsx 第一行作为字段名，按行写入飞书多维表格（追加）
   - sync-data-xlsx: 未指定 --file 时，在指定目录下按 FEISHU_BITABLE_PROFILE 选取文件名前缀（creator=抖创、shop=抖店）匹配且「修改时间最新」的 xlsx；可用 --file 覆盖；默认先清空当前飞书表全部记录再批量写入；可用 --keep-rows N 保留「列出记录」接口顺序下的前 N 条，仅删除之后的记录再写入（不清空整张表）
-  - sync-data-xlsx-shop: 抖店汇总表同步到 feishu.shop 表；默认读取 ${SHOP_DEFAULT_XLSX_RELATIVE}（列为数据来源、所属店铺、作品名、日期、成交类型、增加销售额；飞书会忽略本地表中无对应字段的列）；缺列时仍可映射：作品标题→作品名、用户支付金额→增加销售额、数据日期→日期；默认在表格末尾追加记录（不删除已有行）；加 --replace 则与 sync-data-xlsx 相同先删后写（可用 --keep-rows）
+   - sync-data-xlsx-shop: 抖店汇总表同步到 feishu.shop 表；默认读取 ${SHOP_DEFAULT_XLSX_RELATIVE}（列为数据来源、所属店铺、作品名、日期、成交类型、增加销售额；飞书会忽略本地表中无对应字段的列）；缺列时仍可映射：作品标题→作品名、用户支付金额→增加销售额、数据日期→日期；默认追加模式：按「作品名+日期+增加销售额」三字段匹配已有记录，匹配到则补全空字段，未匹配则新增行；加 --replace 则先删后写（可用 --keep-rows）
   - backup-bitable: 从飞书多维表格拉取当前表全部记录并导出为 xlsx（默认各一份固定文件名，覆盖写入）：data/抖创-飞书表备份.xlsx、data/抖店-飞书表备份.xlsx；此类文件名不会被 sync-data-xlsx 的「按前缀选最新 xlsx」选中；未传 --profiles 时默认 creator,shop
 `);
 }
@@ -460,10 +462,9 @@ function normalizeDedupAmount(value) {
 function makeShopDedupKey(fields) {
   const title = normalizeDedupKey(fields && fields["作品名"]);
   const date = normalizeDedupDate(fields && fields["日期"]);
-  const dealType = normalizeDedupKey(fields && fields["成交类型"]);
   const amount = normalizeDedupAmount(fields && fields["增加销售额"]);
-  if (!title || !date || !dealType || !amount) return "";
-  return `${title}|${date}|${dealType}|${amount}`;
+  if (!title || !date || !amount) return "";
+  return `${title}|${date}|${amount}`;
 }
 
 function extractComparableText(value) {
@@ -640,7 +641,8 @@ async function prepareBitableRowsFromXlsx(
     aliasHeaders,
     droppedValueStats,
     unresolvedLinkValueStats,
-    ambiguousLinkValueStats
+    ambiguousLinkValueStats,
+    writableFieldMap
   };
 }
 
@@ -1234,7 +1236,6 @@ async function run() {
 
     const tokenRecord = await getValidAccessToken(config);
 
-    // 同步前先备份飞书表当前数据（dry-run 跳过）
     if (!dryRun) {
       const shopBackupOutDir = path.resolve(process.cwd(), getDefaultExportsDir());
       await backupBitableProfileToXlsx({
@@ -1258,15 +1259,14 @@ async function run() {
       aliasHeaders,
       droppedValueStats,
       unresolvedLinkValueStats,
-      ambiguousLinkValueStats
+      ambiguousLinkValueStats,
+      writableFieldMap
     } = prepared;
 
     console.log(`同步来源（抖店 shop）: ${filePath}`);
     console.log(`sheet: ${sheetName}`);
-    console.log(
-      `xlsx 有效行: ${totalXlsxRows}，本次准备写入: ${normalizedRecords.length} 行` +
-        (replaceMode ? "（--replace 覆盖模式）" : "（末尾追加）")
-    );
+    console.log(`xlsx 有效行: ${totalXlsxRows} 条` +
+      (replaceMode ? "（--replace 覆盖模式）" : "（追加+补全模式）"));
 
     if (aliasHeaders.length) {
       console.log("自动字段映射:", aliasHeaders.join(", "));
@@ -1283,57 +1283,102 @@ async function run() {
       return;
     }
 
-    // === 去重：追加模式下对比飞书表已有记录，按 作品名+日期+成交类型+增加销售额 去重 ===
-    let recordsToCreate = normalizedRecords;
+    // === 去重 + 补全：按 作品名+日期+增加销售额 三字段匹配 ===
+    //   匹配成功 → 检查该行其他列是否为空，为空则用 xlsx 值补全
+    //   未匹配   → 作为新行追加
+    let recordsToCreate = [];
+    let recordsToUpdate = [];
     let dedupSkipped = 0;
-    if (!replaceMode && recordsToCreate.length > 0) {
-      const DEDUP_FIELDS = ["作品名", "日期", "成交类型", "增加销售额"];
+    if (!replaceMode && normalizedRecords.length > 0) {
       const existing = await listAllBitableRecords(
         config,
-        tokenRecord.accessToken,
-        "",
-        DEDUP_FIELDS
+        tokenRecord.accessToken
       );
 
-      const seen = new Set();
+      const existingMap = new Map();
       for (const rec of existing) {
         const key = makeShopDedupKey((rec && rec.fields) || {});
-        if (key) seen.add(key);
+        if (key) {
+          if (!existingMap.has(key)) {
+            existingMap.set(key, { id: String(rec.record_id || ""), fields: rec.fields || {} });
+          }
+        }
       }
 
-      if (seen.size > 0) {
-        const before = recordsToCreate.length;
-        recordsToCreate = recordsToCreate.filter((record) => {
+      if (existingMap.size > 0) {
+        const allFieldNames = new Set();
+        for (const [ , meta ] of writableFieldMap) {
+          allFieldNames.add(String(meta.field_name || "").trim());
+        }
+
+        const seenXlsxKeys = new Set();
+        for (const record of normalizedRecords) {
           const key = makeShopDedupKey(record.fields || {});
-          if (!key) return true;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        dedupSkipped = before - recordsToCreate.length;
+          if (!key) {
+            recordsToCreate.push(record);
+            continue;
+          }
+          if (seenXlsxKeys.has(key)) continue;
+          seenXlsxKeys.add(key);
+
+          if (!existingMap.has(key)) {
+            recordsToCreate.push(record);
+            continue;
+          }
+
+          const existing = existingMap.get(key);
+          const updatePayload = {};
+          let hasEmpty = false;
+
+          for (const fieldName of allFieldNames) {
+            if (!fieldName) continue;
+            const xlsxValue = record.fields[fieldName];
+            if (isEmptyCellValue(xlsxValue)) continue;
+            const existingValue = existing.fields[fieldName];
+            if (isEmptyCellValue(existingValue)) {
+              updatePayload[fieldName] = xlsxValue;
+              hasEmpty = true;
+            } else if (Array.isArray(existingValue) && existingValue.length === 0) {
+              updatePayload[fieldName] = xlsxValue;
+              hasEmpty = true;
+            }
+          }
+
+          if (hasEmpty && Object.keys(updatePayload).length > 0) {
+            recordsToUpdate.push({
+              rowNumber: record.rowNumber,
+              fields: updatePayload,
+              record_id: existing.id,
+            });
+          }
+
+          dedupSkipped++;
+        }
+      } else {
+        recordsToCreate = normalizedRecords;
       }
     }
 
+    if (replaceMode) {
+      recordsToCreate = normalizedRecords;
+    }
+
     if (dryRun) {
-      let dryMsg;
       if (replaceMode) {
-        dryMsg =
-          keepLeadingRows > 0
-            ? `dry-run（replace）：将保留飞书表前 ${keepLeadingRows} 条，删除其余记录后批量写入；预览前 3 行:`
-            : "dry-run（replace）：将清空飞书表全部记录后批量写入；预览前 3 行:";
-      } else if (dedupSkipped > 0) {
-        dryMsg = `dry-run（追加+去重）：多维表格中已有 ${dedupSkipped} 条记录（按 作品名+日期+成交类型+增加销售额 匹配），跳过；新增 ${recordsToCreate.length} 条；预览前 3 行:`;
+        console.log(
+          `dry-run（replace）：将${keepLeadingRows > 0 ? `保留前 ${keepLeadingRows} 条，` : ""}删除其余后写入 ${recordsToCreate.length} 条`
+        );
       } else {
-        dryMsg =
-          "dry-run（追加）：将在表格末尾批量新增记录（不删除已有行）；预览前 3 行:";
+        const parts = [];
+        if (recordsToCreate.length) parts.push(`新增 ${recordsToCreate.length} 条`);
+        if (recordsToUpdate.length) parts.push(`补全 ${recordsToUpdate.length} 条`);
+        const complete = dedupSkipped - recordsToUpdate.length;
+        if (complete > 0) parts.push(`${complete} 条已完整`);
+        console.log(`dry-run（追加+补全）: ${parts.join("，")}`);
       }
-      console.log(dryMsg);
       recordsToCreate.slice(0, 3).forEach((record) => {
-        console.log(`- 行 ${record.rowNumber}:`, JSON.stringify(record.fields));
+        console.log(`  [预览] 行 ${record.rowNumber}:`, JSON.stringify(record.fields));
       });
-      if (dedupSkipped > 0) {
-        console.log(`去重: 飞书表中已存在 ${dedupSkipped} 条重复记录（按 作品名+日期+成交类型+增加销售额），已排除`);
-      }
       const droppedEntries = Object.entries(droppedValueStats);
       if (droppedEntries.length) {
         console.log(
@@ -1377,17 +1422,48 @@ async function run() {
       }
       deletedCount = idsToDelete.length;
     } else {
-      if (dedupSkipped > 0) {
-        console.log(
-          `追加模式（去重）：飞书表中已有 ${dedupSkipped} 条重复（按 作品名+日期+成交类型+增加销售额），跳过。准备新增 ${recordsToCreate.length} 条…`
+      const summaryParts = [];
+      const newCount = recordsToCreate.length;
+      const updateCount = recordsToUpdate.length;
+      const completeCount = dedupSkipped - updateCount;
+      if (newCount) summaryParts.push(`${newCount} 条新增`);
+      if (updateCount) summaryParts.push(`${updateCount} 条补全`);
+      if (completeCount) summaryParts.push(`${completeCount} 条已完整（匹配但无需补全）`);
+      if (!summaryParts.length) summaryParts.push("无新增、无补全、无完整匹配");
+      console.log(`匹配结果: ${summaryParts.join("，")}`);
+    }
+
+    // === 先执行补全更新 ===
+    let updated = 0;
+    if (recordsToUpdate.length > 0) {
+      const BATCH = 500;
+      const updateChunks = chunkArray(
+        recordsToUpdate.map((r) => ({
+          record_id: r.record_id,
+          fields: r.fields,
+        })),
+        BATCH
+      );
+      for (let i = 0; i < updateChunks.length; i += 1) {
+        await batchUpdateBitableRecords(
+          config,
+          tokenRecord.accessToken,
+          updateChunks[i]
         );
-      } else {
-        console.log("追加模式：不删除已有记录，仅在末尾批量新增…");
+        updated += updateChunks[i].length;
+        if (i < updateChunks.length - 1) {
+          await sleepMs(200);
+        }
       }
     }
 
-    if (!recordsToCreate.length) {
-      console.log("去重后没有新数据需要写入，跳过。");
+    // === 再执行新增 ===
+    if (!recordsToCreate.length && !replaceMode) {
+      if (updated > 0) {
+        console.log(`补全完成: 已更新 ${updated} 条。`);
+      } else {
+        console.log("无需写入。");
+      }
       return;
     }
 
@@ -1417,7 +1493,10 @@ async function run() {
             : "")
       );
     } else {
-      console.log(`追加写入完成: 已新增 ${created} 条`);
+      const parts = [];
+      if (created > 0) parts.push(`新增 ${created} 条`);
+      if (updated > 0) parts.push(`补全 ${updated} 条`);
+      console.log(`写入完成: ${parts.join("，")}`);
     }
 
     const droppedEntries = Object.entries(droppedValueStats);

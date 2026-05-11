@@ -6,18 +6,24 @@ interface FeishuData {
   shop: { baseUrl?: string; appToken: string; tableId: string };
   creator: { baseUrl?: string; appToken: string; tableId: string; keepRows?: number };
   task: { baseUrl?: string; appToken: string; tableId: string };
+  product: { baseUrl?: string; appToken: string; tableId: string };
 }
 
 interface Props extends FeishuData {
   onChange: (data: FeishuData) => void;
 }
 
-export default function ConfigFeishuTab({ shop, creator, task, onChange }: Props) {
-  function update(section: "shop" | "creator" | "task", field: string, value: any) {
-    const data: FeishuData = { shop, creator, task };
+export default function ConfigFeishuTab({ shop, creator, task, product, onChange }: Props) {
+  function update(
+    section: "shop" | "creator" | "task" | "product",
+    field: string,
+    value: any
+  ) {
+    const data: FeishuData = { shop, creator, task, product };
     if (section === "shop") data.shop = { ...data.shop, [field]: value };
     else if (section === "creator") data.creator = { ...data.creator, [field]: value };
-    else data.task = { ...data.task, [field]: value };
+    else if (section === "task") data.task = { ...data.task, [field]: value };
+    else data.product = { ...data.product, [field]: value };
     onChange(data);
   }
 
@@ -104,6 +110,31 @@ export default function ConfigFeishuTab({ shop, creator, task, onChange }: Props
           <Input
             value={task.tableId}
             onChange={(e) => update("task", "tableId", e.target.value)}
+            placeholder="数据表 ID"
+          />
+        </Form.Item>
+      </Form>
+
+      <h3 style={{ marginTop: 16 }}>商品信息多维表格</h3>
+      <Form layout="vertical">
+        <Form.Item label="Base URL">
+          <Input
+            value={product.baseUrl || ""}
+            onChange={(e) => update("product", "baseUrl", e.target.value)}
+            placeholder="飞书多维表格完整链接（可选）"
+          />
+        </Form.Item>
+        <Form.Item label="App Token" required>
+          <Input
+            value={product.appToken}
+            onChange={(e) => update("product", "appToken", e.target.value)}
+            placeholder="飞书多维表格 App Token"
+          />
+        </Form.Item>
+        <Form.Item label="Table ID" required>
+          <Input
+            value={product.tableId}
+            onChange={(e) => update("product", "tableId", e.target.value)}
             placeholder="数据表 ID"
           />
         </Form.Item>

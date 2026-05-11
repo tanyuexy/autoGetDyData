@@ -1,13 +1,49 @@
 const path = require("path");
+const fs = require("fs");
 const { readProjectConfigFromEnv } = require("../../common/project-config");
 
 const DEFAULT_API_BASE = "https://open.feishu.cn";
 const DEFAULT_AUTH_BASE = "https://accounts.feishu.cn";
 const DEFAULT_SCOPE = "bitable:app offline_access";
-const DEFAULT_TOKEN_CACHE_PATH = path.resolve(
+
+const LEGACY_TOKEN_CACHE_PATH = path.resolve(
   process.cwd(),
   "scripts/feishu/token-cache.json"
 );
+const DEFAULT_TOKEN_CACHE_PATH = path.resolve(
+  process.cwd(),
+  "storage/feishu/token-cache.json"
+);
+
+/**
+ * OAuth token 落盘路径。
+ * - 优先 FEISHU_OAUTH_TOKEN_CACHE
+ * - 默认 storage/feishu/token-cache.json（与 storage/ 下其它数据一致）
+ * - 首次若新路径尚无文件且仍存在旧路径 scripts/feishu/token-cache.json，则自动复制并打日志
+ */
+function getFeishuTokenCachePath() {
+  const fromEnv = process.env.FEISHU_OAUTH_TOKEN_CACHE;
+  if (fromEnv != null && String(fromEnv).trim()) {
+    return String(fromEnv).trim();
+  }
+
+  try {
+    if (
+      !fs.existsSync(DEFAULT_TOKEN_CACHE_PATH) &&
+      fs.existsSync(LEGACY_TOKEN_CACHE_PATH)
+    ) {
+      fs.mkdirSync(path.dirname(DEFAULT_TOKEN_CACHE_PATH), { recursive: true });
+      fs.copyFileSync(LEGACY_TOKEN_CACHE_PATH, DEFAULT_TOKEN_CACHE_PATH);
+      console.warn(
+        "[feishu] OAuth token 已从 scripts/feishu/token-cache.json 复制到 storage/feishu/token-cache.json，可手动删除旧文件"
+      );
+    }
+  } catch (e) {
+    console.warn("[feishu] token 路径迁移失败:", e && e.message ? e.message : e);
+  }
+
+  return DEFAULT_TOKEN_CACHE_PATH;
+}
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -87,16 +123,14 @@ function loadFeishuConfig() {
     authBase: optionalEnv("FEISHU_AUTH_BASE", DEFAULT_AUTH_BASE),
     bitableAppToken,
     bitableTableId,
-    tokenCachePath: optionalEnv(
-      "FEISHU_OAUTH_TOKEN_CACHE",
-      DEFAULT_TOKEN_CACHE_PATH
-    )
+    tokenCachePath: getFeishuTokenCachePath()
   };
 }
 
 module.exports = {
   loadFeishuConfig,
   loadFeishuBitableConfigForProfile,
+  getFeishuTokenCachePath,
   requireEnv,
   optionalEnv
 };

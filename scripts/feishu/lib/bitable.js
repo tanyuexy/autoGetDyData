@@ -406,9 +406,74 @@ async function downloadAttachment(config, accessToken, fileToken, saveDir, fileN
   return { filePath: savePath, fileName: finalName, size: buffer.length };
 }
 
+async function batchUpdateBitableRecords(
+  config,
+  accessToken,
+  recordsPayload,
+  tableIdOverride = ""
+) {
+  if (!config.bitableAppToken) {
+    throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
+  }
+  if (!Array.isArray(recordsPayload) || !recordsPayload.length) {
+    return { updated: 0 };
+  }
+  if (recordsPayload.length > 500) {
+    throw new Error("batchUpdateBitableRecords 单次最多 500 条，请在上层分批");
+  }
+
+  const resolvedTableId = resolveBitableTableIdForMutation(
+    config,
+    tableIdOverride
+  );
+
+  const url = `${config.apiBase}/open-apis/bitable/v1/apps/${encodeURIComponent(
+    config.bitableAppToken
+  )}/tables/${encodeURIComponent(resolvedTableId)}/records/batch_update`;
+
+  const body = {
+    records: recordsPayload.map((item) => ({
+      record_id: item.record_id,
+      fields: item.fields,
+    })),
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch (error) {
+    throw new Error(`多维表格批量更新接口返回非 JSON: ${text || "<empty>"}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `多维表格批量更新接口 HTTP ${response.status}: ${parsed.msg || text || "未知错误"}`
+    );
+  }
+  if (typeof parsed.code === "number" && parsed.code !== 0) {
+    throw new Error(
+      `批量更新失败 code=${parsed.code}, msg=${parsed.msg || "未知错误"}`
+    );
+  }
+
+  const data = parsed.data || {};
+  const items = Array.isArray(data.records) ? data.records : [];
+  return { records: items, updated: items.length };
+}
+
 module.exports = {
   createBitableRecord,
   updateBitableRecord,
+  batchUpdateBitableRecords,
   listBitableFields,
   listAllBitableRecords,
   listAllBitableRecordIds,

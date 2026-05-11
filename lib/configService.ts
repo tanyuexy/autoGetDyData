@@ -35,6 +35,12 @@ function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigDa
         appToken: "T64RbXS6wak6QqsaSqzcx0F8n4f",
         tableId: "tblVym8chEalMZgl",
       },
+      product: data?.feishu?.product || {
+        baseUrl:
+          "https://a5bgloffd0.feishu.cn/base/T64RbXS6wak6QqsaSqzcx0F8n4f?table=tblx4oJCulsxEomk&view=vewn3FYuwC",
+        appToken: "T64RbXS6wak6QqsaSqzcx0F8n4f",
+        tableId: "tblx4oJCulsxEomk",
+      },
     },
   };
 }

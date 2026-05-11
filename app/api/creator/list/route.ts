@@ -1,12 +1,16 @@
+import fs from "fs";
+import path from "path";
 import { NextResponse } from "next/server";
+import {
+  CREATOR_KEY_COOKIE_PATTERNS,
+  analyzeStorageState,
+  mergeVerificationIntoAnalysis,
+  readLastVerified,
+} from "@/lib/cookie-checker";
 import { getConfig } from "@/lib/configService";
 
 export async function GET() {
   try {
-    const path = require("path");
-    const fs = require("fs");
-    const { analyzeStorageState, CREATOR_KEY_COOKIE_PATTERNS, readLastVerified } = require("@/app/lib/cookie-checker");
-
     const config = await getConfig();
     const accounts: string[] = config.accounts || [];
 
@@ -29,32 +33,15 @@ export async function GET() {
         const cookiesPath = path.join(accountDir, "cookies.json");
         const exportCfgPath = path.join(accountDir, "creator-export.json");
 
-        let hasStorage = false;
         let hasCookies = false;
         let hasExportDate = false;
         let exportDate: string | null = null;
 
         const analysis = analyzeStorageState(storagePath, CREATOR_KEY_COOKIE_PATTERNS, 14);
-        hasStorage = analysis.status !== "missing";
+        const hasStorage = analysis.status !== "missing";
 
         const lastVerified = readLastVerified(accountDir);
-
-        let cookieStatus = hasStorage ? analysis.status : "missing";
-        let cookieDetail: string | null = hasStorage ? analysis.detail : null;
-        const verifiedAtMs = lastVerified.verifiedAt
-          ? new Date(lastVerified.verifiedAt).getTime()
-          : 0;
-        const lastLoginAtMs = analysis.lastLoginAt
-          ? new Date(analysis.lastLoginAt).getTime()
-          : 0;
-        const shouldUseVerifiedResult =
-          Boolean(lastVerified.verifiedAt && lastVerified.status) &&
-          verifiedAtMs >= lastLoginAtMs;
-
-        if (shouldUseVerifiedResult) {
-          cookieStatus = lastVerified.status;
-          cookieDetail = lastVerified.detail || analysis.detail;
-        }
+        const { cookieStatus, cookieDetail } = mergeVerificationIntoAnalysis(analysis, lastVerified);
 
         try {
           fs.accessSync(cookiesPath);
@@ -62,7 +49,7 @@ export async function GET() {
         } catch {}
         try {
           const raw = fs.readFileSync(exportCfgPath, "utf-8");
-          const cfg = JSON.parse(raw);
+          const cfg = JSON.parse(raw) as { creatorExportDateStart?: string };
           if (cfg?.creatorExportDateStart) {
             hasExportDate = true;
             exportDate = cfg.creatorExportDateStart;

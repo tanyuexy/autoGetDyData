@@ -599,12 +599,13 @@ export default function ConfigPage() {
       children: (
         <SettingSection
           title="飞书多维表格"
-          description="分别配置抖店、抖创和任务表的链接、App Token 与 Table ID。"
+          description="分别配置抖店、抖创、任务和商品信息表的链接、App Token 与 Table ID。"
         >
           <ConfigFeishuTab
             shop={config.feishu.shop}
             creator={config.feishu.creator}
             task={config.feishu.task}
+            product={config.feishu.product}
             onChange={(data) => autoSave({ feishu: data })}
           />
         </SettingSection>

@@ -27,8 +27,7 @@ const {
 const {
   BROWSER_VIEWPORT,
   LOGIN_VERIFY_METHOD,
-  HEADLESS,
-  TARGET_URL
+  HEADLESS
 } = require("./lib/env");
 const { attachQrDataUrlSniffer } = require("./lib/qr");
 const { openTargetAndEnsureLogin, isLoggedInAtTarget } = require("./lib/login");
@@ -41,6 +40,7 @@ const {
 const { parseArgs } = require("./publish/utils");
 const { runPublishArticle } = require("./publish/article");
 const { runPublishVideo } = require("./publish/video");
+const { splitAccountsByCreatorSettingsStatus } = require("./lib/creator-cookie-status");
 
 let activeBrowser = null;
 let shuttingDown = false;
@@ -181,51 +181,6 @@ async function runAccountQueue(browser, accounts, command, options = {}) {
   return results;
 }
 
-async function probeStoredAuthValidity(browser, accountName) {
-  const paths = getAccountPaths(accountName);
-  const hasStoredAuth = await fileExists(paths.storageStatePath);
-  if (!hasStoredAuth) {
-    return { accountName, hasStoredAuth: false, valid: false };
-  }
-
-  const context = await browser.newContext({
-    viewport: BROWSER_VIEWPORT,
-    storageState: paths.storageStatePath
-  });
-
-  try {
-    const page = await context.newPage();
-    await page.goto(TARGET_URL, { waitUntil: "domcontentloaded" });
-    await page.waitForLoadState("networkidle").catch(() => {});
-    await page.waitForTimeout(1200);
-    const valid = await isLoggedInAtTarget(page);
-    return { accountName, hasStoredAuth: true, valid };
-  } catch (error) {
-    console.warn(
-      `账号 [${accountName}] 登录态预检查失败，按需登录处理: ${error.message || error}`
-    );
-    return { accountName, hasStoredAuth: true, valid: false };
-  } finally {
-    await context.close().catch(() => {});
-  }
-}
-
-async function splitAccountsByLiveAuth(browser, accounts) {
-  const withAuth = [];
-  const withoutAuth = [];
-
-  for (const accountName of accounts) {
-    const probe = await probeStoredAuthValidity(browser, accountName);
-    if (probe.valid) {
-      withAuth.push(accountName);
-    } else {
-      withoutAuth.push(accountName);
-    }
-  }
-
-  return { withAuth, withoutAuth };
-}
-
 function runFeishuSyncDataXlsxCreator() {
   const projectRoot = path.resolve(__dirname, "../..");
   const result = spawnSync(
@@ -296,7 +251,7 @@ async function main() {
     return;
   }
 
-  const { withAuth, withoutAuth } = await splitAccountsByLiveAuth(browser, accounts);
+  const { withAuth, withoutAuth } = splitAccountsByCreatorSettingsStatus(accounts);
   printExportChannelSummary(withAuth, withoutAuth, LOGIN_VERIFY_METHOD);
 
   // 串行执行两路队列，避免并行 console 交错导致「开始处理账号 A」与「账号 B 无登录态」粘在一起

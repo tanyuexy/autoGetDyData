@@ -60,3 +60,6 @@ Desktop.ini
 
 # 账号数据与导出文件
 storage/
+
+# 飞书 OAuth（默认 storage/feishu/token-cache.json；勿提交旧路径副本）
+scripts/feishu/token-cache.json
