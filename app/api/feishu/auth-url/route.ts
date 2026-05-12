@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 export async function POST() {
   try {
-    const { loadFeishuConfig } = require("@/scripts/feishu/lib/config");
-    const { buildAuthorizeUrl } = require("@/scripts/feishu/lib/oauth");
+    const { loadFeishuConfig } = require("@/lib/feishu/core/config");
+    const { buildAuthorizeUrl } = require("@/lib/feishu/core/oauth");
 
     const config = loadFeishuConfig();
     if (!config.redirectUri) {
@@ -22,4 +22,3 @@ export async function POST() {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
-

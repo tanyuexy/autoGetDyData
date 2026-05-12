@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { startApiTask } from "@/lib/apiTaskRunner";
+import { syncFeishuBitable } from "@/lib/feishu/service";
 
 export const maxDuration = 0;
 
@@ -12,17 +14,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    require("dotenv").config();
-
     const body = await request.json().catch(() => ({} as any));
     const accounts = Array.isArray(body?.accounts)
       ? body.accounts.map((s: any) => String(s || "").trim()).filter(Boolean)
       : [];
 
     const taskId = generateTaskIdWithTime("creator-feishu-sync");
-    const args = ["scripts/run.js", "feishu:sync-creator"];
-
-    await enqueueTask(taskId, "node", args, { namespace: "creator-export" });
+    startApiTask(taskId, "creator-export", { target: accounts.join(",") || "creator" }, async () => {
+      await syncFeishuBitable({ profile: "creator" });
+    });
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

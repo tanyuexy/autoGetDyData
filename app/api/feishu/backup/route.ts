@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enqueueTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { startApiTask } from "@/lib/apiTaskRunner";
+import { backupFeishuBitable } from "@/lib/feishu/service";
 
 export const maxDuration = 0;
 
@@ -8,15 +10,17 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const { profiles = "creator,shop" } = body;
 
-    require("dotenv").config();
+    if (!(await canStartTask("feishu"))) {
+      return NextResponse.json(
+        { error: "已有飞书任务在运行，请等待完成后再执行" },
+        { status: 409 }
+      );
+    }
 
     const taskId = generateTaskIdWithTime("feishu-backup");
-    await enqueueTask(taskId, "node", [
-      "scripts/run.js",
-      "feishu:backup",
-      "--profiles",
-      profiles,
-    ], { namespace: "feishu" });
+    startApiTask(taskId, "feishu", { target: String(profiles) }, async () => {
+      await backupFeishuBitable({ profiles: String(profiles || "creator,shop") });
+    });
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

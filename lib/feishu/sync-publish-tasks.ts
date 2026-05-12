@@ -1,13 +1,14 @@
+// @ts-nocheck
 require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { MongoClient } = require("mongodb");
-const { readBitable } = require("./lib/readBitable");
-const { downloadAttachment, updateBitableRecord } = require("./lib/bitable");
-const { loadFeishuBitableConfigForProfile } = require("./lib/config");
-const { getValidAccessToken } = require("./lib/oauth");
+const { readBitable } = require("./core/readBitable");
+const { downloadAttachment, updateBitableRecord } = require("./core/bitable");
+const { loadFeishuBitableConfigForProfile } = require("./core/config");
+const { getValidAccessToken } = require("./core/oauth");
 
 const MATERIALS_DIR = path.resolve(
   process.cwd(),

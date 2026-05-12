@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+// @ts-nocheck
 require("dotenv").config();
 
 const fs = require("fs/promises");
@@ -9,7 +9,7 @@ const {
   loadFeishuConfig,
   loadFeishuBitableConfigForProfile,
   optionalEnv
-} = require("./lib/config");
+} = require("./core/config");
 const {
   buildAuthorizeUrl,
   exchangeCodeForToken,
@@ -17,7 +17,7 @@ const {
   writeTokenCache,
   readTokenCache,
   getValidAccessToken
-} = require("./lib/oauth");
+} = require("./core/oauth");
 const {
   createBitableRecord,
   listBitableFields,
@@ -26,7 +26,7 @@ const {
   batchDeleteBitableRecords,
   batchCreateBitableRecords,
   batchUpdateBitableRecords
-} = require("./lib/bitable");
+} = require("./core/bitable");
 
 const DEFAULT_XLSX_FIELD_ALIASES = {
   作品名称: "作品名",
@@ -45,7 +45,7 @@ const SHOP_XLSX_FIELD_ALIASES = {
 };
 
 const { existsSync } = require("fs");
-const { readProjectConfigFromEnv } = require("../common/project-config");
+const { readProjectConfigFromEnv } = require("../../scripts/common/project-config");
 
 function getDefaultExportsDir() {
   const envVal = process.env.EXPORTS_DIR;
@@ -76,19 +76,19 @@ function printHelp() {
 飞书多维表格 OAuth2 工具
 
 用法:
-  node scripts/feishu/cli.js auth-url [--state xxx] [--no-open]
+  node lib/feishu/legacy-cli.ts auth-url [--state xxx] [--no-open]
   npm run feishu:callback
-  node scripts/feishu/cli.js exchange --code <authorization_code>
-  node scripts/feishu/cli.js refresh
-  node scripts/feishu/cli.js insert --fields '{"姓名":"张三","金额":100}'
-  node scripts/feishu/cli.js insert --fields-file ./data/record.json
-  node scripts/feishu/cli.js insert-xlsx --file ./data/作品列表.xlsx [--sheet Sheet1] [--dry-run]
-  node scripts/feishu/cli.js sync-data-xlsx [--dir ./data] [--file ./data/某.xlsx] [--sheet Sheet1] [--keep-rows N] [--dry-run]
-  node scripts/feishu/cli.js sync-data-xlsx-shop [--file ./data/抖店-全部店铺-每日支付增量汇总.xlsx] [--sheet Sheet1] [--replace] [--dry-run]
-  node scripts/feishu/cli.js backup-bitable [--dir ./data] [--profiles creator,shop] [--dry-run]
+  node lib/feishu/legacy-cli.ts exchange --code <authorization_code>
+  node lib/feishu/legacy-cli.ts refresh
+  node lib/feishu/legacy-cli.ts insert --fields '{"姓名":"张三","金额":100}'
+  node lib/feishu/legacy-cli.ts insert --fields-file ./data/record.json
+  node lib/feishu/legacy-cli.ts insert-xlsx --file ./data/作品列表.xlsx [--sheet Sheet1] [--dry-run]
+  node lib/feishu/legacy-cli.ts sync-data-xlsx [--dir ./data] [--file ./data/某.xlsx] [--sheet Sheet1] [--keep-rows N] [--dry-run]
+  node lib/feishu/legacy-cli.ts sync-data-xlsx-shop [--file ./data/抖店-全部店铺-每日支付增量汇总.xlsx] [--sheet Sheet1] [--replace] [--dry-run]
+  node lib/feishu/legacy-cli.ts backup-bitable [--dir ./data] [--profiles creator,shop] [--dry-run]
 
 说明:
-  - OAuth token 默认写入 storage/feishu/token-cache.json（可用 FEISHU_OAUTH_TOKEN_CACHE 覆盖）；若仅有旧路径 scripts/feishu/token-cache.json，首次运行会自动复制到新路径
+  - OAuth token 默认写入 storage/feishu/token-cache.json（可用 FEISHU_OAUTH_TOKEN_CACHE 覆盖）
   - 多维表格 appToken/tableId：优先读环境变量 FEISHU_BITABLE_*；未设置时读 Mongo app_config 的 feishu.<profile>（默认 profile=shop，抖创同步可设 FEISHU_BITABLE_PROFILE=creator 并在 Mongo 配置 feishu.creator）
   - auth-url: 生成 OAuth 授权地址（默认自动拉起浏览器，可用 --no-open 关闭）
   - feishu:callback: 启动本地回调服务，自动 exchange 并保存 token
@@ -867,8 +867,8 @@ function printLinkMappingWarnings(
   }
 }
 
-async function run() {
-  const args = parseArgs(process.argv.slice(2));
+async function runWithArgs(argv) {
+  const args = parseArgs(argv);
   const command = args._[0];
 
   if (
@@ -1534,7 +1534,13 @@ async function run() {
   throw new Error(`未知命令: ${command}`);
 }
 
-run().catch((error) => {
-  console.error("执行失败:", error.message || error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  runWithArgs(process.argv.slice(2)).catch((error) => {
+    console.error("执行失败:", error.message || error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  runWithArgs,
+};

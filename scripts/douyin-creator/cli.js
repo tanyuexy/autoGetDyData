@@ -15,7 +15,7 @@ try {
   }
 } catch (_) {}
 const path = require("path");
-const { spawnSync } = require("child_process");
+const { startAndWaitInternalApiTask } = require("../common/internal-api-client");
 const { chromium } = require("playwright");
 
 const { ensureDir, fileExists } = require("../common/fs");
@@ -181,26 +181,13 @@ async function runAccountQueue(browser, accounts, command, options = {}) {
   return results;
 }
 
-function runFeishuSyncDataXlsxCreator() {
-  const projectRoot = path.resolve(__dirname, "../..");
-  const result = spawnSync(
-    process.execPath,
-    ["scripts/run.js", "feishu:sync-creator"],
-    {
-      cwd: projectRoot,
-      stdio: "inherit",
-      env: { ...process.env },
-      shell: false
-    }
+async function runFeishuSyncDataXlsxCreator() {
+  console.log("调用 Next API 同步抖创数据到飞书多维表格...");
+  await startAndWaitInternalApiTask(
+    "/api/feishu/sync",
+    { profile: "creator" },
+    { timeoutMs: 30 * 60 * 1000 }
   );
-
-  if (result.status !== 0) {
-    throw new Error(
-      `写入飞书多维表格失败，退出码: ${
-        result.status == null ? "unknown" : result.status
-      }`
-    );
-  }
 }
 
 async function main() {
@@ -289,7 +276,7 @@ async function main() {
 
   if (shouldSyncFeishuAfterExport && allSuccess && mergedPath) {
     console.log("全部店铺导出成功，开始写入飞书多维表格...");
-    runFeishuSyncDataXlsxCreator();
+    await runFeishuSyncDataXlsxCreator();
   } else if (shouldSyncFeishuAfterExport) {
     console.log("存在失败店铺，已跳过写入飞书多维表格。");
   }

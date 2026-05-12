@@ -11,6 +11,7 @@ import {
   registerRuntimeProcess,
   removeRuntimeProcess,
 } from "./runtimeProcessStore";
+import { cancelApiTask, countRunningApiTasks, getRunningApiTaskList } from "./apiTaskRunner";
 
 export type TaskNamespace = "creator-export" | "creator-open" | "shop-export" | "creator-publish" | "login" | "system" | "feishu";
 
@@ -110,7 +111,7 @@ function countMemoryRunning(ns: NamespaceState): number {
 async function countRegistryRunning(namespace: TaskNamespace): Promise<number> {
   const ns = getOrCreateNamespace(namespace);
   const memoryIds = new Set(ns.tasks.keys());
-  let running = countMemoryRunning(ns);
+  let running = countMemoryRunning(ns) + countRunningApiTasks(namespace);
   for (const record of await getRuntimeProcessesByNamespace(namespace)) {
     if (!memoryIds.has(record.taskId)) running++;
   }
@@ -177,6 +178,9 @@ export interface RunningTaskInfo {
 /** List all currently running tasks across all namespaces */
 export async function getRunningTaskList(): Promise<RunningTaskInfo[]> {
   const result = new Map<string, RunningTaskInfo>();
+  for (const record of getRunningApiTaskList()) {
+    result.set(record.taskId, record);
+  }
   for (const [nsName, ns] of namespaces) {
     for (const [taskId, meta] of ns.taskMeta) {
       if (!ns.stoppingTasks.has(taskId) && ns.tasks.has(taskId)) {
@@ -322,6 +326,8 @@ export async function enqueueTask(
 }
 
 export async function killTask(taskId: string): Promise<boolean> {
+  if (cancelApiTask(taskId)) return true;
+
   for (const ns of namespaces.values()) {
     const child = ns.tasks.get(taskId);
     if (child?.pid) {

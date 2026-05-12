@@ -1,8 +1,9 @@
+// @ts-nocheck
 /**
  * 飞书多维表格读取工具 (可复用)
  *
  * 用法:
- *   const { readBitable } = require("./scripts/feishu/lib/readBitable");
+ *   const { readBitable } = require("@/lib/feishu/core/readBitable");
  *   const data = await readBitable("task");
  *   // data = { fields: [...], records: [...], fieldMap: {...} }
  */

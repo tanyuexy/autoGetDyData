@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enqueueTask, generateTaskIdWithTime, canStartTask } from "@/lib/taskManager";
+import { generateTaskIdWithTime, canStartTask } from "@/lib/taskManager";
+import { startApiTask } from "@/lib/apiTaskRunner";
+import { importPublishTasksFromFeishu } from "@/lib/feishu/service";
 import crypto from "crypto";
 
 export const maxDuration = 0;
 
-export async function POST(_request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
+    const body = await request.json().catch(() => ({} as any));
+    const autoStart = body?.autoStart === true;
     if (!(await canStartTask("creator-publish"))) {
       return NextResponse.json(
         { error: "已有发布任务正在执行，请等待完成后再导入" },
@@ -13,15 +17,14 @@ export async function POST(_request: NextRequest) {
       );
     }
 
-    require("dotenv").config();
-
     const suffix = crypto.randomBytes(3).toString("hex");
     const taskId = `${generateTaskIdWithTime("feishu-import")}-${suffix}`;
-    await enqueueTask(taskId, "node", [
-      "scripts/run.js",
-      "feishu:import-publish-tasks",
-    ], {
-      namespace: "creator-publish",
+    startApiTask(taskId, "creator-publish", { target: "feishu-import" }, async ({ log }) => {
+      await importPublishTasksFromFeishu({
+        autoStart,
+        allowCreate: true,
+        logger: (...args) => log(...args),
+      });
     });
 
     return NextResponse.json({ taskId });

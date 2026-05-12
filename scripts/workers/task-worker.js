@@ -11,6 +11,7 @@ const {
   ensureTaskLogMeta,
   readLastTaskError
 } = require("../common/task-log-store");
+const { postInternalApi } = require("../common/internal-api-client");
 
 const projectRoot = path.resolve(__dirname, "../..");
 const WORKER_ID = process.env.WORKER_ID || `task-worker-${process.pid}`;
@@ -238,27 +239,12 @@ async function tryClaimAutomationSlot(slotKey) {
 }
 
 async function enqueueCreatorPublishAutomationJob(taskId, reason) {
-  const db = await getDb();
-  const now = new Date();
-  await db.collection("task_jobs").replaceOne(
-    { taskId },
-    {
-      taskId,
-      namespace: "creator-publish",
-      status: "queued",
-      command: "node",
-      args: ["scripts/run.js", "feishu:import-publish-tasks", "--auto-start"],
-      cwd: projectRoot,
-      env: { HEADLESS: String(process.env.HEADLESS === "true" || process.env.HEADLESS === "1") },
-      timeoutMs: PUBLISH_TIMEOUT_MS,
-      interactive: false,
-      createdAt: now,
-      updatedAt: now,
-      automationReason: reason,
-    },
-    { upsert: true }
-  );
   appendTaskLog(taskId, "info", `自动调度触发，准备从飞书导入并执行任务 (${reason})`);
+  const data = await postInternalApi("/api/creator/publish/import-from-feishu", {
+    autoStart: true,
+  });
+  appendTaskLog(taskId, "info", `已通过 Next API 启动飞书导入任务: ${data.taskId || "(unknown)"}`);
+  appendTaskDone(taskId, 0, `Started API task ${data.taskId || ""}`.trim());
 }
 
 async function processCreatorPublishAutomation() {
@@ -436,22 +422,18 @@ async function buildRunArgs(task) {
 
 async function markFeishuPublished(task) {
   if (!task.feishuRecordId) return;
-  const child = spawn(
-    process.execPath,
-    [
-      path.join(projectRoot, "scripts/run.js"),
-      "feishu:mark-task-published",
-      task.feishuRecordId,
-      task.accountName || "",
-    ],
-    {
-      cwd: projectRoot,
-      stdio: "ignore",
-      detached: true,
-      env: { ...process.env },
-    }
-  );
-  child.unref();
+  try {
+    await postInternalApi("/api/feishu/task-writeback", {
+      action: "published",
+      recordId: task.feishuRecordId,
+    });
+  } catch (error) {
+    appendTaskLog(
+      task.taskId || task.id,
+      "error",
+      `[feishu-writeback] 发布成功回写失败 record ${task.feishuRecordId}: ${error.message || error}`
+    );
+  }
 }
 
 function formatFeishuFailureStatus(errorText) {
@@ -511,24 +493,19 @@ async function markFeishuFailed(task, errorText) {
     );
     return;
   }
-  const child = spawn(
-    process.execPath,
-    [
-      path.join(projectRoot, "scripts/run.js"),
-      "feishu:write-task-created-status",
-      task.feishuRecordId,
-      formatFeishuFailureStatus(errorText),
-      task.accountName || "",
-      "异常待修改",
-    ],
-    {
-      cwd: projectRoot,
-      stdio: "ignore",
-      detached: true,
-      env: { ...process.env },
-    }
-  );
-  child.unref();
+  try {
+    await postInternalApi("/api/feishu/task-writeback", {
+      recordId: task.feishuRecordId,
+      statusText: formatFeishuFailureStatus(errorText),
+      approvalText: "异常待修改",
+    });
+  } catch (error) {
+    appendTaskLog(
+      task.taskId || task.id,
+      "error",
+      `[feishu-writeback] 失败状态回写失败 record ${task.feishuRecordId}: ${error.message || error}`
+    );
+  }
 }
 
 async function startTask(task) {

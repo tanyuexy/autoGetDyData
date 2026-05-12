@@ -1,7 +1,6 @@
 require("dotenv").config();
 
 const fs = require("fs/promises");
-const { execSync } = require("child_process");
 const { chromium } = require("playwright");
 
 const { BROWSER_VIEWPORT, HEADLESS, getDefaultAccounts } = require("./lib/env");
@@ -17,7 +16,13 @@ const {
   buildRemainingTargetsResolver,
   printResultSummary
 } = require("./lib/index-helpers");
-const { listFailedItems, closeExportItemStore } = require("./lib/export-item-store");
+const {
+  listFailedItems,
+  closeExportItemStore
+} = require("./lib/export-item-store");
+const {
+  startAndWaitInternalApiTask
+} = require("../common/internal-api-client");
 
 let activeBrowser = null;
 let shuttingDown = false;
@@ -45,7 +50,11 @@ function parseArgs(argv) {
     args[0] && !args[0].includes("@") ? String(args[0]).toLowerCase() : "login";
   const positional = args[0] && !args[0].includes("@") ? args.slice(1) : args;
 
-  if (command === "merge" || command === "feishu-sync" || command === "retry-failed") {
+  if (
+    command === "merge" ||
+    command === "feishu-sync" ||
+    command === "retry-failed"
+  ) {
     return { command, accounts: [] };
   }
 
@@ -139,7 +148,9 @@ function createExportBatchId() {
 }
 
 function parseDataDate(dataDate) {
-  const match = String(dataDate || "").trim().match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
+  const match = String(dataDate || "")
+    .trim()
+    .match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
   if (!match) return null;
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }
@@ -159,7 +170,9 @@ function offsetFromDataDate(dataDate) {
 }
 
 function uniq(values) {
-  return [...new Set(values.map((v) => String(v || "").trim()).filter(Boolean))];
+  return [
+    ...new Set(values.map((v) => String(v || "").trim()).filter(Boolean))
+  ];
 }
 
 function getLatestResultsByAccount(results) {
@@ -186,7 +199,8 @@ async function getRetryableFailedItems(runId, options = {}) {
 
 async function runFailedShopExportRetry(accounts, options = {}) {
   const requestedRunId = options.runId || process.env.SHOP_RETRY_RUN_ID;
-  const failedItems = options.failedItems || (await listFailedItems({ runId: requestedRunId }));
+  const failedItems =
+    options.failedItems || (await listFailedItems({ runId: requestedRunId }));
   if (failedItems.length === 0) {
     console.log("没有找到需要补跑的抖店失败项");
     return [];
@@ -196,7 +210,9 @@ async function runFailedShopExportRetry(accounts, options = {}) {
   const targetShopNames = uniq(failedItems.map((item) => item.shopName));
   const targetDates = uniq(failedItems.map((item) => item.dataDate));
   const targetKinds = uniq(failedItems.map((item) => item.kind));
-  const offsets = targetDates.map(offsetFromDataDate).filter((n) => Number.isFinite(n));
+  const offsets = targetDates
+    .map(offsetFromDataDate)
+    .filter((n) => Number.isFinite(n));
   const daysToExport = offsets.length ? Math.max(...offsets) + 1 : 1;
 
   console.log(
@@ -211,14 +227,19 @@ async function runFailedShopExportRetry(accounts, options = {}) {
 
   const results = [];
   const processedNames = new Set();
-  const remainingTargets = buildRemainingTargetsResolver(targetShopNames, processedNames);
+  const remainingTargets = buildRemainingTargetsResolver(
+    targetShopNames,
+    processedNames
+  );
 
   try {
     for (let i = 0; i < accounts.length; i += 1) {
       const account = accounts[i];
       const remaining = remainingTargets();
       if (remaining.length === 0) {
-        console.log(`失败项目标店铺均已补跑 (${processedNames.size}/${targetShopNames.length})，提前结束`);
+        console.log(
+          `失败项目标店铺均已补跑 (${processedNames.size}/${targetShopNames.length})，提前结束`
+        );
         break;
       }
 
@@ -374,7 +395,9 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
     );
   }
 
-  const processedAccountEmails = latestResults.map((r) => r.account).filter(Boolean);
+  const processedAccountEmails = latestResults
+    .map((r) => r.account)
+    .filter(Boolean);
   const validation = await validateShopExportFiles({
     daysToExport,
     exportBatchId,
@@ -408,10 +431,11 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
   printResultSummary(latestResults);
 
   console.log("抖店数据拉取、文件校验、汇总校验均通过，开始同步飞书表格…");
-  execSync("node scripts/run.js feishu:sync-shop", {
-    stdio: "inherit",
-    cwd: process.cwd()
-  });
+  await startAndWaitInternalApiTask(
+    "/api/feishu/sync",
+    { profile: "shop" },
+    { timeoutMs: 30 * 60 * 1000 }
+  );
 }
 
 async function main() {
@@ -440,10 +464,11 @@ async function main() {
 
   if (command === "feishu-sync") {
     console.log("同步抖店汇总数据到飞书多维表格…");
-    execSync("node scripts/run.js feishu:sync-data-xlsx-shop", {
-      stdio: "inherit",
-      cwd: process.cwd()
-    });
+    await startAndWaitInternalApiTask(
+      "/api/feishu/sync",
+      { profile: "shop" },
+      { timeoutMs: 30 * 60 * 1000 }
+    );
     return;
   }
 
@@ -498,14 +523,14 @@ async function main() {
       } ==========`
     );
 
-      const result = await runOne(browser, account, {
-        processedNames,
-        daysToExport,
-        exportBatchId,
-        accountEmail: account.email,
-        selectedShopNames: preferredList,
-        targetDates,
-      });
+    const result = await runOne(browser, account, {
+      processedNames,
+      daysToExport,
+      exportBatchId,
+      accountEmail: account.email,
+      selectedShopNames: preferredList,
+      targetDates
+    });
     results.push(result);
 
     collectProcessedNamesIntoSet(result, processedNames);

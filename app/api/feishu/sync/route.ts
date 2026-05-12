@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enqueueTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { startApiTask } from "@/lib/apiTaskRunner";
+import { syncFeishuBitable } from "@/lib/feishu/service";
 
 export const maxDuration = 0;
 
@@ -8,8 +10,12 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const { profile = "creator", keepRows } = body;
 
-    require("dotenv").config();
-    process.env.FEISHU_BITABLE_PROFILE = profile;
+    if (!(await canStartTask("feishu"))) {
+      return NextResponse.json(
+        { error: "已有飞书任务在运行，请等待完成后再执行" },
+        { status: 409 }
+      );
+    }
 
     let defaultKeepRows = 0;
     try {
@@ -19,19 +25,15 @@ export async function POST(request: NextRequest) {
     } catch { }
 
     const taskId = generateTaskIdWithTime("feishu-sync");
-    const args = [
-      "scripts/run.js",
-      profile === "shop" ? "feishu:sync-shop" : "feishu:sync-creator",
-    ];
-
     const effectiveKeepRows =
       keepRows !== undefined ? Number(keepRows) : profile === "shop" ? defaultKeepRows : 0;
 
-    if (effectiveKeepRows !== undefined && Number.isFinite(effectiveKeepRows) && effectiveKeepRows > 0) {
-      args.push("--keep-rows", String(Math.floor(effectiveKeepRows)));
-    }
-
-    await enqueueTask(taskId, "node", args, { namespace: "feishu" });
+    startApiTask(taskId, "feishu", { target: String(profile) }, async () => {
+      await syncFeishuBitable({
+        profile: profile === "shop" ? "shop" : "creator",
+        keepRows: effectiveKeepRows,
+      });
+    });
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

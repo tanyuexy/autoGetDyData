@@ -1,3 +1,4 @@
+// @ts-nocheck
 async function createBitableRecord(config, accessToken, fields) {
   if (!config.bitableAppToken) {
     throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");

@@ -1,5 +1,3 @@
-import path from "path";
-import { spawn as spawnChild } from "child_process";
 import { getTaskList } from "./taskManager";
 import { getDb } from "./db/mongo";
 import { loadTaskSnapshot, readLastTaskError } from "./taskLogStore";
@@ -200,20 +198,19 @@ function writeBackFeishuFailure(task: CreatorPublishTask, errorText: string | un
     );
     return;
   }
-  try {
-    spawnChild(
-      process.execPath,
-      [
-        path.join(process.cwd(), "scripts/run.js"),
-        "feishu:write-task-created-status",
-        task.feishuRecordId,
-        formatFeishuFailureStatus(errorText),
-        task.accountName || "",
-        "异常待修改",
-      ],
-      { stdio: "inherit", detached: true }
-    ).unref();
-  } catch { }
+  import("./feishu/service")
+    .then(({ writeFeishuTaskStatus }) =>
+      writeFeishuTaskStatus({
+        recordId: task.feishuRecordId!,
+        statusText: formatFeishuFailureStatus(errorText),
+        approvalText: "异常待修改",
+      })
+    )
+    .catch((e) => {
+      console.error(
+        `[feishu-writeback] 回写失败 record ${task.feishuRecordId} (${task.accountName}): ${e.message || e}`
+      );
+    });
 }
 
 /**
@@ -230,11 +227,11 @@ export async function reconcileFeishuWritebacks(): Promise<void> {
 
   try {
     const { loadFeishuBitableConfigForProfile } = require(
-      "../scripts/feishu/lib/config"
+      "./feishu/core/config"
     );
-    const { getValidAccessToken } = require("../scripts/feishu/lib/oauth");
+    const { getValidAccessToken } = require("./feishu/core/oauth");
     const { updateBitableRecord, listAllBitableRecords } = require(
-      "../scripts/feishu/lib/bitable"
+      "./feishu/core/bitable"
     );
 
     const cfg = loadFeishuBitableConfigForProfile("task");
@@ -378,18 +375,15 @@ export function attachCreatorPublishTaskRuntime(
 
       // 发布成功 + 来自飞书导入 → 回写飞书行状态
       if (code === 0 && resolvedTarget.feishuRecordId) {
-        try {
-          spawnChild(
-            process.execPath,
-            [
-              path.join(process.cwd(), "scripts/run.js"),
-              "feishu:mark-task-published",
-              resolvedTarget.feishuRecordId,
-              resolvedTarget.accountName || "",
-            ],
-            { stdio: "inherit", detached: true }
-          ).unref();
-        } catch { }
+        import("./feishu/service")
+          .then(({ markFeishuTaskPublished }) =>
+            markFeishuTaskPublished(resolvedTarget.feishuRecordId!)
+          )
+          .catch((e) => {
+            console.error(
+              `[feishu-writeback] 发布成功回写失败 record ${resolvedTarget.feishuRecordId}: ${e.message || e}`
+            );
+          });
       } else if (code !== 0 && !manualTerminated) {
         writeBackFeishuFailure(resolvedTarget, lastError);
       }

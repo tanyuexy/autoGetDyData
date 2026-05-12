@@ -8,9 +8,7 @@ import {
   type CreatorPublishPayload,
   type CreatorPublishTask,
 } from "@/lib/creatorPublishStore";
-import { getConfig } from "@/lib/configService";
-
-const { syncPublishTasks } = require("../../../../../scripts/feishu/sync-publish-tasks");
+import { importPublishTasksFromFeishu } from "@/lib/feishu/service";
 
 export const maxDuration = 0;
 
@@ -76,12 +74,10 @@ export async function PATCH(req: NextRequest) {
     const id = String(body.id || "").trim();
 
     if (action === "refresh-from-feishu") {
-      process.env.PROJECT_CONFIG_JSON = JSON.stringify(await getConfig());
-      const summary = await syncPublishTasks({
+      const summary = await importPublishTasksFromFeishu({
         autoStart: false,
         allowCreate: false,
         logger: () => {},
-        summaryPrefix: "[refresh-publish-tasks]",
       });
       const tasks = await readCreatorPublishTasks();
       return NextResponse.json({ ok: true, summary, tasks });

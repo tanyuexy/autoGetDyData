@@ -1,9 +1,9 @@
 const fs = require("fs/promises");
 const { existsSync } = require("fs");
 const path = require("path");
-const { execSync } = require("child_process");
 const XLSX = require("xlsx");
 const { ACCOUNTS_DIR } = require("./env");
+const { startAndWaitInternalApiTask } = require("../../common/internal-api-client");
 
 const OUTPUT_DIR = (() => {
   const envVal = process.env.EXPORTS_DIR;
@@ -157,10 +157,11 @@ async function ensureBackupExists() {
     return;
   } catch {
     console.log("未找到飞书备份表（抖店-飞书表备份.xlsx），先执行备份…");
-    execSync("node run.js feishu:backup-bitable --profiles shop", {
-      stdio: "inherit",
-      cwd: process.cwd()
-    });
+    await startAndWaitInternalApiTask(
+      "/api/feishu/backup",
+      { profiles: "shop" },
+      { timeoutMs: 30 * 60 * 1000 }
+    );
     console.log("备份完成。");
   }
 }

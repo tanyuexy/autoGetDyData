@@ -53,36 +53,6 @@ const ROUTES = {
     argv: ["retry-failed"]
   },
 
-  "feishu:auth": {
-    script: "scripts/feishu/cli.js",
-    argv: ["auth-url"]
-  },
-  "feishu:sync-creator": {
-    script: "scripts/feishu/cli.js",
-    argv: ["sync-data-xlsx"],
-    env: { FEISHU_BITABLE_PROFILE: "creator" }
-  },
-  "feishu:sync-shop": {
-    script: "scripts/feishu/cli.js",
-    argv: ["sync-data-xlsx-shop"],
-    env: { FEISHU_BITABLE_PROFILE: "shop" }
-  },
-  "feishu:backup": {
-    script: "scripts/feishu/cli.js",
-    argv: ["backup-bitable"]
-  },
-  "feishu:import-publish-tasks": {
-    script: "scripts/feishu/import-publish-tasks.js",
-    argv: []
-  },
-  "feishu:mark-task-published": {
-    script: "scripts/feishu/mark-task-published.js",
-    argv: []
-  },
-  "feishu:write-task-created-status": {
-    script: "scripts/feishu/write-task-created-status.js",
-    argv: []
-  }
 };
 
 function printHelp() {

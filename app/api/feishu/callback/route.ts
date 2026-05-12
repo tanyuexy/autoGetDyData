@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
   try {
-    const { loadFeishuConfig } = require("@/scripts/feishu/lib/config");
-    const { exchangeCodeForToken, writeTokenCache } = require("@/scripts/feishu/lib/oauth");
+    const { loadFeishuConfig } = require("@/lib/feishu/core/config");
+    const { exchangeCodeForToken, writeTokenCache } = require("@/lib/feishu/core/oauth");
 
     const url = new URL(request.url);
     const code = url.searchParams.get("code");
@@ -62,4 +62,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

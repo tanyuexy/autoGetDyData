@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 export async function GET() {
   try {
     const fs = require("fs");
-    const { getFeishuTokenCachePath } = require("@/scripts/feishu/lib/config");
+    const { getFeishuTokenCachePath } = require("@/lib/feishu/core/config");
 
     const cachePath = getFeishuTokenCachePath();
 
