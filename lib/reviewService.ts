@@ -39,11 +39,19 @@ export async function upsertReviewItems(items: ReviewItem[]): Promise<void> {
   );
 }
 
-export async function pruneReviewItemsForAccount(accountName: string, keepIds: string[]): Promise<void> {
+export async function pruneReviewItemsForAccount(
+  accountName: string,
+  keepIds: string[],
+  reviewStatuses?: string[]
+): Promise<void> {
   if (!accountName) return;
   const db = await getDb();
-  await db.collection("creator_review_items").deleteMany({
+  const filter: any = {
     accountName,
     id: { $nin: keepIds },
-  });
+  };
+  if (Array.isArray(reviewStatuses) && reviewStatuses.length > 0) {
+    filter.reviewStatus = { $in: reviewStatuses };
+  }
+  await db.collection("creator_review_items").deleteMany(filter);
 }

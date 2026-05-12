@@ -20,6 +20,12 @@ const CONTENT_MANAGE_URL = "https://creator.douyin.com/creator-micro/content/man
 const REVIEW_SCREENSHOT_DIR_NAME = "review-screenshots";
 const WORK_LIST_PATH = "/janus/douyin/creator/pc/work_list";
 const WORK_LIST_PAGE_SIZE = 12;
+const REVIEW_SCOPE_OPTIONS = {
+  all: { label: "全部", apiStatus: 0, statuses: ["under_review", "approved", "rejected"] },
+  approved: { label: "已通过", apiStatus: 1, statuses: ["approved"] },
+  under_review: { label: "审核中", apiStatus: 2, statuses: ["under_review"] },
+  rejected: { label: "未通过", apiStatus: 3, statuses: ["rejected"] },
+};
 
 /**
  * 生成稳定短 id。作品管理页卡片没有稳定暴露 item id 时，用标题+发布时间兜底。
@@ -37,8 +43,12 @@ function safeFilePart(input, fallback = "item") {
   return cleaned || fallback;
 }
 
+function normalizeTitleKey(input) {
+  return String(input || "").replace(/\s+/g, " ").trim();
+}
+
 function itemKey(item) {
-  return `${item.publishDate || ""}::${item.title || ""}`;
+  return `${item.publishDate || ""}::${normalizeTitleKey(item.title)}`;
 }
 
 function mapKeyForItem(item) {
@@ -68,7 +78,7 @@ function inferReviewStatusFromAweme(aweme) {
 
 function normalizeWorkListAweme(aweme) {
   const postId = String(aweme?.aweme_id || aweme?.item_id || "").trim();
-  const title = String(aweme?.desc || aweme?.item_title || "").trim();
+  const title = normalizeTitleKey(aweme?.desc || aweme?.item_title || "");
   const coverUrl =
     firstUrl(aweme?.Cover) ||
     firstUrl(aweme?.cover) ||
@@ -122,17 +132,19 @@ async function fetchWorkListPage(context, { status = 0, maxCursor = 0, count = W
   return json;
 }
 
-async function fetchAllReviewItemsFromApi(context) {
+async function fetchAllReviewItemsFromApi(context, reviewScope = "all") {
+  const scope = REVIEW_SCOPE_OPTIONS[reviewScope] || REVIEW_SCOPE_OPTIONS.all;
   const byKey = new Map();
   let maxCursor = 0;
   const seenCursors = new Set();
 
   for (let pageNo = 1; pageNo <= 30; pageNo++) {
-    const data = await fetchWorkListPage(context, { status: 0, maxCursor });
+    const data = await fetchWorkListPage(context, { status: scope.apiStatus, maxCursor });
     const list = Array.isArray(data.aweme_list) ? data.aweme_list : [];
     for (const aweme of list) {
       const item = normalizeWorkListAweme(aweme);
       if (!item) continue;
+      if (reviewScope !== "all" && !scope.statuses.includes(item.reviewStatus)) continue;
       mergeItem(byKey, item);
     }
 
@@ -172,8 +184,21 @@ async function clickManageTab(page, label) {
   const tab = page.getByText(label, { exact: true }).first();
   await tab.waitFor({ state: "visible", timeout: 10000 });
   await tab.click({ timeout: 5000 });
-  await page.waitForTimeout(1200);
+  await page.waitForFunction(
+    () => {
+      const text = document.body?.innerText || "";
+      if (/加载中|请稍后|loading/i.test(text)) return false;
+      return /没有更多作品/.test(text) || /删除作品/.test(text);
+    },
+    { timeout: 20000 }
+  ).catch(() => {});
+  await page.waitForTimeout(800);
   await dismissFloatingTips(page);
+}
+
+function reviewScopeFromArg(value) {
+  const scope = String(value || "").trim();
+  return REVIEW_SCOPE_OPTIONS[scope] ? scope : "all";
 }
 
 function mergeItem(map, item, tabStatus) {
@@ -214,7 +239,7 @@ async function extractVisibleManageCards(page, tabStatus = null) {
         if (/^\d{2}:\d{2}$/.test(line)) return false;
         return line.trim().length > 0;
       });
-      return titleLines.join(" ").trim();
+      return titleLines.join(" ").replace(/\s+/g, " ").trim();
     }
 
     function topCards() {
@@ -222,7 +247,7 @@ async function extractVisibleManageCards(page, tabStatus = null) {
         const cls = String(el.className || "");
         const text = el.innerText || "";
         return (
-          text.includes("编辑作品") &&
+          (text.includes("编辑作品") || text.includes("删除作品")) &&
           !cls.includes("video-card-content") &&
           !cls.includes("video-card-info")
         );
@@ -300,8 +325,7 @@ async function findReviewDialogClip(page, iframe) {
   const iframeBox = await iframe.boundingBox().catch(() => null);
   if (!iframeBox) return null;
 
-  const iframeHandle = await iframe.elementHandle().catch(() => null);
-  const frame = iframeHandle ? await iframeHandle.contentFrame().catch(() => null) : null;
+  const frame = await getFrameFromIframe(iframe);
   if (!frame) return null;
 
   const rect = await frame.evaluate(() => {
@@ -339,15 +363,100 @@ async function findReviewDialogClip(page, iframe) {
   };
 }
 
+async function getFrameFromIframe(iframe) {
+  const iframeHandle = await iframe.elementHandle().catch(() => null);
+  return iframeHandle ? await iframeHandle.contentFrame().catch(() => null) : null;
+}
+
+async function waitForReviewDialogLoaded(page, iframe, timeoutMs = 30000) {
+  const frame = await getFrameFromIframe(iframe);
+  if (!frame) {
+    await page.waitForTimeout(2500).catch(() => {});
+    return false;
+  }
+
+  const start = Date.now();
+  let lastText = "";
+  let stableCount = 0;
+
+  while (Date.now() - start < timeoutMs) {
+    const state = await frame.evaluate(() => {
+      const text = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+      const loading = /加载中|请稍后|loading/i.test(text);
+      const ready = /作品审核通知|审核结果|违规原因|本作品/.test(text) && !loading;
+      const imgPending = Array.from(document.images || []).some((img) => !img.complete);
+      return { text, ready, imgPending };
+    }).catch(() => ({ text: "", ready: false, imgPending: true }));
+
+    if (state.ready && !state.imgPending) {
+      if (state.text === lastText) stableCount += 1;
+      else stableCount = 0;
+      lastText = state.text;
+      if (stableCount >= 2) return true;
+    } else {
+      stableCount = 0;
+      lastText = state.text;
+    }
+
+    await page.waitForTimeout(600);
+  }
+
+  return false;
+}
+
+async function waitForCardLoaded(page, card, timeoutMs = 15000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const ready = await card.evaluate((el) => {
+      const text = (el.innerText || "").replace(/\s+/g, " ").trim();
+      const loading = /加载中|请稍后|loading/i.test(text);
+      const imagesReady = Array.from(el.querySelectorAll("img")).every((img) => img.complete);
+      const rect = el.getBoundingClientRect();
+      return !loading && imagesReady && rect.width > 0 && rect.height > 0;
+    }).catch(() => false);
+    if (ready) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+async function captureCardScreenshot(page, card, screenshotPath) {
+  await card.scrollIntoViewIfNeeded().catch(() => {});
+  await waitForCardLoaded(page, card);
+  await page.waitForTimeout(400);
+
+  try {
+    await card.screenshot({ path: screenshotPath });
+    return;
+  } catch {}
+
+  const box = await card.boundingBox().catch(() => null);
+  if (box) {
+    await page.screenshot({
+      path: screenshotPath,
+      clip: {
+        x: Math.max(0, box.x - 4),
+        y: Math.max(0, box.y - 4),
+        width: Math.min(BROWSER_VIEWPORT.width, box.width + 8),
+        height: Math.min(BROWSER_VIEWPORT.height, box.height + 8),
+      },
+    });
+    return;
+  }
+
+  await page.screenshot({ path: screenshotPath, fullPage: false });
+}
+
 async function captureRejectedDetailScreenshots(page, paths, accountName, itemsByKey) {
   const screenshotDir = path.join(paths.dataDir, REVIEW_SCREENSHOT_DIR_NAME);
   await ensureDir(screenshotDir);
   const rejectedTitles = new Set(
     Array.from(itemsByKey.values())
       .filter((item) => item.reviewStatus === "rejected")
-      .map((item) => item.title)
+      .map((item) => normalizeTitleKey(item.title))
       .filter(Boolean)
   );
+  console.log(`[review] 账号 ${accountName} 未通过截图候选 ${rejectedTitles.size} 条`);
 
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
   await page.waitForTimeout(600);
@@ -356,12 +465,15 @@ async function captureRejectedDetailScreenshots(page, paths, accountName, itemsB
 
   for (let round = 0; round < 30; round++) {
     const visibleItems = await extractVisibleManageCards(page, "rejected");
+    if (round === 0) {
+      console.log(`[review] 账号 ${accountName} 未通过页首屏可见 ${visibleItems.length} 条`);
+    }
     await page.evaluate(() => {
       const cards = Array.from(document.querySelectorAll("div[class*='video-card-']")).filter((el) => {
         const cls = String(el.className || "");
         const text = el.innerText || "";
         return (
-          text.includes("编辑作品") &&
+          (text.includes("编辑作品") || text.includes("删除作品")) &&
           !cls.includes("video-card-content") &&
           !cls.includes("video-card-info")
         );
@@ -371,44 +483,59 @@ async function captureRejectedDetailScreenshots(page, paths, accountName, itemsB
 
     for (const item of visibleItems) {
       const key = itemKey(item);
-      if (!rejectedTitles.has(item.title)) continue;
-      if (!item.hasDetail || processed.has(key)) continue;
-      processed.add(key);
+      const titleKey = normalizeTitleKey(item.title);
+      if (!rejectedTitles.has(titleKey)) continue;
 
       const card = page.locator(`[data-review-card-index="${item.index}"]`).first();
       await card.scrollIntoViewIfNeeded().catch(() => {});
       await page.waitForTimeout(300);
-      await card.getByText("查看详情", { exact: true }).first().click({ timeout: 5000 });
 
-      const iframe = page.locator("iframe[src*='community_security']").first();
-      await iframe.waitFor({ state: "visible", timeout: 15000 });
-      await page.waitForTimeout(1500);
+      const current =
+        itemsByKey.get(key) ||
+        Array.from(itemsByKey.values()).find(
+          (candidate) =>
+            candidate.reviewStatus === "rejected" && normalizeTitleKey(candidate.title) === titleKey
+        );
+      if (!current || current.reviewStatus !== "rejected") {
+        console.warn(`[review] 账号 ${accountName} 跳过非未通过卡片截图: ${item.title}`);
+        continue;
+      }
+      const processKey = mapKeyForItem(current);
+      if (processed.has(processKey)) continue;
+      processed.add(processKey);
 
-      const src = (await iframe.getAttribute("src").catch(() => "")) || "";
-      const objectId = (src.match(/[?&]object_id=(\d+)/) || [])[1] || "";
       const screenshotPath = path.join(
         screenshotDir,
         `review-rejected-${Date.now()}-${safeFilePart(item.title)}.png`
       );
+      let objectId = "";
+      let screenshotType = "卡片";
 
-      const clip = await findReviewDialogClip(page, iframe);
-      if (clip) {
-        await page.screenshot({ path: screenshotPath, clip });
+      if (item.hasDetail) {
+        await card.getByText("查看详情", { exact: true }).first().click({ timeout: 5000 });
+
+        const iframe = page.locator("iframe[src*='community_security']").first();
+        await iframe.waitFor({ state: "visible", timeout: 15000 });
+        const dialogLoaded = await waitForReviewDialogLoaded(page, iframe);
+        if (!dialogLoaded) {
+          console.warn(`[review] 账号 ${accountName} 审核详情弹窗等待加载超时，仍尝试截图: ${item.title}`);
+        }
+        await page.waitForTimeout(500);
+
+        const src = (await iframe.getAttribute("src").catch(() => "")) || "";
+        objectId = (src.match(/[?&]object_id=(\d+)/) || [])[1] || "";
+
+        const clip = await findReviewDialogClip(page, iframe);
+        if (clip) {
+          await page.screenshot({ path: screenshotPath, clip });
+        } else {
+          await page.screenshot({ path: screenshotPath, fullPage: false });
+        }
+        screenshotType = "详情弹窗";
       } else {
-        await page.screenshot({ path: screenshotPath, fullPage: false });
+        await captureCardScreenshot(page, card, screenshotPath);
       }
 
-      const current =
-        (objectId && itemsByKey.get(objectId)) ||
-        itemsByKey.get(key) ||
-        Array.from(itemsByKey.values()).find(
-          (candidate) => candidate.reviewStatus === "rejected" && candidate.title === item.title
-        );
-      if (!current || current.reviewStatus !== "rejected") {
-        console.warn(`[review] 账号 ${accountName} 跳过非未通过详情截图: ${item.title}`);
-        await closeReviewDialog(page);
-        continue;
-      }
       const next = {
         ...current,
         ...item,
@@ -421,8 +548,8 @@ async function captureRejectedDetailScreenshots(page, paths, accountName, itemsB
       itemsByKey.delete(mapKeyForItem(current));
       itemsByKey.set(next.postId, next);
 
-      console.log(`[review] 账号 ${accountName} 已保存未通过详情截图: ${screenshotPath}`);
-      await closeReviewDialog(page);
+      console.log(`[review] 账号 ${accountName} 已保存未通过${screenshotType}截图: ${screenshotPath}`);
+      if (item.hasDetail) await closeReviewDialog(page);
     }
 
     const state = await page.evaluate(() => ({
@@ -449,7 +576,8 @@ async function captureRejectedDetailScreenshots(page, paths, accountName, itemsB
 /**
  * 为单个账号抓取审核状态
  */
-async function scrapeReviewForAccount(browser, accountName) {
+async function scrapeReviewForAccount(browser, accountName, reviewScope = "all") {
+  const scope = REVIEW_SCOPE_OPTIONS[reviewScope] || REVIEW_SCOPE_OPTIONS.all;
   const paths = getAccountPaths(accountName);
   await ensureDir(paths.accountDir);
   await ensureDir(paths.dataDir);
@@ -475,9 +603,15 @@ async function scrapeReviewForAccount(browser, accountName) {
 
     await openContentManagePage(page);
 
-    console.log(`[review] 账号 ${accountName} 通过 work_list 接口读取作品列表`);
-    const itemsByKey = await fetchAllReviewItemsFromApi(context);
+    console.log(`[review] 账号 ${accountName} 通过 work_list 接口读取${scope.label}作品列表`);
+    const itemsByKey = await fetchAllReviewItemsFromApi(context, reviewScope);
     console.log(`[review] 账号 ${accountName} 接口抓取 ${itemsByKey.size} 条`);
+    const statusCounts = Array.from(itemsByKey.values()).reduce((acc, item) => {
+      const status = item.reviewStatus || "approved";
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    console.log(`[review] 账号 ${accountName} 状态统计: ${JSON.stringify(statusCounts)}`);
 
     if (Array.from(itemsByKey.values()).some((item) => item.reviewStatus === "rejected")) {
       await clickManageTab(page, "未通过");
@@ -498,7 +632,7 @@ async function scrapeReviewForAccount(browser, accountName) {
     });
     console.log(`[review] 账号 ${accountName} 抓取到 ${items.length} 条内容`);
 
-    return { accountName, ok: true, items };
+    return { accountName, ok: true, reviewScope, reviewStatuses: scope.statuses, items };
   } catch (error) {
     console.error(`[review] 账号 ${accountName} 抓取失败:`, error.message || error);
     return { accountName, ok: false, error: error.message || String(error), items: [] };
@@ -512,7 +646,19 @@ async function scrapeReviewForAccount(browser, accountName) {
  */
 async function main() {
   const args = process.argv.slice(2);
-  let accountNames = args.filter(Boolean);
+  let reviewScope = reviewScopeFromArg(process.env.REVIEW_SCOPE || "all");
+  let accountNames = [];
+  for (const arg of args) {
+    if (arg.startsWith("--review-scope=")) {
+      reviewScope = reviewScopeFromArg(arg.slice("--review-scope=".length));
+      continue;
+    }
+    if (arg.startsWith("--status=")) {
+      reviewScope = reviewScopeFromArg(arg.slice("--status=".length));
+      continue;
+    }
+    if (arg) accountNames.push(arg);
+  }
 
   // 支持通过环境变量指定账号
   if (accountNames.length === 0 && process.env.REVIEW_ACCOUNTS) {
@@ -532,7 +678,9 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`[review] 将处理 ${accountNames.length} 个账号: ${accountNames.join(", ")}`);
+  console.log(
+    `[review] 将处理 ${accountNames.length} 个账号: ${accountNames.join(", ")}，抓取范围: ${REVIEW_SCOPE_OPTIONS[reviewScope].label}`
+  );
 
   const browser = await chromium.launch({
     headless: HEADLESS,
@@ -543,7 +691,7 @@ async function main() {
 
   try {
     for (const accountName of accountNames) {
-      const result = await scrapeReviewForAccount(browser, accountName);
+      const result = await scrapeReviewForAccount(browser, accountName, reviewScope);
       allResults.push(result);
     }
   } finally {

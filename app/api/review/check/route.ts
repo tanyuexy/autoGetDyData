@@ -16,9 +16,12 @@ export async function POST(request: NextRequest) {
     const accounts = Array.isArray(body?.accounts)
       ? body.accounts.map((s: any) => String(s || "").trim()).filter(Boolean)
       : [];
+    const reviewScope = ["all", "approved", "under_review", "rejected"].includes(String(body?.reviewScope || ""))
+      ? String(body.reviewScope)
+      : "all";
 
     const taskId = generateTaskIdWithTime("review");
-    const args = ["scripts/douyin-creator/review.js", ...accounts];
+    const args = ["scripts/douyin-creator/review.js", `--review-scope=${reviewScope}`, ...accounts];
 
     await enqueueTask(taskId, "node", args, { namespace: "review" });
 

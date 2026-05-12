@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   App,
   Button,
@@ -91,13 +91,14 @@ function renderRejectionReason(item: ReviewItem) {
 
 export default function ReviewPage() {
   const { message } = App.useApp();
-  const { isNamespaceBusy, startTask } = useTaskContext();
+  const { isNamespaceBusy, startTask, activeTasks } = useTaskContext();
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [loadingItems, setLoadingItems] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [accounts, setAccounts] = useState<{ name: string }[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [fetchScope, setFetchScope] = useState<string>("rejected");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [accountFilter, setAccountFilter] = useState<string>("all");
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -130,6 +131,20 @@ export default function ReviewPage() {
     fetchAccounts();
     fetchItems();
   }, [fetchAccounts, fetchItems]);
+
+  const doneReviewTaskIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    let shouldRefresh = false;
+    for (const [id, st] of activeTasks) {
+      if (st.namespace === "review" && st.done) {
+        if (!doneReviewTaskIdsRef.current.has(id)) {
+          doneReviewTaskIdsRef.current.add(id);
+          shouldRefresh = true;
+        }
+      }
+    }
+    if (shouldRefresh) fetchItems();
+  }, [activeTasks, fetchItems]);
 
   const accountOptions = useMemo(
     () => accounts.map((a) => ({ label: a.name, value: a.name })),
@@ -189,7 +204,7 @@ export default function ReviewPage() {
     try {
       const taskId = await startTask(
         "/api/review/check",
-        { accounts: selectedAccounts },
+        { accounts: selectedAccounts, reviewScope: fetchScope },
         "review"
       );
       message.info(`审核抓取任务已启动: ${taskId}`);
@@ -289,7 +304,7 @@ export default function ReviewPage() {
       render: (v: string) => {
         if (!v) return "-";
         const d = dayjs(v);
-        return d.isValid() ? d.format("MM-DD HH:mm") : "-";
+        return d.isValid() ? d.format("YYYY-MM-DD HH:mm") : "-";
       },
     },
     {
@@ -376,6 +391,13 @@ export default function ReviewPage() {
             loading={loadingAccounts}
             placeholder="选择账号"
             maxTagCount={3}
+          />
+          <Select
+            style={{ width: 120 }}
+            value={fetchScope}
+            onChange={setFetchScope}
+            options={STATUS_FILTER_OPTIONS}
+            aria-label="抓取范围"
           />
           <Button
             type="primary"

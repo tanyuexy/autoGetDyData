@@ -13,10 +13,19 @@ export async function POST(request: NextRequest) {
 
     const now = new Date().toISOString();
     const items: ReviewItem[] = [];
+    const pruneScopes = new Map<string, Set<string>>();
 
     for (const result of results) {
       const accountName = result.accountName || "";
       const postItems = result.items || [];
+      const reviewStatuses = Array.isArray(result.reviewStatuses)
+        ? result.reviewStatuses
+            .map((s: any) => String(s || "").trim())
+            .filter((s: string) => ["under_review", "approved", "rejected"].includes(s))
+        : [];
+      if (accountName) {
+        pruneScopes.set(accountName, new Set(reviewStatuses));
+      }
       for (const item of postItems) {
         const postId = item.postId || `unknown-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         items.push({
@@ -43,8 +52,8 @@ export async function POST(request: NextRequest) {
       ids.push(item.id);
       idsByAccount.set(item.accountName, ids);
     }
-    for (const [accountName, ids] of idsByAccount) {
-      await pruneReviewItemsForAccount(accountName, ids);
+    for (const [accountName, statuses] of pruneScopes) {
+      await pruneReviewItemsForAccount(accountName, idsByAccount.get(accountName) || [], Array.from(statuses));
     }
 
     return NextResponse.json({ saved: items.length });

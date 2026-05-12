@@ -44,5 +44,10 @@ function shutdown(signal, exitCode = 0) {
 process.once("SIGINT", () => shutdown("SIGINT", 130));
 process.once("SIGTERM", () => shutdown("SIGTERM", 143));
 
-spawnNamed("next-dev", process.execPath, ["./node_modules/next/dist/bin/next", "dev"]);
+spawnNamed("next-dev", process.execPath, [
+  "./node_modules/next/dist/bin/next",
+  "dev",
+  "-H",
+  "0.0.0.0",
+]);
 spawnNamed("worker-dev", process.execPath, ["--watch", "scripts/workers/task-worker.js"]);
