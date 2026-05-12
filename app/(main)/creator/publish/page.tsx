@@ -777,7 +777,7 @@ export default function CreatorPublishPage() {
     },
     {
       title: "操作",
-      width: 140 ,
+      width: 180,
       align: "center" as const,
       render: (_: any, r: PublishTask) => (
         <Space size={0} wrap>

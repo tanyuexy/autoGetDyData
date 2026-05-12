@@ -314,6 +314,46 @@ async function batchCreateBitableRecords(
   return { records: items };
 }
 
+async function getBitableRecord(config, accessToken, recordId, tableIdOverride = "") {
+  if (!config.bitableAppToken) {
+    throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
+  }
+  if (!recordId) throw new Error("缺少 recordId");
+
+  const resolvedTableId = resolveBitableTableIdForMutation(config, tableIdOverride);
+
+  const url = `${config.apiBase}/open-apis/bitable/v1/apps/${encodeURIComponent(
+    config.bitableAppToken
+  )}/tables/${encodeURIComponent(resolvedTableId)}/records/${encodeURIComponent(recordId)}`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch (error) {
+    throw new Error(`多维表格读取接口返回非 JSON: ${text || "<empty>"}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `多维表格读取接口 HTTP ${response.status}: ${parsed.msg || text || "未知错误"}`
+    );
+  }
+  if (typeof parsed.code === "number" && parsed.code !== 0) {
+    throw new Error(
+      `读取记录失败 code=${parsed.code}, msg=${parsed.msg || "未知错误"}`
+    );
+  }
+
+  return (parsed.data && parsed.data.record) || parsed.data || parsed;
+}
+
 async function updateBitableRecord(config, accessToken, recordId, fields, tableIdOverride = "") {
   if (!config.bitableAppToken) {
     throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
@@ -473,6 +513,7 @@ async function batchUpdateBitableRecords(
 
 module.exports = {
   createBitableRecord,
+  getBitableRecord,
   updateBitableRecord,
   batchUpdateBitableRecords,
   listBitableFields,

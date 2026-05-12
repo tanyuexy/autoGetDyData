@@ -1,10 +1,44 @@
 const {
   isLoggedInAtTarget,
+  isVerificationUiVisible,
   notifyLoginRequired,
   waitForManualLoginFlow
 } = require("../lib/login");
 const { saveAuth } = require("../lib/exporter");
 const { TARGET_URL } = require("../lib/env");
+
+async function waitForLoginCheckToSettle(page, accountName) {
+  let y = 3;
+  for (let i = 0; i < y; i += 1) {
+    if (await isLoggedInAtTarget(page)) {
+      return "logged_in";
+    }
+    if (await isVerificationUiVisible(page)) {
+      return "login_required";
+    }
+
+    console.log(
+      `账号 [${accountName}] 登录态暂未确认，等待页面稳定... (${i + 1}/${y})`
+    );
+    await page.waitForLoadState("networkidle").catch(() => {});
+    await page.waitForTimeout(1500);
+  }
+
+  await page
+    .goto(TARGET_URL, { waitUntil: "domcontentloaded" })
+    .catch(() => {});
+  await page.waitForLoadState("networkidle").catch(() => {});
+  await page.waitForTimeout(1500);
+
+  if (await isLoggedInAtTarget(page)) {
+    return "logged_in";
+  }
+  if (await isVerificationUiVisible(page)) {
+    return "login_required";
+  }
+
+  return "unknown";
+}
 
 async function ensureLoggedIn(page, accountName, paths) {
   console.log(`检查账号 [${accountName}] 登录状态...`);
@@ -16,8 +50,22 @@ async function ensureLoggedIn(page, accountName, paths) {
     return;
   }
 
+  const loginStatus = await waitForLoginCheckToSettle(page, accountName);
+  if (loginStatus === "logged_in") {
+    console.log(`账号 [${accountName}] 登录态有效`);
+    return;
+  }
+
   const reason = "cookies/storageState 失效或已过期";
-  console.log(`账号 [${accountName}] ${reason}，进入登录流程`);
+  if (loginStatus === "login_required") {
+    console.log(
+      `账号 [${accountName}] 检测到登录/验证页面，${reason}，进入登录流程`
+    );
+  } else {
+    console.log(
+      `账号 [${accountName}] 未能确认登录态，${reason}，进入登录流程`
+    );
+  }
   await notifyLoginRequired(page, paths, accountName, reason);
   await waitForManualLoginFlow(page, paths, accountName, reason);
 

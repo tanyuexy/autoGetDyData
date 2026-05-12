@@ -10,7 +10,6 @@ import {
   Tag,
   Typography,
   Popover,
-  Segmented,
   Popconfirm,
   Tooltip,
 } from "antd";
@@ -100,6 +99,7 @@ export default function ReviewPage() {
   const [accounts, setAccounts] = useState<{ name: string }[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [accountFilter, setAccountFilter] = useState<string>("all");
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
   const fetchAccounts = useCallback(async () => {
@@ -129,8 +129,6 @@ export default function ReviewPage() {
   useEffect(() => {
     fetchAccounts();
     fetchItems();
-    const t = setInterval(fetchItems, 3000);
-    return () => clearInterval(t);
   }, [fetchAccounts, fetchItems]);
 
   const accountOptions = useMemo(
@@ -139,9 +137,15 @@ export default function ReviewPage() {
   );
 
   const filteredItems = useMemo(() => {
-    if (statusFilter === "all") return items;
-    return items.filter((item) => item.reviewStatus === statusFilter);
-  }, [items, statusFilter]);
+    let result = items;
+    if (accountFilter !== "all") {
+      result = result.filter((item) => item.accountName === accountFilter);
+    }
+    if (statusFilter !== "all") {
+      result = result.filter((item) => item.reviewStatus === statusFilter);
+    }
+    return result;
+  }, [items, statusFilter, accountFilter]);
 
   async function handleDelete(id: string) {
     try {
@@ -418,12 +422,20 @@ export default function ReviewPage() {
         </Space>
       </div>
 
-      <div style={{ marginBottom: 10 }}>
-        <Segmented
+      <div style={{ marginBottom: 10, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <Select
           size="small"
+          style={{ width: 120 }}
           value={statusFilter}
-          onChange={(v) => setStatusFilter(v as string)}
+          onChange={(v) => setStatusFilter(v)}
           options={STATUS_FILTER_OPTIONS}
+        />
+        <Select
+          size="small"
+          style={{ width: 160 }}
+          value={accountFilter}
+          onChange={(v) => setAccountFilter(v)}
+          options={[{ label: "全部账号", value: "all" }, ...accountOptions]}
         />
       </div>
 

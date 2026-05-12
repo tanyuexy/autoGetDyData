@@ -88,5 +88,25 @@ export async function writeFeishuTaskStatus(options: {
 }
 
 export async function markFeishuTaskPublished(recordId: string) {
-  await writeFeishuTaskStatus({ recordId, statusText: "是" });
+  let approvalText: string | undefined;
+
+  try {
+    await prepareProjectConfigEnv("task");
+    const { loadFeishuBitableConfigForProfile } = require("@/lib/feishu/core/config");
+    const { getValidAccessToken } = require("@/lib/feishu/core/oauth");
+    const { getBitableRecord } = require("@/lib/feishu/core/bitable");
+
+    const cfg = loadFeishuBitableConfigForProfile("task");
+    const tokenCache = await getValidAccessToken(cfg);
+    const record = await getBitableRecord(cfg, tokenCache.accessToken, recordId);
+
+    const approvalValue = String(record?.fields?.审批 ?? "").trim();
+    if (approvalValue && approvalValue.includes("异常待修改")) {
+      approvalText = "通过";
+    }
+  } catch {
+    // 读取失败不阻塞写回，approvalText 保持 undefined
+  }
+
+  await writeFeishuTaskStatus({ recordId, statusText: "是", approvalText });
 }
