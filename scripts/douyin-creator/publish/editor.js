@@ -24,7 +24,7 @@ function splitDescription(text) {
         if (!plainHashtags.includes(tag)) {
           plainHashtags.push(tag);
         }
-        return matched;
+        return rawTag.trim();
       }
 
       if (!hashtags.includes(tag)) {
@@ -37,7 +37,7 @@ function splitDescription(text) {
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 
-  if (!body) {
+  if (!body && hashtags.length === 0 && plainHashtags.length === 0) {
     body = text.trim();
   }
 
@@ -126,7 +126,7 @@ async function fillTitleAndDescription(page, title, description) {
   console.log(`正文拆分完成: 正文长度 ${body.length}，识别到可自动话题化标签 ${hashtags.length} 个`);
   if (plainHashtags.length > 0) {
     console.log(
-      `以下话题超过 ${MAX_RECOGNIZED_HASHTAG_LENGTH} 个字，保留为正文: ${plainHashtags.map((tag) => `#${tag}`).join(", ")}`
+      `以下话题超过 ${MAX_RECOGNIZED_HASHTAG_LENGTH} 个字，已去掉 # 后保留为正文: ${plainHashtags.map((tag) => `#${tag}`).join(", ")}`
     );
   }
 
@@ -163,4 +163,5 @@ async function fillTitleAndDescription(page, title, description) {
 
 module.exports = {
   fillTitleAndDescription,
+  splitDescription,
 };

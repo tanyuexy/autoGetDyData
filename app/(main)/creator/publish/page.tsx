@@ -33,6 +33,8 @@ type TaskType = "video" | "article";
 
 type TaskStatus = "pending" | "queued" | "running" | "success" | "failed" | "cancelled";
 
+type FeishuAiProvider = "siliconflow" | "deepseek";
+
 const TERMINABLE_TASK_STATUSES = new Set<TaskStatus>(["pending", "running"]);
 
 /** 表格「操作」列：link 按钮默认 padding 较大，收一点横向间距 */
@@ -163,6 +165,8 @@ export default function CreatorPublishPage() {
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [feishuAiProvider, setFeishuAiProvider] = useState<FeishuAiProvider>("siliconflow");
+  const [generatingFeishuAi, setGeneratingFeishuAi] = useState(false);
   const [refreshingFeishu, setRefreshingFeishu] = useState(false);
 
   const [type, setType] = useState<TaskType>("video");
@@ -236,7 +240,7 @@ export default function CreatorPublishPage() {
   useEffect(() => {
     fetchAccounts();
     fetchTasks();
-    const t = setInterval(fetchTasks, 2000);
+    const t = setInterval(fetchTasks, 60_000);
     return () => clearInterval(t);
   }, [fetchAccounts, fetchTasks]);
 
@@ -487,6 +491,21 @@ export default function CreatorPublishPage() {
       message.error(e.message || "启动导入失败");
     }
     setImporting(false);
+  }
+
+  async function handleGenerateFeishuAiContent() {
+    setGeneratingFeishuAi(true);
+    try {
+      const taskId = await startTask(
+        "/api/creator/publish/generate-feishu-ai-content",
+        { provider: feishuAiProvider },
+        "creator-publish"
+      );
+      message.info(`AI正文生成任务已启动: ${taskId}`);
+    } catch (e: any) {
+      message.error(e.message || "启动AI正文生成失败");
+    }
+    setGeneratingFeishuAi(false);
   }
 
   async function handleRefreshTasksFromFeishu() {
@@ -852,16 +871,7 @@ export default function CreatorPublishPage() {
   const formContent = (
     <div style={{ width: "100%" }}>
       <Space orientation="vertical" size={6} style={{ width: "100%" }}>
-      <Button
-        type="primary"
-        onClick={handleImportFromFeishu}
-        loading={importing}
-        disabled={isNamespaceBusy("creator-publish")}
-        block
-      >
-        从飞书导入任务
-      </Button>
-      <Card size="small" styles={{ body: { paddingTop: 8 } }}>
+        <Card size="small" styles={{ body: { paddingTop: 8 } }}>
         <Space orientation="vertical" size={6} style={{ width: "100%" }}>
           <Form layout="vertical" colon={false} requiredMark={false}>
             <Form.Item label="发布类型" style={{ marginBottom: 8 }}>
@@ -1021,12 +1031,12 @@ export default function CreatorPublishPage() {
             </Space>
           </Form>
         </Space>
-      </Card>
+        </Card>
       </Space>
     </div>
   );
 
-    const taskListContent = (
+  const taskListContent = (
       <>
         <div
           style={{
@@ -1074,6 +1084,43 @@ export default function CreatorPublishPage() {
               删除选中 ({selectedRowKeys.length})
             </Button>
           </Popconfirm>
+          <Popover
+            trigger="hover"
+            placement="bottomRight"
+            content={
+              <Space direction="vertical" size={8} style={{ minWidth: 200 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>AI 模型选择</Text>
+                <Select
+                  value={feishuAiProvider}
+                  onChange={setFeishuAiProvider}
+                  style={{ width: "100%" }}
+                  options={[
+                    { label: "SiliconFlow", value: "siliconflow" },
+                    { label: "DeepSeek", value: "deepseek" },
+                  ]}
+                />
+              </Space>
+            }
+          >
+            <Button
+              type="primary"
+              size="small"
+              onClick={handleGenerateFeishuAiContent}
+              loading={generatingFeishuAi}
+              disabled={isNamespaceBusy("creator-publish")}
+            >
+              AI正文到飞书
+            </Button>
+          </Popover>
+          <Button
+            type="primary"
+            size="small"
+            onClick={handleImportFromFeishu}
+            loading={importing}
+            disabled={isNamespaceBusy("creator-publish")}
+          >
+            从飞书导入任务
+          </Button>
           <Button onClick={handleRefreshTasksFromFeishu} loading={refreshingFeishu} size="small">
             刷新任务
           </Button>

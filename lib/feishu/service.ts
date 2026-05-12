@@ -64,6 +64,21 @@ export async function importPublishTasksFromFeishu(options: {
   });
 }
 
+export async function generateFeishuTaskAiContent(options: {
+  provider?: "siliconflow" | "deepseek";
+  logger?: (...args: unknown[]) => void;
+  isCancelled?: () => boolean;
+} = {}) {
+  await prepareProjectConfigEnv("task");
+  const { generateTaskAiContentToFeishu } = require("@/lib/feishu/generate-task-ai-content");
+  return await generateTaskAiContentToFeishu({
+    provider: options.provider || "siliconflow",
+    logger: options.logger || console.log,
+    isCancelled: options.isCancelled,
+    summaryPrefix: "[generate-feishu-ai-content-api]",
+  });
+}
+
 export async function writeFeishuTaskStatus(options: {
   recordId: string;
   statusText: string;

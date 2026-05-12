@@ -39,7 +39,9 @@ export default function LogTerminal({ logs, onClear, height }: Props) {
 
   function handleCopy() {
     const text = logs.map((l) => `[${l.level.toUpperCase()}] ${l.text}`).join("\n");
-    navigator.clipboard.writeText(text).catch(() => {});
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
   }
 
   const isEmpty = logs.length === 0;

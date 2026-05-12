@@ -67,7 +67,8 @@
       "Bash(npm list *)",
       "Bash(npx @playwright/mcp --version)",
       "Bash(timeout 5 npx -y @playwright/mcp)",
-      "Bash(npx -y @playwright/mcp --help)"
+      "Bash(npx -y @playwright/mcp --help)",
+      "Bash(curl *)"
     ]
   }
 }
