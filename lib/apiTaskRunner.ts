@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { appendTaskDone, appendTaskLog, ensureTaskLogMeta, type TaskLogMeta } from "./taskLogStore";
 import type { TaskNamespace } from "./taskManager";
 
@@ -9,6 +10,9 @@ type RunningApiTask = {
 };
 
 const runningApiTasks = new Map<string, RunningApiTask>();
+
+/** 标识当前 async 调用链属于哪一个 API 任务，用于把 console 归属到对应任务日志 */
+const apiTaskLogContext = new AsyncLocalStorage<{ taskId: string }>();
 
 function normalizeLogArg(value: unknown): string {
   if (typeof value === "string") return value;
@@ -28,6 +32,36 @@ function writeLog(taskId: string, level: "info" | "warn" | "error", args: unknow
     text,
     timestamp: new Date().toISOString(),
   });
+}
+
+let apiTaskConsoleRoutingInstalled = false;
+
+/** 只安装一次：仅当调用栈处于某 API 任务的 AsyncLocalStorage 内时，才把 console 写入任务日志 */
+function ensureApiTaskConsoleRouting() {
+  if (apiTaskConsoleRoutingInstalled) return;
+  apiTaskConsoleRoutingInstalled = true;
+
+  const original = {
+    log: console.log.bind(console),
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+  };
+
+  console.log = (...args: unknown[]) => {
+    original.log(...args);
+    const active = apiTaskLogContext.getStore()?.taskId;
+    if (active) writeLog(active, "info", args);
+  };
+  console.warn = (...args: unknown[]) => {
+    original.warn(...args);
+    const active = apiTaskLogContext.getStore()?.taskId;
+    if (active) writeLog(active, "warn", args);
+  };
+  console.error = (...args: unknown[]) => {
+    original.error(...args);
+    const active = apiTaskLogContext.getStore()?.taskId;
+    if (active) writeLog(active, "error", args);
+  };
 }
 
 export function getRunningApiTaskList() {
@@ -87,11 +121,7 @@ export function startApiTask(
   });
 
   setImmediate(async () => {
-    const original = {
-      log: console.log,
-      warn: console.warn,
-      error: console.error,
-    };
+    ensureApiTaskConsoleRouting();
     const helpers = {
       log: (...args: unknown[]) => writeLog(taskId, "info", args),
       warn: (...args: unknown[]) => writeLog(taskId, "warn", args),
@@ -99,30 +129,16 @@ export function startApiTask(
       isCancelled: () => isApiTaskCancelled(taskId),
     };
 
-    console.log = (...args: unknown[]) => {
-      original.log(...args);
-      helpers.log(...args);
-    };
-    console.warn = (...args: unknown[]) => {
-      original.warn(...args);
-      helpers.warn(...args);
-    };
-    console.error = (...args: unknown[]) => {
-      original.error(...args);
-      helpers.error(...args);
-    };
-
     try {
-      await fn(helpers);
+      await apiTaskLogContext.run({ taskId }, async () => {
+        await fn(helpers);
+      });
       const cancelled = isApiTaskCancelled(taskId);
       appendTaskDone(taskId, cancelled ? 143 : 0, cancelled ? "API task cancelled" : "API task completed");
     } catch (error: any) {
       helpers.error(error?.message || error);
       appendTaskDone(taskId, 1, error?.message || "API task failed");
     } finally {
-      console.log = original.log;
-      console.warn = original.warn;
-      console.error = original.error;
       runningApiTasks.delete(taskId);
     }
   });
