@@ -35,6 +35,10 @@ const ROUTES = {
     script: "scripts/douyin-creator/open.js",
     argv: []
   },
+  "creator:review": {
+    script: "scripts/douyin-creator/review.js",
+    argv: []
+  },
 
   "shop:login": {
     script: "scripts/douyin-shop/cli.js",

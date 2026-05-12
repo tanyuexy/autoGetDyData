@@ -62,16 +62,12 @@
       "Bash(git *)",
       "Bash(defaults read *)",
       "Bash(npm search *)",
-      "Bash(npx -y @playwright/mcp --version)"
+      "Bash(npx -y @playwright/mcp --version)",
+      "Bash(npx --version)",
+      "Bash(npm list *)",
+      "Bash(npx @playwright/mcp --version)",
+      "Bash(timeout 5 npx -y @playwright/mcp)",
+      "Bash(npx -y @playwright/mcp --help)"
     ]
-  },
-  "mcpServers": {
-    "playwright": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@playwright/mcp"
-      ]
-    }
   }
 }

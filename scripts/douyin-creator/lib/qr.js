@@ -95,6 +95,116 @@ function attachQrDataUrlSniffer(page) {
   });
 }
 
+/**
+ * 等待登录二维码对应节点已绘制（避免仅占位白底时截屏）。
+ * @returns {Promise<boolean>}
+ */
+async function waitForLoginQrPaint(locator, page, timeoutMs = 12000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const ok = await locator
+      .evaluate(async (el) => {
+        const canvasHasInk = (c) => {
+          try {
+            if (!c || c.width < 32 || c.height < 32) return false;
+            const ctx = c.getContext("2d", { willReadFrequently: true });
+            if (!ctx) return false;
+            const w = Math.min(96, c.width);
+            const h = Math.min(96, c.height);
+            const x = Math.floor((c.width - w) / 2);
+            const y = Math.floor((c.height - h) / 2);
+            const { data } = ctx.getImageData(x, y, w, h);
+            let dark = 0;
+            const step = 8;
+            for (let i = 0; i < data.length; i += 4 * step) {
+              if (data[i] < 210 || data[i + 1] < 210 || data[i + 2] < 210) {
+                dark += 1;
+              }
+            }
+            const samples = Math.ceil(data.length / (4 * step));
+            return samples > 0 && dark / samples > 0.03;
+          } catch {
+            return false;
+          }
+        };
+
+        const imgLooksPainted = async (img) => {
+          if (!img || img.tagName !== "IMG") return false;
+          try {
+            if (typeof img.decode === "function") {
+              await img.decode();
+            }
+          } catch {
+            // ignore
+          }
+          if (
+            !img.complete ||
+            img.naturalWidth < 48 ||
+            img.naturalHeight < 48
+          ) {
+            return false;
+          }
+          const src = (img.getAttribute("src") || "").trim();
+          if (!src || src === "about:blank") return false;
+          try {
+            const c = document.createElement("canvas");
+            const w = Math.min(96, img.naturalWidth);
+            const h = Math.min(96, img.naturalHeight);
+            c.width = w;
+            c.height = h;
+            const ctx = c.getContext("2d");
+            if (!ctx) return true;
+            ctx.drawImage(img, 0, 0, w, h);
+            const { data } = ctx.getImageData(0, 0, w, h);
+            let dark = 0;
+            const step = 6;
+            for (let i = 0; i < data.length; i += 4 * step) {
+              if (data[i] < 220 || data[i + 1] < 220 || data[i + 2] < 220) {
+                dark += 1;
+              }
+            }
+            const samples = Math.ceil(data.length / (4 * step));
+            return samples > 0 && dark / samples > 0.02;
+          } catch {
+            // 跨域污染画布时仅能依赖尺寸与 complete
+            return true;
+          }
+        };
+
+        if (!el) return false;
+        const tag = el.tagName && el.tagName.toLowerCase();
+        if (tag === "img") return imgLooksPainted(el);
+        if (tag === "canvas") return canvasHasInk(el);
+
+        const innerImg =
+          el.querySelector(
+            "img[aria-label='二维码'],img[src*='qrcode'],img[src^='data:image/']"
+          ) || el.querySelector("img");
+        if (innerImg && (await imgLooksPainted(innerImg))) return true;
+
+        const innerCanvas = el.querySelector("canvas");
+        if (innerCanvas && canvasHasInk(innerCanvas)) return true;
+
+        return false;
+      })
+      .catch(() => false);
+    if (ok) return true;
+    await page.waitForTimeout(220);
+  }
+  return false;
+}
+
+async function pollTryCaptureQrFromDataUrl(page, screenshotPath, totalMs = 8000) {
+  const start = Date.now();
+  while (Date.now() - start < totalMs) {
+    if (await tryCaptureQrFromDataUrl(page, screenshotPath)) {
+      return true;
+    }
+    await page.waitForTimeout(350);
+  }
+  return false;
+}
+
 async function tryCaptureQrFromDataUrl(page, screenshotPath) {
   // 1) 第一优先：直接使用 img[aria-label='二维码'] 的 src。
   const ariaQrSrc = await page
@@ -361,9 +471,9 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
   await ensureDir(paths.alertDir);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const screenshotPath = path.join(paths.alertDir, `${timestamp}-login-qr.png`);
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(500);
 
-  if (await tryCaptureQrFromDataUrl(page, screenshotPath)) {
+  if (await pollTryCaptureQrFromDataUrl(page, screenshotPath, 8000)) {
     console.log(
       `账号 [${accountName}] 已通过 DOM dataURL 保存二维码: ${screenshotPath}`
     );
@@ -422,7 +532,9 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
     if (!visible) return false;
 
     await locator.scrollIntoViewIfNeeded().catch(() => {});
-    await page.waitForTimeout(120);
+    const painted = await waitForLoginQrPaint(locator, page, 10000);
+    if (!painted) return false;
+    await page.waitForTimeout(100);
 
     let viewport = page.viewportSize() || BROWSER_VIEWPORT;
     let box = await locator.boundingBox().catch(() => null);
@@ -463,7 +575,7 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
   };
 
   const qrSelectors = [
-    "[aria-label='二维码']",
+    "img[aria-label='二维码']",
     "div:has-text('扫码登录') img[src*='qrcode']",
     "div:has-text('扫码登录') canvas",
     "[role='dialog'] img[src*='qrcode']",
@@ -471,7 +583,8 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
     "img[src*='qrcode']",
     "img[alt*='二维码']",
     "[class*='qrcode'] img",
-    "[class*='qrcode'] canvas"
+    "[class*='qrcode'] canvas",
+    "[aria-label='二维码']"
   ];
 
   for (const selector of qrSelectors) {
@@ -483,6 +596,14 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
         return screenshotPath;
       }
     }
+  }
+
+  await page.waitForTimeout(400);
+  if (await pollTryCaptureQrFromDataUrl(page, screenshotPath, 5000)) {
+    console.log(
+      `账号 [${accountName}] 已通过 DOM dataURL（延后）保存二维码: ${screenshotPath}`
+    );
+    return screenshotPath;
   }
 
   const loginTitle = page.getByText("扫码登录").first();

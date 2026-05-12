@@ -80,3 +80,20 @@ export interface RunningTaskInfo {
   namespace: string;
   startedAt: number;
 }
+
+export type ReviewStatus = "under_review" | "approved" | "rejected";
+
+export interface ReviewItem {
+  id: string;
+  accountName: string;
+  postId: string;
+  title: string;
+  coverUrl?: string;
+  publishDate: string;
+  reviewStatus: ReviewStatus;
+  rejectionReason?: string;
+  rejectionScreenshotPath?: string;
+  checkedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}

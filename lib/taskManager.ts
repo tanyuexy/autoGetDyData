@@ -13,7 +13,7 @@ import {
 } from "./runtimeProcessStore";
 import { cancelApiTask, countRunningApiTasks, getRunningApiTaskList } from "./apiTaskRunner";
 
-export type TaskNamespace = "creator-export" | "creator-open" | "shop-export" | "creator-publish" | "login" | "system" | "feishu";
+export type TaskNamespace = "creator-export" | "creator-open" | "shop-export" | "creator-publish" | "login" | "system" | "feishu" | "review";
 
 /**
  * 生成带时间后缀的 taskId，格式：{prefix}-HH.mm.ss
@@ -73,6 +73,7 @@ const DEFAULT_MAX_CONCURRENT: Record<TaskNamespace, number> = {
   login: 1,
   system: 1,
   feishu: 1,
+  review: 1,
 };
 
 const DEFAULT_TIMEOUT_MS: Partial<Record<TaskNamespace, number>> = {
@@ -82,6 +83,7 @@ const DEFAULT_TIMEOUT_MS: Partial<Record<TaskNamespace, number>> = {
   "creator-publish": 30 * 60 * 1000,
   login: 30 * 60 * 1000,
   feishu: 30 * 60 * 1000,
+  review: 30 * 60 * 1000,
 };
 
 const namespaces = new Map<TaskNamespace, NamespaceState>();

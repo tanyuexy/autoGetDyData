@@ -12,6 +12,7 @@ import {
   CloseOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  AuditOutlined,
 } from "@ant-design/icons";
 import { useRouter, usePathname } from "next/navigation";
 import TaskPanel from "@/components/TaskPanel";
@@ -33,6 +34,11 @@ const menuItems = [
     key: "/creator/publish",
     icon: <VideoCameraOutlined />,
     label: "定时发布",
+  },
+  {
+    key: "/review",
+    icon: <AuditOutlined />,
+    label: "稿文审核",
   },
   {
     key: "/feishu",

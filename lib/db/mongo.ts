@@ -57,5 +57,10 @@ export async function ensureMongoIndexes(): Promise<void> {
       { key: { shopName: 1, kind: 1, dataDate: 1 }, name: "shop_kind_date" },
       { key: { updatedAt: -1 }, name: "updatedAt" },
     ]),
+    db.collection("creator_review_items").createIndexes([
+      { key: { accountName: 1, checkedAt: -1 }, name: "account_checkedAt" },
+      { key: { postId: 1 }, name: "postId_unique", unique: true, sparse: true },
+      { key: { reviewStatus: 1 }, name: "reviewStatus" },
+    ]),
   ]);
 }
