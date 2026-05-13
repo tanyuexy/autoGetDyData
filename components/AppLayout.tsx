@@ -39,7 +39,7 @@ const menuItems = [
   {
     key: "/review",
     icon: <AuditOutlined />,
-    label: "稿文审核",
+    label: "作品信息",
   },
   {
     key: "/comment",

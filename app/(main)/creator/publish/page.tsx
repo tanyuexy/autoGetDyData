@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   App,
   Badge,
@@ -182,7 +182,7 @@ type EditTaskState = {
 
 export default function CreatorPublishPage() {
   const { message } = App.useApp();
-  const { isNamespaceBusy, selectTaskLog, runningTasks, startTask } = useTaskContext();
+  const { isNamespaceBusy, selectTaskLog, runningTasks, startTask, activeTasks } = useTaskContext();
   const [tasks, setTasks] = useState<PublishTask[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(true);
@@ -283,6 +283,39 @@ export default function CreatorPublishPage() {
     const t = setInterval(fetchTasks, 60_000);
     return () => clearInterval(t);
   }, [fetchAccounts, fetchTasks]);
+
+  /** 本页触发的发布任务在终端侧标记完成（SSE / 快照）后立即刷新列表 */
+  const donePublishTaskIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    let shouldRefresh = false;
+    for (const [id, st] of activeTasks) {
+      if (st.namespace === "creator-publish" && st.done) {
+        if (!donePublishTaskIdsRef.current.has(id)) {
+          donePublishTaskIdsRef.current.add(id);
+          shouldRefresh = true;
+        }
+      }
+    }
+    if (shouldRefresh) void fetchTasks();
+  }, [activeTasks, fetchTasks]);
+
+  /** 任意 creator-publish 进程从服务端运行列表消失时刷新（含 worker、未打开终端的任务、崩溃恢复） */
+  const prevRunningPublishIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const current = new Set(
+      runningTasks.filter((t) => t.namespace === "creator-publish").map((t) => t.taskId)
+    );
+    const prev = prevRunningPublishIdsRef.current;
+    let terminated = false;
+    for (const id of prev) {
+      if (!current.has(id)) {
+        terminated = true;
+        break;
+      }
+    }
+    prevRunningPublishIdsRef.current = current;
+    if (terminated) void fetchTasks();
+  }, [runningTasks, fetchTasks]);
 
   async function uploadOne(file: File): Promise<string> {
     const fd = new FormData();

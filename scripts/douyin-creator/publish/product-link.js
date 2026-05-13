@@ -148,13 +148,14 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
     }
   }
 
+  const limitModal = page.locator('.semi-modal-content').filter({ hasText: '无法添加购物车' }).first();
+  if (await limitModal.isVisible().catch(() => false)) {
+    const limitMsg = await limitModal.locator('[class*="modal-message"]').first().textContent().catch(() => "已达到限额");
+    throw new Error(`购物车限额: ${limitMsg.trim()}`);
+  }
+
   editModal = page.locator('.semi-modal-content').filter({ hasText: '完成编辑' }).first();
   if (await editModal.isVisible().catch(() => false)) {
-    const limitModal = page.locator('.semi-modal-content').filter({ hasText: '无法添加购物车' }).first();
-    if (await limitModal.isVisible().catch(() => false)) {
-      const limitMsg = await limitModal.locator('[class*="modal-message"]').first().textContent().catch(() => "已达到限额");
-      throw new Error(`购物车限额: ${limitMsg.trim()}`);
-    }
     await fillProductEditModal(page, productTitle, approvalNumber);
   }
 }
