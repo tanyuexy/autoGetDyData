@@ -5,8 +5,77 @@ const {
   waitForManualLoginFlow
 } = require("../lib/login");
 const { saveAuth } = require("../lib/exporter");
-const { TARGET_URL } = require("../lib/env");
+const { TARGET_URL, PUBLISH_WAIT_MULTIPLIER } = require("../lib/env");
 const { step, checkOk } = require("./logger");
+
+// ---- 自动慢网识别 ----
+
+/** 已校准的倍率，null 表示尚未校准 */
+let _calibratedMultiplier = null;
+
+/** 首次 networkidle 的基准耗时（毫秒），低于此值视为快网 */
+const NETWORK_IDLE_BASELINE_MS = 3000;
+
+/** 最终使用的倍率 = max(环境变量, 自动校准)，上限 5 */
+function scaledMs(ms) {
+  if (_calibratedMultiplier === null) {
+    return Math.round(ms * PUBLISH_WAIT_MULTIPLIER);
+  }
+  const m = Math.max(PUBLISH_WAIT_MULTIPLIER, _calibratedMultiplier);
+  return Math.round(ms * Math.min(m, 5));
+}
+
+function networkLabel(multiplier) {
+  if (multiplier <= 1.0) return "流畅";
+  if (multiplier <= 1.5) return "一般";
+  if (multiplier <= 2.5) return "较慢";
+  if (multiplier <= 4.0) return "缓慢";
+  return "极慢";
+}
+
+/**
+ * 自动校准网络速度。在首次大页面加载后调用一次即可。
+ * 测量 networkidle 耗时 vs 基准，自动提升后续等待倍率。
+ */
+async function calibrateNetworkSpeed(page, { baselineMs = NETWORK_IDLE_BASELINE_MS } = {}) {
+  if (_calibratedMultiplier !== null) return;
+  try {
+    const start = Date.now();
+    await page.waitForLoadState("networkidle").catch(() => {});
+    const elapsed = Date.now() - start;
+    const computed = Math.min(Math.max(1, Math.round((elapsed / baselineMs) * 10) / 10), 5);
+    _calibratedMultiplier = computed;
+
+    const envNote =
+      PUBLISH_WAIT_MULTIPLIER > 1
+        ? `（环境变量强制 ×${PUBLISH_WAIT_MULTIPLIER}）`
+        : "";
+    console.log(
+      `[网络环境] ${networkLabel(getCalibratedMultiplier())} | ` +
+        `networkidle ${elapsed}ms / 基准 ${baselineMs}ms → 倍率 ×${_calibratedMultiplier}${envNote}`
+    );
+  } catch {
+    _calibratedMultiplier = 1;
+    console.log("[网络环境] 校准失败，使用默认倍率 ×1.0");
+  }
+}
+
+/** 返回当前生效的倍率（调试用） */
+function getCalibratedMultiplier() {
+  return _calibratedMultiplier === null
+    ? PUBLISH_WAIT_MULTIPLIER
+    : Math.max(PUBLISH_WAIT_MULTIPLIER, _calibratedMultiplier);
+}
+
+// ---- 工具函数 ----
+
+async function waitForPageSettled(page, opts = {}) {
+  const { afterClick = true, minWaitMs = 500 } = opts;
+  if (afterClick) {
+    await page.waitForLoadState("networkidle").catch(() => {});
+  }
+  await page.waitForTimeout(scaledMs(minWaitMs));
+}
 
 async function waitForLoginCheckToSettle(page, accountName) {
   let y = 3;
@@ -22,14 +91,14 @@ async function waitForLoginCheckToSettle(page, accountName) {
       `账号 [${accountName}] 登录态暂未确认，等待页面稳定... (${i + 1}/${y})`
     );
     await page.waitForLoadState("networkidle").catch(() => {});
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(scaledMs(1500));
   }
 
   await page
     .goto(TARGET_URL, { waitUntil: "domcontentloaded" })
     .catch(() => {});
   await page.waitForLoadState("networkidle").catch(() => {});
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(scaledMs(1500));
 
   if (await isLoggedInAtTarget(page)) {
     return "logged_in";
@@ -44,7 +113,9 @@ async function waitForLoginCheckToSettle(page, accountName) {
 async function ensureLoggedIn(page, accountName, paths) {
   console.log(`检查账号 [${accountName}] 登录状态...`);
   await page.goto(TARGET_URL, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(3000);
+  // 利用首帧加载自动校准慢网倍率（后续所有等待自动适配）
+  await calibrateNetworkSpeed(page);
+  await waitForPageSettled(page, { afterClick: false, minWaitMs: 3000 });
 
   if (await isLoggedInAtTarget(page)) {
     console.log(`账号 [${accountName}] 登录态有效`);
@@ -72,12 +143,12 @@ async function ensureLoggedIn(page, accountName, paths) {
 
   console.log(`账号 [${accountName}] 登录流程完成，验证状态...`);
   await page.goto(TARGET_URL, { waitUntil: "networkidle" });
-  await page.waitForTimeout(3000);
+  await waitForPageSettled(page, { afterClick: false, minWaitMs: 3000 });
 
   for (let i = 0; i < 3; i += 1) {
     if (await isLoggedInAtTarget(page)) break;
     console.log(`  验证未通过，等待渲染... (${i + 1}/3)`);
-    await page.waitForTimeout(3000);
+    await waitForPageSettled(page, { afterClick: false, minWaitMs: 3000 });
   }
 
   if (!(await isLoggedInAtTarget(page))) {
@@ -140,7 +211,7 @@ async function scrollPublishFormToBottom(page) {
       window.scrollTo(0, document.body.scrollHeight);
     })
     .catch(() => {});
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(scaledMs(500));
 }
 
 async function optimizePublishPageForViewing(page) {
@@ -173,7 +244,7 @@ async function clickPublishButton(page) {
     )
     .first();
 
-  if (!(await publishBtn.isVisible({ timeout: 5000 }).catch(() => false))) {
+  if (!(await publishBtn.isVisible({ timeout: scaledMs(5000) }).catch(() => false))) {
     console.log("  ⚠️ 未找到发布按钮，可能已自动发布或按钮被遮挡");
     return false;
   }
@@ -188,13 +259,13 @@ async function clickPublishButton(page) {
   await publishBtn.click();
   console.log("  ✓ 已点击发布按钮");
 
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(scaledMs(3000));
 
   const toastSelector =
     '.semi-toast-content, .semi-message, [class*="toast"], [class*="message"]';
   try {
     const toast = await page
-      .waitForSelector(toastSelector, { timeout: 25000 })
+      .waitForSelector(toastSelector, { timeout: scaledMs(25000) })
       .catch(() => null);
     if (toast) {
       const toastText = await toast.textContent().catch(() => "");
@@ -430,6 +501,10 @@ async function checkMusicSelected(page) {
 }
 
 module.exports = {
+  scaledMs,
+  waitForPageSettled,
+  calibrateNetworkSpeed,
+  getCalibratedMultiplier,
   ensureLoggedIn,
   closeCreatorGuides,
   scrollPublishFormToBottom,

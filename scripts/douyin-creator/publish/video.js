@@ -23,6 +23,8 @@ const {
   checkSelfDeclarationSet,
   splitDescription,
   MAX_HASHTAGS,
+  scaledMs,
+  waitForPageSettled,
 } = require("./utils");
 const {
   logVideoPublishStart,
@@ -57,7 +59,7 @@ async function uploadVideo(page, videoKey, accountName) {
   }
 
   // 视频页面 file input 是隐藏的，用 attached 状态检测
-  await page.waitForSelector('input[type="file"][accept*="video"]', { state: 'attached', timeout: 30000 }).catch(() => {});
+  await page.waitForSelector('input[type="file"][accept*="video"]', { state: 'attached', timeout: scaledMs(30000) }).catch(() => {});
   const videoInput = page.locator('input[type="file"][accept*="video"]').first();
   if ((await videoInput.count()) > 0) {
     await videoInput.setInputFiles(filePath);
@@ -73,9 +75,9 @@ async function uploadVideo(page, videoKey, accountName) {
       const video = document.querySelector('video');
       const blobImg = document.querySelector('img[src^="blob:"]');
       return video || blobImg;
-    }, { timeout: 120000 });
+    }, { timeout: scaledMs(120000) });
   } catch {}
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(scaledMs(2000));
 }
 
 async function selectFirstAiCover(page) {
@@ -215,7 +217,7 @@ async function runPublishVideo(options) {
     }
 
     stage(10, `发布后停留 ${publishWaitSec}s`);
-    await page.waitForTimeout(publishWaitSec * 1000);
+    await page.waitForTimeout(scaledMs(publishWaitSec * 1000));
   } catch (error) {
     await saveDebugArtifacts(page, accountName, "run-failed").catch(() => {});
     throw error;

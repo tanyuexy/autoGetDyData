@@ -5,6 +5,10 @@ const { waitVisible, setTextLikeInput } = require("./dom");
 const { fillTitleAndDescription } = require("./editor");
 const { selectSelfDeclaration, setScheduleIfNeeded } = require("./publish-form");
 const {
+  scaledMs,
+  waitForPageSettled,
+  calibrateNetworkSpeed,
+  getCalibratedMultiplier,
   ensureLoggedIn,
   closeCreatorGuides,
   scrollPublishFormToBottom,
@@ -45,6 +49,10 @@ module.exports = {
   fillTitleAndDescription,
   selectSelfDeclaration,
   setScheduleIfNeeded,
+  scaledMs,
+  waitForPageSettled,
+  calibrateNetworkSpeed,
+  getCalibratedMultiplier,
   ensureLoggedIn,
   closeCreatorGuides,
   scrollPublishFormToBottom,

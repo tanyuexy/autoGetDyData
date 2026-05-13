@@ -1,8 +1,13 @@
 const { step, info } = require("./logger");
+const { PUBLISH_WAIT_MULTIPLIER } = require("../lib/env");
+
+function scaledMs(ms) {
+  return Math.round(ms * PUBLISH_WAIT_MULTIPLIER);
+}
 
 async function dismissBlockingPortals(page) {
   await page.keyboard.press("Escape").catch(() => {});
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(scaledMs(250));
 
   const datePicker = page.locator('.semi-portal [class*="datepicker"], .semi-portal .semi-datepicker').first();
   if (await datePicker.isVisible().catch(() => false)) {
@@ -41,7 +46,7 @@ async function clickEvenIfCovered(locator, label) {
 async function fillProductEditModal(page, productTitle, approvalNumber) {
   const editModal = page.locator('.semi-modal-content').filter({ hasText: '完成编辑' }).first();
   await editModal.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(scaledMs(500));
 
   if (!(await editModal.isVisible().catch(() => false))) {
     info("无弹窗，链接可能已直接添加");
@@ -91,7 +96,7 @@ async function fillProductEditModal(page, productTitle, approvalNumber) {
   const finishBtn = editModal.locator('button:has-text("完成编辑")').first();
   if (await finishBtn.isVisible().catch(() => false)) {
     await finishBtn.click();
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(scaledMs(3000));
     step("已点击完成编辑");
   } else {
     info("⚠️ 未找到完成编辑按钮，停留在弹窗供查看");
@@ -112,12 +117,12 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
   }
   await dismissBlockingPortals(page);
   await clickEvenIfCovered(tagSelect, "购物车下拉框");
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(scaledMs(1500));
 
   const cartOpt = page.locator('[role="option"]').filter({ hasText: '购物车' }).first();
   if (await cartOpt.isVisible({ timeout: 3000 }).catch(() => false)) {
     await clickEvenIfCovered(cartOpt, "购物车选项");
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(scaledMs(2000));
     step("已选择购物车");
   } else {
     await page.keyboard.press("Escape");
@@ -129,7 +134,7 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
   if (await linkInput.isVisible().catch(() => false)) {
     await linkInput.fill(productLink);
     step("链接已填入");
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(scaledMs(3000));
   }
 
   let editModal = page.locator('.semi-modal-content').filter({ hasText: '完成编辑' }).first();
@@ -139,7 +144,7 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
     const addBtn = page.locator('span:has-text("添加链接"), button:has-text("添加链接")').first();
     if (await addBtn.isVisible().catch(() => false)) {
       await clickEvenIfCovered(addBtn, "添加链接按钮");
-      await page.waitForTimeout(4000);
+      await page.waitForTimeout(scaledMs(4000));
     }
   }
 
@@ -173,11 +178,11 @@ async function selectCartAndLinkForArticle(page, productLink, productTitle, appr
 
   await dismissBlockingPortals(page);
   await clickEvenIfCovered(select, "购物车下拉框");
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(scaledMs(1500));
   const cartOpt = page.locator('[role="option"]').filter({ hasText: '购物车' }).first();
   if (await cartOpt.isVisible().catch(() => false)) {
     await clickEvenIfCovered(cartOpt, "购物车选项");
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(scaledMs(2000));
     step("已选择购物车");
   } else {
     await page.keyboard.press("Escape");

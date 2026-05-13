@@ -96,7 +96,11 @@
       "Bash(playwright-cli run-code *)",
       "Bash(playwright-cli press *)",
       "Bash(playwright-cli eval *)",
-      "Bash(playwright-cli fill *)"
+      "Bash(playwright-cli fill *)",
+      "Bash(npx uipro *)",
+      "Bash(uipro --help)",
+      "Bash(uipro versions *)",
+      "Bash(uipro init *)"
     ]
   }
 }

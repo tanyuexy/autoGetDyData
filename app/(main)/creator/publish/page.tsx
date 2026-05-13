@@ -40,6 +40,29 @@ const TERMINABLE_TASK_STATUSES = new Set<TaskStatus>(["pending", "running"]);
 /** 表格「操作」列：link 按钮默认 padding 较大，收一点横向间距 */
 const TASK_TABLE_OP_LINK_STYLE = { paddingInline: 1 } as const;
 
+const STATUS_MAP: Record<TaskStatus, { color: string; text: string }> = {
+  pending: { color: "default", text: "待执行" },
+  queued: { color: "blue", text: "队列中" },
+  running: { color: "processing", text: "执行中" },
+  success: { color: "success", text: "成功" },
+  failed: { color: "error", text: "失败" },
+  cancelled: { color: "warning", text: "已取消" },
+};
+
+const MULTILINE_TEXT_STYLE = {
+  display: "-webkit-box",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 2,
+  overflow: "hidden",
+  whiteSpace: "normal",
+  wordBreak: "break-word",
+  lineHeight: 1.5,
+  textAlign: "left",
+  color: "rgba(15,23,42,.88)",
+} as const;
+
+const ON_ROW_STYLE = { verticalAlign: "top" } as const;
+
 function isTerminableTask(task: PublishTask) {
   return TERMINABLE_TASK_STATUSES.has(task.status);
 }
@@ -192,6 +215,8 @@ export default function CreatorPublishPage() {
     null
   );
 
+  const schedulePresets = useMemo(() => scheduleQuickPresets(), []);
+
   const editScheduleTimeOptions = useMemo(() => {
     if (!editState?.scheduleAt) return [];
     const d = dayjs(editState.scheduleAt);
@@ -209,6 +234,13 @@ export default function CreatorPublishPage() {
     [accounts]
   );
 
+  const handleRow = useCallback(() => ({ style: ON_ROW_STYLE }), []);
+
+  const rowSelection = useMemo(
+    () => ({ selectedRowKeys, onChange: setSelectedRowKeys }),
+    [selectedRowKeys]
+  );
+
   const fetchAccounts = useCallback(async () => {
     setLoadingAccounts(true);
     try {
@@ -223,19 +255,28 @@ export default function CreatorPublishPage() {
 
   const fetchTasks = useCallback(async () => {
     setLoadingTasks(true);
-    try {
-      const res = await fetch("/api/creator/publish/tasks");
-      const data = await res.json();
-      setTasks(data.tasks || []);
-      setSelectedRowKeys((prev) => {
-        const ids = new Set((data.tasks || []).map((t: PublishTask) => t.id));
-        return prev.filter((k) => ids.has(k));
-      });
-    } catch {
-      message.error("获取任务列表失败");
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch("/api/creator/publish/tasks");
+        const data = await res.json();
+        setTasks(data.tasks || []);
+        setSelectedRowKeys((prev) => {
+          const ids = new Set((data.tasks || []).map((t: PublishTask) => t.id));
+          return prev.filter((k) => ids.has(k));
+        });
+        setLoadingTasks(false);
+        return;
+      } catch (e: unknown) {
+        lastErr = e;
+        // only retry network errors, not HTTP errors
+        if (!(e instanceof TypeError) || attempt === 2) break;
+        await new Promise((r) => setTimeout(r, 2_000 * (attempt + 1)));
+      }
     }
+    message.error("获取任务列表失败");
     setLoadingTasks(false);
-  }, []);
+  }, [message]);
 
   useEffect(() => {
     fetchAccounts();
@@ -247,39 +288,58 @@ export default function CreatorPublishPage() {
   async function uploadOne(file: File): Promise<string> {
     const fd = new FormData();
     fd.append("file", file);
-    const res = await fetch("/api/creator/publish/upload", { method: "POST", body: fd });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "upload failed");
-    return data.fileKey as string;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch("/api/creator/publish/upload", {
+        method: "POST",
+        body: fd,
+        signal: controller.signal,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "upload failed");
+      return data.fileKey as string;
+    } catch (e: any) {
+      if (e.name === "AbortError") throw new Error("上传超时，请检查网络后重试");
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
-  const videoUploadProps = {
-    maxCount: 1,
-    beforeUpload: async (file: File) => {
-      try {
-        const key = await uploadOne(file);
-        setVideoFileKey(key);
-        message.success(`上传成功: ${key}`);
-      } catch (e: any) {
-        message.error(e.message || "上传失败");
-      }
-      return false;
-    },
-  };
+  const videoUploadProps = useMemo(
+    () => ({
+      maxCount: 1,
+      beforeUpload: async (file: File) => {
+        try {
+          const key = await uploadOne(file);
+          setVideoFileKey(key);
+          message.success(`上传成功: ${key}`);
+        } catch (e: any) {
+          message.error(e.message || "上传失败");
+        }
+        return false;
+      },
+    }),
+    [message]
+  );
 
-  const imageUploadProps = {
-    multiple: true,
-    beforeUpload: async (file: File) => {
-      try {
-        const key = await uploadOne(file);
-        setImageKeys((prev) => [...prev, key]);
-        message.success(`上传成功: ${key}`);
-      } catch (e: any) {
-        message.error(e.message || "上传失败");
-      }
-      return false;
-    },
-  };
+  const imageUploadProps = useMemo(
+    () => ({
+      multiple: true,
+      beforeUpload: async (file: File) => {
+        try {
+          const key = await uploadOne(file);
+          setImageKeys((prev) => [...prev, key]);
+          message.success(`上传成功: ${key}`);
+        } catch (e: any) {
+          message.error(e.message || "上传失败");
+        }
+        return false;
+      },
+    }),
+    [message]
+  );
 
   const coverOptions = useMemo(
     () => imageKeys.map((k) => ({ label: k, value: k })),
@@ -343,17 +403,30 @@ export default function CreatorPublishPage() {
               coverImageKey: coverImageKey || undefined,
             };
 
+      let createdCount = 0;
       for (const accountName of accountNames) {
-        const res = await fetch("/api/creator/publish/tasks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accountName, payload }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "创建任务失败");
+        try {
+          const res = await fetch("/api/creator/publish/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ accountName, payload }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "创建任务失败");
+          createdCount++;
+        } catch (e: any) {
+          if (createdCount > 0) {
+            message.success(`已创建 ${createdCount}/${accountNames.length} 个任务`);
+          }
+          throw new Error(
+            `为「${accountName}」创建任务失败` +
+              (createdCount > 0 ? `（已完成 ${createdCount}/${accountNames.length}）` : "") +
+              `: ${e.message || "未知错误"}`
+          );
+        }
       }
 
-      message.success(`已创建 ${accountNames.length} 个任务`);
+      message.success(`已创建 ${createdCount} 个任务`);
       setAccountNames([]);
       setTitle("");
       setDescription("");
@@ -590,17 +663,7 @@ export default function CreatorPublishPage() {
     return (
       <div
         title={value}
-        style={{
-          display: "-webkit-box",
-          WebkitBoxOrient: "vertical",
-          WebkitLineClamp: lines,
-          overflow: "hidden",
-          whiteSpace: "normal",
-          wordBreak: "break-word",
-          lineHeight: 1.5,
-          textAlign: "left",
-          color: "rgba(15,23,42,.88)",
-        }}
+        style={lines === 2 ? MULTILINE_TEXT_STYLE : { ...MULTILINE_TEXT_STYLE, WebkitLineClamp: lines }}
       >
         {value}
       </div>
@@ -753,15 +816,7 @@ export default function CreatorPublishPage() {
       width: 72,
       align: "center" as const,
       render: (s: TaskStatus) => {
-        const map: Record<TaskStatus, { color: string; text: string }> = {
-          pending: { color: "default", text: "待执行" },
-          queued: { color: "blue", text: "队列中" },
-          running: { color: "processing", text: "执行中" },
-          success: { color: "success", text: "成功" },
-          failed: { color: "error", text: "失败" },
-          cancelled: { color: "warning", text: "已取消" },
-        };
-        const v = map[s];
+        const v = STATUS_MAP[s];
         return <Tag color={v.color}>{v.text}</Tag>;
       },
     },
@@ -1019,7 +1074,7 @@ export default function CreatorPublishPage() {
                 onChange={(v) => setScheduleAt(v ? v.toISOString() : null)}
                 disabledDate={scheduleDisabledDate}
                 disabledTime={scheduleDisabledTime}
-                presets={scheduleQuickPresets()}
+                presets={schedulePresets}
                 style={{ width: "100%" }}
               />
             </Form.Item>
@@ -1141,16 +1196,9 @@ export default function CreatorPublishPage() {
           const s = Array.isArray(sorter) ? sorter[0] : sorter;
           setScheduleColumnSortOrder((s?.order ?? null) as "ascend" | "descend" | null);
         }}
-        rowSelection={{
-          selectedRowKeys,
-          onChange: setSelectedRowKeys,
-        }}
+        rowSelection={rowSelection}
         style={{ width: "100%" }}
-        onRow={() => ({
-          style: {
-            verticalAlign: "top",
-          },
-        })}
+        onRow={handleRow}
       />
       <Modal
         title="编辑任务"
@@ -1328,7 +1376,7 @@ export default function CreatorPublishPage() {
                         快捷时间
                       </Text>
                       <Space size={[6, 6]} wrap>
-                        {scheduleQuickPresets().map((p) => (
+                        {schedulePresets.map((p) => (
                           <Button
                             key={p.label}
                             size="small"

@@ -213,6 +213,16 @@ function getCreatorExportDateStartSpec(accountName) {
 const HEADLESS =
   process.env.HEADLESS === "true" || process.env.HEADLESS === "1";
 
+/** 发布流程各步骤等待时间的倍率，慢网环境调大（如 2.0 ~ 3.0） */
+const PUBLISH_WAIT_MULTIPLIER = (() => {
+  const raw = process.env.PUBLISH_WAIT_MULTIPLIER;
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0.5 && n <= 10) return n;
+  }
+  return 1;
+})();
+
 module.exports = {
   TARGET_URL,
   ACCOUNTS_DIR,
@@ -229,5 +239,6 @@ module.exports = {
   LOGIN_PAGE_GOTO_TIMEOUT_MS,
   LOGIN_VERIFY_METHOD,
   HEADLESS,
+  PUBLISH_WAIT_MULTIPLIER,
   getCreatorExportDateStartSpec
 };

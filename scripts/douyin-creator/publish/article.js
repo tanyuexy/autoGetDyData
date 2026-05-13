@@ -26,6 +26,8 @@ const {
   checkMusicSelected,
   splitDescription,
   MAX_HASHTAGS,
+  scaledMs,
+  waitForPageSettled,
 } = require("./utils");
 const { selectCartAndLinkForArticle } = require("./product-link");
 
@@ -69,23 +71,23 @@ async function uploadImages(page, imageKeys, accountName) {
     }
   }
 
-  await page.waitForTimeout(3000);
+  await waitForPageSettled(page, { afterClick: false, minWaitMs: 3000 });
 
-  const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 15000 }).catch(() => null);
-
-  const uploadText = page.getByText("点击上传").first();
-  if (await uploadText.isVisible().catch(() => false)) {
-    await uploadText.click();
-  } else {
-    await page.locator('div:has-text("点击上传")').last().click().catch(() => {});
+  const uploadBtn = page.locator('div:has-text("点击上传")').last();
+  if (!(await uploadBtn.isVisible({ timeout: scaledMs(5000) }).catch(() => false))) {
+    await saveDebugArtifacts(page, accountName, "upload-not-found");
+    throw new Error("上传按钮不可见，无法触发文件上传");
   }
-  await page.waitForTimeout(3000);
+
+  const fileChooserPromise = page.waitForEvent("filechooser", { timeout: scaledMs(30000) }).catch(() => null);
+  await uploadBtn.click();
+  await page.waitForTimeout(scaledMs(2000));
 
   const fileChooser = await fileChooserPromise;
   if (fileChooser) {
     await fileChooser.setFiles(filePaths);
     console.log(`已选择 ${filePaths.length} 张图片`);
-    await page.waitForTimeout(8000);
+    await page.waitForTimeout(scaledMs(8000));
     return;
   }
 
@@ -101,9 +103,9 @@ async function selectCoverIfNeeded(page, coverImageKey) {
 async function selectMusic(page) {
   console.log("选择音乐...");
   const guideOk = page.locator('button:has-text("我知道了")').first();
-  if (await guideOk.isVisible({ timeout: 1000 }).catch(() => false)) {
+  if (await guideOk.isVisible({ timeout: scaledMs(1000) }).catch(() => false)) {
     await guideOk.click().catch(() => {});
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(scaledMs(500));
   }
 
   const musicAction = page.locator('span:has-text("选择音乐")').last();
@@ -112,7 +114,7 @@ async function selectMusic(page) {
   }
 
   await musicAction.scrollIntoViewIfNeeded().catch(() => {});
-  await musicAction.click({ timeout: 5000 }).catch(async (error) => {
+  await musicAction.click({ timeout: scaledMs(5000) }).catch(async (error) => {
     const message = String(error?.message || error || "");
     if (!/intercepts pointer events|Timeout/i.test(message)) throw error;
     console.log("选择音乐按钮被页面浮层遮挡，改用 DOM 点击");
@@ -125,14 +127,14 @@ async function selectMusic(page) {
       .catch(() => false);
     if (!clicked) throw error;
   });
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(scaledMs(3000));
 
   const hotTab = page.locator('div[role="tab"]:has-text("热门榜")').first();
-  if (!(await hotTab.isVisible({ timeout: 5000 }).catch(() => false))) {
+  if (!(await hotTab.isVisible({ timeout: scaledMs(5000) }).catch(() => false))) {
     throw new Error("配乐选择失败：未找到热门榜标签");
   }
   await hotTab.click();
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(scaledMs(3000));
 
   const songNames = page.locator('.semi-tabs-pane-active [class*="song-name"], [class*="song-name"]');
   const count = await songNames.count().catch(() => 0);
@@ -242,7 +244,7 @@ async function runPublishArticle(options) {
 
     stage(2, "进入图文发布页");
     await page.goto(ARTICLE_POST_URL, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(3000);
+    await waitForPageSettled(page, { afterClick: false, minWaitMs: 3000 });
     await optimizePublishPageForViewing(page);
     await page.evaluate(() => { window.scrollTo(0, 0); document.body?.scrollIntoView?.(); }).catch(() => {});
     await saveStepDebug(page, accountName, "02-open-post-page", options);
@@ -313,7 +315,7 @@ async function runPublishArticle(options) {
     }
 
     stage(11, `发布后停留 ${publishWaitSec}s`);
-    await page.waitForTimeout(publishWaitSec * 1000);
+    await page.waitForTimeout(scaledMs(publishWaitSec * 1000));
   } catch (error) {
     await saveDebugArtifacts(page, accountName, "run-failed").catch(() => {});
     throw error;
