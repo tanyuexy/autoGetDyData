@@ -70,7 +70,7 @@ const DEFAULT_MAX_CONCURRENT: Record<TaskNamespace, number> = {
   "creator-open": Number.POSITIVE_INFINITY,
   "shop-export": 1,
   "creator-publish": 3,
-  login: 1,
+  login: Number.POSITIVE_INFINITY,
   system: 1,
   feishu: 1,
   review: 1,

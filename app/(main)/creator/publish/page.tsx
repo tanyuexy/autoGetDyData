@@ -190,7 +190,6 @@ export default function CreatorPublishPage() {
   const [importing, setImporting] = useState(false);
   const [feishuAiProvider, setFeishuAiProvider] = useState<FeishuAiProvider>("siliconflow");
   const [generatingFeishuAi, setGeneratingFeishuAi] = useState(false);
-  const [refreshingFeishu, setRefreshingFeishu] = useState(false);
 
   const [type, setType] = useState<TaskType>("video");
   const [accountNames, setAccountNames] = useState<string[]>([]);
@@ -581,29 +580,13 @@ export default function CreatorPublishPage() {
     setGeneratingFeishuAi(false);
   }
 
-  async function handleRefreshTasksFromFeishu() {
-    setRefreshingFeishu(true);
+  async function handleRefreshTasks() {
     try {
-      const res = await fetch("/api/creator/publish/tasks", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "refresh-from-feishu" }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "刷新失败");
-      setTasks(data.tasks || []);
-      setSelectedRowKeys((prev) => {
-        const ids = new Set((data.tasks || []).map((t: PublishTask) => t.id));
-        return prev.filter((k) => ids.has(k));
-      });
-      const summary = data.summary || {};
-      message.success(
-        `刷新完成：更新 ${summary.updatedCount || 0}，飞书行更新 ${summary.rowUpdatedCount || 0}，无变化 ${summary.unchangedCount || 0}`
-      );
+      await fetchTasks();
+      message.success("任务列表已刷新");
     } catch (e: any) {
       message.error(e.message || "刷新失败");
     }
-    setRefreshingFeishu(false);
   }
 
   function openEditTask(task: PublishTask) {
@@ -1143,7 +1126,7 @@ export default function CreatorPublishPage() {
             trigger="hover"
             placement="bottomRight"
             content={
-              <Space direction="vertical" size={8} style={{ minWidth: 200 }}>
+              <Space orientation="vertical" size={8} style={{ minWidth: 200 }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>AI 模型选择</Text>
                 <Select
                   value={feishuAiProvider}
@@ -1176,7 +1159,7 @@ export default function CreatorPublishPage() {
           >
             从飞书导入任务
           </Button>
-          <Button onClick={handleRefreshTasksFromFeishu} loading={refreshingFeishu} size="small">
+          <Button onClick={handleRefreshTasks} loading={loadingTasks} size="small">
             刷新任务
           </Button>
           </Space>

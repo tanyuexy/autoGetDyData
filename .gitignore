@@ -66,3 +66,4 @@ storage/
 scripts/feishu/token-cache.json
 .playwright-mcp/
 .playwright-cli/
+.cursor/

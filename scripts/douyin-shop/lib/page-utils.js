@@ -72,24 +72,46 @@ async function hasShopPicker(page) {
 async function hasLoginForm(page) {
   if (await hasShopPicker(page)) return false;
 
-  const pw = page.locator('input[type="password"]').first();
-  if (!(await isVisibleFast(pw, 350))) return false;
-
-  const emailTab = page
-    .locator(
-      'div[role="tab"]:has-text("邮箱登录"), span:has-text("邮箱登录"), :text-is("邮箱登录")'
-    )
-    .first();
-  if (await isVisibleFast(emailTab, 280)) return true;
-
-  const emailInput = page
-    .locator(
-      'input[placeholder="请输入邮箱"], input[placeholder*="邮箱"], input[type="email"]'
-    )
-    .first();
-  if (await isVisibleFast(emailInput, 280)) return true;
-
   const url = page.url() || "";
+
+  // 邮箱登录 tab：有密码输入框 + 邮箱tab/邮箱输入框
+  const pw = page.locator('input[type="password"]').first();
+  const hasPasswordInput = await isVisibleFast(pw, 350);
+  if (hasPasswordInput) {
+    const emailTab = page
+      .locator(
+        'div[role="tab"]:has-text("邮箱登录"), span:has-text("邮箱登录"), :text-is("邮箱登录")'
+      )
+      .first();
+    if (await isVisibleFast(emailTab, 280)) return true;
+
+    const emailInput = page
+      .locator(
+        'input[placeholder="请输入邮箱"], input[placeholder*="邮箱"], input[type="email"]'
+      )
+      .first();
+    if (await isVisibleFast(emailInput, 280)) return true;
+
+    if (LOGIN_URL_RE.test(url)) return false;
+    return false;
+  }
+
+  // 手机登录 tab（默认）：有手机号码输入框 + 手机登录tab
+  const mobileInput = page.locator('input[placeholder="手机号码"]').first();
+  const hasMobileInput = await isVisibleFast(mobileInput, 350);
+  if (hasMobileInput) {
+    const phoneTab = page
+      .locator(
+        'div[role="tab"]:has-text("手机登录"), span:has-text("手机登录"), :text-is("手机登录")'
+      )
+      .first();
+    if (await isVisibleFast(phoneTab, 280)) return true;
+
+    // 手机登录 tab 的另一种呈现方式（按钮式切换）
+    const phoneTabBtn = page.locator('text=手机登录').first();
+    if (await isVisibleFast(phoneTabBtn, 280)) return true;
+  }
+
   if (LOGIN_URL_RE.test(url)) return false;
 
   return false;

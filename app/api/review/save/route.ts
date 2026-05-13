@@ -38,6 +38,8 @@ export async function POST(request: NextRequest) {
           reviewStatus: item.reviewStatus || "under_review",
           rejectionReason: item.rejectionReason || undefined,
           rejectionScreenshotPath: item.rejectionScreenshotPath || undefined,
+          workLink: item.workLink || undefined,
+          workType: item.workType || undefined,
           checkedAt: now,
           createdAt: now,
           updatedAt: now,

@@ -181,8 +181,8 @@ function buildFeishuContentHash(snapshot) {
   return crypto.createHash("sha1").update(JSON.stringify(payloadSignature)).digest("hex");
 }
 
-function buildCoreComparableSignature(input) {
-  return JSON.stringify({
+function buildCoreContentHash(input) {
+  const payloadSignature = {
     accountName: String(input?.accountName || ""),
     type: String(input?.type || ""),
     title: String(input?.title || ""),
@@ -191,7 +191,8 @@ function buildCoreComparableSignature(input) {
     scheduleAt: input?.scheduleAt || null,
     productLink: String(input?.productLink || ""),
     productTitle: String(input?.productTitle || ""),
-  });
+  };
+  return crypto.createHash("sha1").update(JSON.stringify(payloadSignature)).digest("hex");
 }
 
 function buildTaskComparableInput(task) {
@@ -226,21 +227,15 @@ function getExistingTaskSyncState(existingTask, snapshot, contentHash) {
   if (existingTask.status === "running") return { action: "skip-running" };
   if (snapshot.remoteCreatedStatus === "是") return { action: "skip-remote-created" };
 
-  if (existingTask.feishuContentHash) {
+  const taskContentHash = buildCoreContentHash(buildTaskComparableInput(existingTask));
+  const snapshotContentHash = buildCoreContentHash(buildSnapshotComparableInput(snapshot));
+
+  if (taskContentHash === snapshotContentHash) {
     return existingTask.feishuContentHash === contentHash
       ? { action: "skip-unchanged" }
-      : { action: "update" };
+      : { action: "backfill-hash-only" };
   }
 
-  const existingComparable = buildCoreComparableSignature(
-    buildTaskComparableInput(existingTask)
-  );
-  const snapshotComparable = buildCoreComparableSignature(
-    buildSnapshotComparableInput(snapshot)
-  );
-  if (existingComparable === snapshotComparable) {
-    return { action: "backfill-hash-only" };
-  }
   return { action: "update" };
 }
 
@@ -253,15 +248,48 @@ function buildTaskPayload(snapshot, downloaded) {
     scheduleAt: snapshot.scheduleAt,
     ...(snapshot.productLink
       ? {
-          productTitle: snapshot.productTitle || "还少胶囊",
-          approvalNumber: "不包含广审内容",
-          productLink: snapshot.productLink,
-        }
+        productTitle: snapshot.productTitle || "还少胶囊",
+        approvalNumber: "不包含广审内容",
+        productLink: snapshot.productLink,
+      }
       : {}),
     ...(snapshot.type === "video"
       ? { videoFileKey: downloaded[0] }
       : { imagesFileKeys: downloaded }),
   };
+}
+
+function getRecordEligibilityIssue(record) {
+  const f = record.fields || {};
+  const approval = String(f["审批"] || "").trim();
+  if (approval !== "通过") return `审批不是通过(${approval || "空"})`;
+  const remark = String(f["备注"] || "").trim();
+  if (remark === "示例") return "备注为示例";
+  const shop = f["所属店铺"];
+  if (!shop || !Array.isArray(shop) || !shop[0]?.text) return "缺少所属店铺";
+  const attachments = f["视频/图文内容"];
+  if (!attachments || !Array.isArray(attachments) || !attachments.length) {
+    return "缺少视频/图文内容";
+  }
+  return "";
+}
+
+function summarizeEligibility(records) {
+  const stats = {
+    eligible: 0,
+    skippedByIssue: new Map(),
+  };
+
+  for (const record of records) {
+    const issue = getRecordEligibilityIssue(record);
+    if (!issue) {
+      stats.eligible++;
+      continue;
+    }
+    stats.skippedByIssue.set(issue, (stats.skippedByIssue.get(issue) || 0) + 1);
+  }
+
+  return stats;
 }
 
 async function syncPublishTasks(options = {}) {
@@ -313,20 +341,19 @@ async function syncPublishTasks(options = {}) {
       rowUpdatedCount++;
     }
 
-    const syncCandidates = records.filter((r) => {
-      const f = r.fields || {};
-      const approval = String(f["审批"] || "").trim();
-      if (approval !== "通过") return false;
-      const remark = String(f["备注"] || "").trim();
-      if (remark === "示例") return false;
-      const shop = f["所属店铺"];
-      if (!shop || !Array.isArray(shop) || !shop[0]?.text) return false;
-      const attachments = f["视频/图文内容"];
-      if (!attachments || !Array.isArray(attachments) || !attachments.length) return false;
-      return true;
-    });
+    const eligibility = summarizeEligibility(records);
+    const syncCandidates = records.filter((r) => !getRecordEligibilityIssue(r));
 
+    log(
+      `  同步规则：仅处理「审批=通过」且非示例、已填所属店铺、已上传视频/图文内容的记录`
+    );
     log(`  其中 ${syncCandidates.length} 条满足同步条件`);
+    if (eligibility.skippedByIssue.size > 0) {
+      const skippedText = Array.from(eligibility.skippedByIssue.entries())
+        .map(([issue, count]) => `${issue} ${count} 条`)
+        .join("，");
+      log(`  已跳过 ${records.length - syncCandidates.length} 条：${skippedText}`);
+    }
 
     if (syncCandidates.length === 0) {
       log(`${summaryPrefix} 没有满足同步条件的任务，退出。`);
@@ -358,20 +385,26 @@ async function syncPublishTasks(options = {}) {
     for (const record of syncCandidates) {
       const snapshot = buildRecordSnapshot(record);
       const existingTask = existingTasksByRecordId.get(record.record_id || "");
-      const contentHash = buildFeishuContentHash(snapshot);
-      const syncState = getExistingTaskSyncState(existingTask, snapshot, contentHash);
       const label = `${snapshot.accountName} | ${snapshot.type} | ${snapshot.scheduleAt || "-"} | 第${rowNumberMap.get(record.record_id || "") || "-"}行`;
 
-      if (syncState.action === "skip-running") {
+      if (existingTask?.status === "running") {
         log(`  ↺ 跳过运行中任务: ${label}（taskId=${existingTask.id}）`);
         skippedRunningCount++;
         continue;
       }
 
-      if (syncState.action === "skip-remote-created") {
+      if (snapshot.remoteCreatedStatus === "是") {
         skippedRemoteCreatedCount++;
         continue;
       }
+
+      if (!existingTask && snapshot.remoteCreatedStatus !== "" && snapshot.remoteCreatedStatus !== "否") {
+        skippedRemoteCreatedCount++;
+        continue;
+      }
+
+      const contentHash = buildFeishuContentHash(snapshot);
+      const syncState = getExistingTaskSyncState(existingTask, snapshot, contentHash);
 
       if (syncState.action === "skip-unchanged") {
         unchangedCount++;
@@ -405,10 +438,6 @@ async function syncPublishTasks(options = {}) {
 
       if (!existingTask) {
         if (!allowCreate) continue;
-        if (snapshot.remoteCreatedStatus !== "" && snapshot.remoteCreatedStatus !== "否") {
-          skippedRemoteCreatedCount++;
-          continue;
-        }
         log(`  + 新建任务: ${label}`);
       } else {
         log(`  * 检测到内容变化，准备更新任务: ${label}（taskId=${existingTask.id}）`);

@@ -4,6 +4,7 @@ const { ensureDir, fileExists } = require("../../common/fs");
 const { BROWSER_VIEWPORT } = require("./env");
 
 const qrDataUrlStateByPage = new WeakMap();
+const NETWORK_QR_MAX_AGE_MS = 30 * 1000;
 
 function extractQrDataUrls(text) {
   if (!text || typeof text !== "string") return [];
@@ -82,8 +83,9 @@ function attachQrDataUrlSniffer(page) {
       const urls = extractQrDataUrls(text);
       if (urls.length === 0) return;
 
+      const capturedAt = Date.now();
       for (const item of urls) {
-        state.dataUrls.push(item);
+        state.dataUrls.push({ dataUrl: item, capturedAt, responseUrl: url });
       }
       // 只保留最近候选，避免长时间运行内存膨胀。
       if (state.dataUrls.length > 8) {
@@ -93,6 +95,117 @@ function attachQrDataUrlSniffer(page) {
       // 响应抓取失败不影响主流程
     }
   });
+}
+
+function getRecentNetworkQrDataUrls(page, maxAgeMs = NETWORK_QR_MAX_AGE_MS) {
+  const state = qrDataUrlStateByPage.get(page);
+  const now = Date.now();
+  return (state?.dataUrls || [])
+    .map((item) => {
+      if (typeof item === "string") {
+        return { dataUrl: item, capturedAt: 0 };
+      }
+      return item;
+    })
+    .filter((item) => {
+      if (!item?.dataUrl) return false;
+      if (!item.capturedAt) return false;
+      return now - item.capturedAt <= maxAgeMs;
+    })
+    .sort((a, b) => b.capturedAt - a.capturedAt)
+    .map((item) => item.dataUrl);
+}
+
+function getLatestNetworkQrCapturedAt(page) {
+  const state = qrDataUrlStateByPage.get(page);
+  return (state?.dataUrls || []).reduce((latest, item) => {
+    const capturedAt =
+      typeof item === "string" ? 0 : Number(item?.capturedAt || 0);
+    return Math.max(latest, capturedAt);
+  }, 0);
+}
+
+async function readLoginQrKeys(page) {
+  return page
+    .evaluate(() => {
+      const keys = [];
+      const seen = new Set();
+      const push = (value) => {
+        const key = String(value || "").trim();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        keys.push(key);
+      };
+      const selectors = [
+        "img[aria-label='二维码']",
+        "img[src*='qrcode']",
+        "img[src^='data:image/']",
+        "[class*='qrcode'] img",
+        "[aria-label='二维码'] img"
+      ];
+      for (const selector of selectors) {
+        for (const el of Array.from(document.querySelectorAll(selector))) {
+          push(el.getAttribute("src") || "");
+        }
+      }
+      return keys;
+    })
+    .catch(() => []);
+}
+
+async function waitForLoginQrKeyChange(page, previousKeys, timeoutMs = 5000) {
+  const previous = new Set(previousKeys || []);
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const current = await readLoginQrKeys(page);
+    if (current.some((key) => key && !previous.has(key))) return true;
+    await page.waitForTimeout(250);
+  }
+  return false;
+}
+
+async function refreshLoginQrIfPossible(page, accountName) {
+  const beforeKeys = await readLoginQrKeys(page);
+  const refreshLocators = [
+    page.locator("button", { hasText: /刷新|重新获取|重试/ }).first(),
+    page.locator("text=/刷新二维码|二维码已失效|点击刷新|重新获取|重试/").first(),
+    page.locator("[role='dialog']").getByText(/刷新|重新获取|重试/).first(),
+    page.locator("[class*='qrcode']").getByText(/刷新|重新获取|重试/).first()
+  ];
+
+  for (const locator of refreshLocators) {
+    const visible = await locator.isVisible({ timeout: 350 }).catch(() => false);
+    if (!visible) continue;
+    try {
+      await locator.click({ timeout: 1500 });
+    } catch {
+      await locator.click({ force: true, timeout: 1500 }).catch(() => {});
+    }
+    const changed = await waitForLoginQrKeyChange(page, beforeKeys, 5000);
+    console.log(
+      `账号 [${accountName}] 已尝试刷新登录二维码${changed ? "，检测到二维码已更新" : ""}。`
+    );
+    await page.waitForTimeout(300);
+    return changed;
+  }
+
+  const latestNetworkQrAt = getLatestNetworkQrCapturedAt(page);
+  const hasVisibleLoginQr = beforeKeys.length > 0;
+  if (
+    hasVisibleLoginQr &&
+    latestNetworkQrAt > 0 &&
+    Date.now() - latestNetworkQrAt > NETWORK_QR_MAX_AGE_MS
+  ) {
+    await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+    await page.waitForLoadState("networkidle").catch(() => {});
+    await waitForLoginQrKeyChange(page, beforeKeys, 8000);
+    console.log(
+      `账号 [${accountName}] 登录二维码已加载超过 ${NETWORK_QR_MAX_AGE_MS / 1000}s，已刷新页面后重新截图。`
+    );
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -262,11 +375,8 @@ async function tryCaptureQrFromDataUrl(page, screenshotPath) {
     }
   }
 
-  // 3) 再尝试从网络响应缓存中提取 dataURL。
-  const state = qrDataUrlStateByPage.get(page);
-  const candidates = (state?.dataUrls || [])
-    .slice()
-    .sort((a, b) => b.length - a.length);
+  // 3) 再尝试从网络响应缓存中提取 dataURL。只取最近捕获的候选，避免邮件发出旧二维码。
+  const candidates = getRecentNetworkQrDataUrls(page);
   for (const item of candidates) {
     const ok = await saveDataUrlPng(item, screenshotPath, {
       minBytes: 1500,
@@ -471,6 +581,7 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
   await ensureDir(paths.alertDir);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const screenshotPath = path.join(paths.alertDir, `${timestamp}-login-qr.png`);
+  await refreshLoginQrIfPossible(page, accountName);
   await page.waitForTimeout(500);
 
   if (await pollTryCaptureQrFromDataUrl(page, screenshotPath, 8000)) {
@@ -633,4 +744,3 @@ module.exports = {
   captureFaceQrScreenshot,
   hasVisibleQr
 };
-

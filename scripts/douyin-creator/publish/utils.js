@@ -24,7 +24,7 @@ const {
   checkSelfDeclarationSet,
   checkMusicSelected,
 } = require("./runtime");
-const { splitDescription } = require("./editor");
+const { normalizeDescriptionForPublish, splitDescription } = require("./editor");
 
 const MAX_HASHTAGS = 5;
 
@@ -67,6 +67,7 @@ module.exports = {
   checkProductLinkSet,
   checkSelfDeclarationSet,
   checkMusicSelected,
+  normalizeDescriptionForPublish,
   splitDescription,
   MAX_HASHTAGS,
 };

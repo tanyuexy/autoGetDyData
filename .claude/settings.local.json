@@ -100,7 +100,8 @@
       "Bash(npx uipro *)",
       "Bash(uipro --help)",
       "Bash(uipro versions *)",
-      "Bash(uipro init *)"
+      "Bash(uipro init *)",
+      "Bash(npx playwright-cli *)"
     ]
   }
 }

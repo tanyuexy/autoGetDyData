@@ -98,7 +98,6 @@ export default function ReviewPage() {
   const [fetching, setFetching] = useState(false);
   const [accounts, setAccounts] = useState<{ name: string }[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
-  const [fetchScope, setFetchScope] = useState<string>("rejected");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [accountFilter, setAccountFilter] = useState<string>("all");
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -194,7 +193,7 @@ export default function ReviewPage() {
     }
   }
 
-  async function handleFetchReviewStatus() {
+  async function handleFetchWorkInfo() {
     if (selectedAccounts.length === 0) {
       message.warning("请选择至少一个账号");
       return;
@@ -204,12 +203,12 @@ export default function ReviewPage() {
     try {
       const taskId = await startTask(
         "/api/review/check",
-        { accounts: selectedAccounts, reviewScope: fetchScope },
+        { accounts: selectedAccounts },
         "review"
       );
-      message.info(`审核抓取任务已启动: ${taskId}`);
+      message.info(`作品信息抓取任务已启动: ${taskId}`);
     } catch (e: any) {
-      message.error(e.message || "启动审核抓取失败");
+      message.error(e.message || "启动作品信息抓取失败");
     }
     setFetching(false);
   }
@@ -335,6 +334,20 @@ export default function ReviewPage() {
       },
     },
     {
+      title: "作品链接",
+      dataIndex: "workLink",
+      align: "center" as const,
+      width: 80,
+      render: (v: string | undefined) => {
+        if (!v) return "-";
+        return (
+          <a href={v} target="_blank" rel="noopener noreferrer">
+            查看
+          </a>
+        );
+      },
+    },
+    {
       title: "操作",
       align: "center" as const,
       width: 80,
@@ -392,21 +405,14 @@ export default function ReviewPage() {
             placeholder="选择账号"
             maxTagCount={3}
           />
-          <Select
-            style={{ width: 120 }}
-            value={fetchScope}
-            onChange={setFetchScope}
-            options={STATUS_FILTER_OPTIONS}
-            aria-label="抓取范围"
-          />
           <Button
             type="primary"
-            onClick={handleFetchReviewStatus}
+            onClick={handleFetchWorkInfo}
             loading={fetching}
             disabled={isNamespaceBusy("review")}
             icon={<ReloadOutlined />}
           >
-            抓取审核状态
+            获取作品信息
           </Button>
         </Space>
 
@@ -474,8 +480,8 @@ export default function ReviewPage() {
           onChange: (keys) => setSelectedRowKeys(keys),
         }}
         pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
-        scroll={{ x: 820, y: "calc(100vh - 260px)" }}
-        locale={{ emptyText: "暂无审核记录，请先选择账号并点击「抓取审核状态」" }}
+        scroll={{ x: 900, y: "calc(100vh - 260px)" }}
+        locale={{ emptyText: "暂无作品记录，请先选择账号并点击「获取作品信息」" }}
         style={{ width: "100%" }}
       />
     </div>

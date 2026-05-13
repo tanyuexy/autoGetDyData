@@ -11,15 +11,17 @@ export async function POST(request: Request) {
     const path = require("path");
     const fs = require("fs");
     const { chromium } = require("playwright");
-
-    const ACCOUNTS_DIR = (() => {
-      const envVal = process.env.SHOP_ACCOUNTS_DIR;
-      if (envVal) return path.resolve(process.cwd(), envVal);
-      const newPath = path.resolve(process.cwd(), "storage/shop-accounts");
-      const oldPath = path.resolve(process.cwd(), "accounts-shop");
-      if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) return oldPath;
-      return newPath;
-    })();
+    const {
+      ACCOUNTS_DIR,
+      BROWSER_VIEWPORT,
+      SHOP_HOME_URL,
+    } = require("@/scripts/douyin-shop/lib/env");
+    const {
+      STAGES,
+      isAuthenticatedStage,
+      retryableGoto,
+      waitForStage,
+    } = require("@/scripts/douyin-shop/lib/page-utils");
 
     const dirName = String(email).trim().replace(/[\\/:*?"<>|]+/g, "_");
     const storagePath = path.join(ACCOUNTS_DIR, dirName, "storageState.json");
@@ -36,94 +38,79 @@ export async function POST(request: Request) {
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
       storageState: storagePath,
-      viewport: { width: 1280, height: 800 },
+      viewport: BROWSER_VIEWPORT,
     });
     const page = await context.newPage();
 
-    const SHOP_HOME_URL =
-      process.env.SHOP_HOME_URL ||
-      "https://fxg.jinritemai.com/ffa/mshop/home/index";
-
     let verified = false;
     let detail = "";
+    let status: "valid" | "expired" | "warning" = "expired";
     const start = Date.now();
 
     try {
-      await page.goto(SHOP_HOME_URL, {
+      await retryableGoto(page, SHOP_HOME_URL, {
         waitUntil: "domcontentloaded",
-        timeout: 15000,
+        timeout: 45000,
+        maxRetries: 2,
+        baseBackoff: 2500,
+        expectedUrlRe: /jinritemai\.com/,
       });
-      await page.waitForTimeout(2000);
 
-      // 检查是否跳转到登录页
-      const url = page.url() || "";
-      const isLoginPage =
-        url.includes("/login/") || url.includes("/passport/");
+      const stage = await waitForStage(
+        page,
+        [
+          STAGES.LOGIN_FORM,
+          STAGES.SHOP_PICKER,
+          STAGES.COMPASS_VIDEO,
+          STAGES.COMPASS_GRAPHIC,
+          STAGES.COMPASS_OTHER,
+          STAGES.FXG_WORKSPACE,
+          STAGES.CAPTCHA,
+        ],
+        { timeoutMs: 90000, intervalMs: 350 }
+      );
 
-      if (isLoginPage) {
-        detail = "cookie 已失效 — 页面重定向到登录页";
-      } else {
-        // 检查是否有登录密码框（说明登录表单出现了）
-        const hasPasswordInput = await page
-          .locator('input[type="password"]')
-          .first()
-          .isVisible({ timeout: 300 })
-          .catch(() => false);
-
-        if (hasPasswordInput) {
-          // 进一步确认是否有邮箱/手机登录相关 UI
-          const hasLoginUi = await page
-            .locator('div[role="tab"]:has-text("邮箱登录"), text=手机号登录')
-            .first()
-            .isVisible({ timeout: 300 })
-            .catch(() => false);
-          if (hasLoginUi) {
-            detail = "cookie 已失效 — 页面显示了登录表单";
-          } else {
-            // 可能只是在其他页面有个 password input（如修改密码）
-            verified = true;
-            detail = "验证通过（无登录表单）";
-          }
-        } else {
-          // 检查是否有工作台 DOM 特征
-          const hasWorkspaceDom =
-            (await page
-              .locator('div[class*="userDropDown"], [class*="shopName"], [class*="shopTitle"]')
-              .first()
-              .isVisible({ timeout: 1000 })
-              .catch(() => false));
-
-          if (hasWorkspaceDom) {
-            verified = true;
-            detail = "验证通过 — 检测到工作台界面";
-          } else {
-            const isCompassUrl = url.includes("compass.jinritemai.com");
-            if (isCompassUrl) {
-              const hasCompassDom = await page
-                .locator('text=短视频明细, text=视频明细, [class*="ecom-"]')
-                .first()
-                .isVisible({ timeout: 1500 })
-                .catch(() => false);
-              if (hasCompassDom) {
-                verified = true;
-                detail = "验证通过 — 检测到罗盘界面";
-              } else {
-                detail = `验证不确定 — URL: ${url}，未检测到明显登录特征`;
-              }
-            } else {
-              detail = `验证不确定 — 当前 URL: ${url}`;
-            }
-          }
+      let finalStage = stage;
+      if (stage.stage === STAGES.LOGIN_FORM) {
+        const authenticatedStage = await waitForStage(
+          page,
+          [
+            STAGES.SHOP_PICKER,
+            STAGES.COMPASS_VIDEO,
+            STAGES.COMPASS_GRAPHIC,
+            STAGES.COMPASS_OTHER,
+            STAGES.FXG_WORKSPACE,
+          ],
+          { timeoutMs: 8000, intervalMs: 250 }
+        );
+        if (isAuthenticatedStage(authenticatedStage.stage)) {
+          finalStage = authenticatedStage;
         }
       }
+
+      if (isAuthenticatedStage(finalStage.stage)) {
+        verified = true;
+        status = "valid";
+        detail = `验证通过 — 阶段=${finalStage.stage}`;
+      } else if (finalStage.stage === STAGES.LOGIN_FORM) {
+        status = "expired";
+        detail = `cookie 已失效 — 页面显示登录表单，url=${finalStage.url}`;
+      } else if (finalStage.stage === STAGES.CAPTCHA) {
+        status = "warning";
+        detail = `验证不确定 — 页面出现滑块验证，url=${finalStage.url}`;
+      } else {
+        status = "warning";
+        detail = `验证不确定 — 阶段=${finalStage.stage}，url=${finalStage.url}`;
+      }
     } catch (e: any) {
+      status = "warning";
       detail = `页面加载失败: ${e.message || e}`;
     }
 
     await context.close();
     const elapsed = Date.now() - start;
 
-    // 验证通过时写入验证结果，下次刷新页面时 list API 会读到
+    // 写入本次浏览器验证结果，下次刷新页面时 list API 会读到。
     try {
       const vp = path.join(ACCOUNTS_DIR, dirName, "verified-at.json");
       fs.writeFileSync(
@@ -132,7 +119,7 @@ export async function POST(request: Request) {
           time: Date.now(),
           detail,
           verified,
-          status: verified ? "valid" : "expired",
+          status,
         }),
         "utf-8"
       );
@@ -141,7 +128,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       email,
       verified,
-      status: verified ? "valid" : "expired",
+      status,
       detail,
       elapsed,
     });

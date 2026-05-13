@@ -137,6 +137,7 @@ export default function ConfigPage() {
 
   const [creatorAccounts, setCreatorAccounts] = useState<CreatorAccount[]>([]);
   const [loadingCreatorAccounts, setLoadingCreatorAccounts] = useState(false);
+  const [shopLoginRefreshKey, setShopLoginRefreshKey] = useState(0);
 
   const configRef = useRef<ConfigData | null>(null);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -179,6 +180,7 @@ export default function ConfigPage() {
     const loginTaskRunning = runningTasks.some((task) => task.namespace === "login");
     if (loginTaskWasRunningRef.current && !loginTaskRunning) {
       fetchCreatorAccounts();
+      setShopLoginRefreshKey((value) => value + 1);
     }
     loginTaskWasRunningRef.current = loginTaskRunning;
   }, [runningTasks, fetchCreatorAccounts]);
@@ -580,6 +582,7 @@ export default function ConfigPage() {
         >
           <ConfigEmailTab
             emails={config.emails || []}
+            refreshKey={shopLoginRefreshKey}
             onChange={(emails) => autoSave({ emails })}
             onLogin={async (email) => {
               try {

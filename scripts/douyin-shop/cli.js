@@ -477,6 +477,35 @@ async function main() {
     return;
   }
 
+  if (command === "login") {
+    console.log(
+      `抖店纯登录：候选邮箱 ${accounts.length} 个: ${accounts.map((a) => a.email).join(", ")}`
+    );
+
+    const browser = await chromium.launch({
+      headless: HEADLESS,
+      args: ["--start-maximized"]
+    });
+    activeBrowser = browser;
+
+    try {
+      for (let i = 0; i < accounts.length; i += 1) {
+        const account = accounts[i];
+        console.log(`\n========== 纯登录 ${i + 1}/${accounts.length}: ${account.email} ==========`);
+        const result = await runOne(browser, account, { loginOnly: true });
+        if (result.ok) {
+          console.log(`[${account.email}] 登录成功`);
+        } else {
+          console.error(`[${account.email}] 登录失败: ${result.error}`);
+        }
+      }
+    } finally {
+      await browser.close();
+      activeBrowser = null;
+    }
+    return;
+  }
+
   const preferredList = targetShopNames;
   console.log(
     `抖店登录：候选邮箱 ${accounts.length} 个: ${accounts

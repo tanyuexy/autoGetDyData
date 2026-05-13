@@ -27,6 +27,7 @@ const NAMESPACE_LABELS: Record<string, string> = {
   login: "登录",
   system: "系统",
   feishu: "飞书",
+  review: "获取作品信息",
 };
 
 interface RecentLogFile {

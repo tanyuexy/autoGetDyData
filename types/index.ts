@@ -93,6 +93,8 @@ export interface ReviewItem {
   reviewStatus: ReviewStatus;
   rejectionReason?: string;
   rejectionScreenshotPath?: string;
+  workLink?: string;
+  workType?: string;
   checkedAt: string;
   createdAt: string;
   updatedAt: string;

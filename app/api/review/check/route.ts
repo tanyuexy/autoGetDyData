@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
   try {
     if (!(await canStartTask("review"))) {
       return NextResponse.json(
-        { error: "已有稿文审核任务在运行，请等待完成后再执行" },
+        { error: "已有作品信息任务在运行，请等待完成后再执行" },
         { status: 409 }
       );
     }
@@ -16,12 +16,9 @@ export async function POST(request: NextRequest) {
     const accounts = Array.isArray(body?.accounts)
       ? body.accounts.map((s: any) => String(s || "").trim()).filter(Boolean)
       : [];
-    const reviewScope = ["all", "approved", "under_review", "rejected"].includes(String(body?.reviewScope || ""))
-      ? String(body.reviewScope)
-      : "all";
 
     const taskId = generateTaskIdWithTime("review");
-    const args = ["scripts/douyin-creator/review.js", `--review-scope=${reviewScope}`, ...accounts];
+    const args = ["scripts/douyin-creator/review.js", ...accounts];
 
     await enqueueTask(taskId, "node", args, { namespace: "review" });
 

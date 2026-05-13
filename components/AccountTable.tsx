@@ -29,7 +29,7 @@ interface CreatorProps {
   type: "creator";
   accounts: CreatorAccount[];
   loading: boolean;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
   onLogin?: (accountName: string, mode: "email_qr" | "local_manual") => void;
   onAddAccount?: (name: string) => void;
   onDeleteAccount?: (name: string) => void;
@@ -161,6 +161,7 @@ export default function AccountTable(props: Props) {
     const loginBusy = isNamespaceBusy("login");
     const [modalOpen, setModalOpen] = useState(false);
     const [verifying, setVerifying] = useState<Set<string>>(new Set());
+    const [verifyAllLoading, setVerifyAllLoading] = useState(false);
 
     // Store verify results locally so we can show them immediately
     const [verifyResults, setVerifyResults] = useState<Record<string, { status: string; detail: string }>>({});
@@ -182,19 +183,37 @@ export default function AccountTable(props: Props) {
       });
     }, [accounts, verifyResults]);
 
+    function mapCreatorVerifyStatus(result: { verified: boolean; status?: string }) {
+      if (result.verified) return "valid";
+      if (result.status === "missing") return "missing";
+      return "expired";
+    }
+
+    async function runCreatorVerify(accountName: string) {
+      const res = await fetch("/api/creator/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountName }),
+      });
+      if (!res.ok) throw new Error("验证请求失败");
+      return res.json() as Promise<{
+        verified: boolean;
+        status?: string;
+        detail: string;
+        elapsed?: number;
+      }>;
+    }
+
     async function handleVerify(accountName: string) {
       setVerifying((prev) => new Set(prev).add(accountName));
       try {
-        const res = await fetch("/api/creator/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accountName }),
-        });
-        if (!res.ok) throw new Error("验证请求失败");
-        const result = await res.json();
+        const result = await runCreatorVerify(accountName);
+        const status = mapCreatorVerifyStatus(result);
 
         if (result.verified) {
-          message.success(`账号 ${accountName} 验证通过 (${(result.elapsed / 1000).toFixed(1)}s)`);
+          message.success(
+            `账号 ${accountName} 验证通过 (${((result.elapsed ?? 0) / 1000).toFixed(1)}s)`
+          );
         } else {
           message.warning(`账号 ${accountName} 验证失败: ${result.detail}`);
         }
@@ -202,7 +221,7 @@ export default function AccountTable(props: Props) {
         setVerifyResults((prev) => ({
           ...prev,
           [accountName]: {
-            status: result.verified ? "valid" : "expired",
+            status,
             detail: result.detail,
           },
         }));
@@ -214,6 +233,47 @@ export default function AccountTable(props: Props) {
         next.delete(accountName);
         return next;
       });
+    }
+
+    async function handleVerifyAll() {
+      const list = (accounts as CreatorAccount[]).map((a) => String(a.name || "").trim()).filter(Boolean);
+      if (list.length === 0) {
+        message.warning("暂无账号");
+        return;
+      }
+
+      setVerifyAllLoading(true);
+      let ok = 0;
+      let fail = 0;
+
+      try {
+        for (const accountName of list) {
+          setVerifying((prev) => new Set(prev).add(accountName));
+          try {
+            const result = await runCreatorVerify(accountName);
+            const status = mapCreatorVerifyStatus(result);
+            setVerifyResults((prev) => ({
+              ...prev,
+              [accountName]: { status, detail: result.detail },
+            }));
+            if (result.verified) ok += 1;
+            else fail += 1;
+          } catch (e: any) {
+            fail += 1;
+            message.error(`${accountName}: ${e.message || e}`);
+          }
+          setVerifying((prev) => {
+            const next = new Set(prev);
+            next.delete(accountName);
+            return next;
+          });
+        }
+      } finally {
+        setVerifyAllLoading(false);
+      }
+
+      await Promise.resolve(onRefresh());
+      message.success(`全部校验完成：${ok} 个登录态有效，${fail} 个无效或异常`);
     }
 
     const columns = [
@@ -334,6 +394,14 @@ export default function AccountTable(props: Props) {
             )}
             <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>
               刷新
+            </Button>
+            <Button
+              icon={<SafetyCertificateOutlined />}
+              loading={verifyAllLoading}
+              disabled={accounts.length === 0 || loading}
+              onClick={() => void handleVerifyAll()}
+            >
+              校验所有账号
             </Button>
           </Space>
         </div>

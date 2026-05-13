@@ -48,6 +48,32 @@ Pages call API routes → API enqueues a task → the Playwright script scrapes 
 
 All Douyin Creator Playwright scripts reuse `scripts/douyin-creator/lib/login.js` (`openTargetAndEnsureLogin`). Accounts are stored as directories under `storage/creator-accounts/<name>/` containing `storageState.json`, `cookies.json`, and exported data. The login flow detects the current stage (QR code, SMS, face verification) via DOM inspection and sends email alerts (`lib/mail.js`) when manual intervention is needed.
 
+### Shop account automation
+
+**Two modes:**
+- `shop:login` — pure login only, saves cookies and exits (no data export)
+- `shop:export` — full login + post-login flow (shop selection → data download → merge → Feishu sync)
+
+Both use `scripts/douyin-shop/cli.js` with different command branches. Accounts stored under `storage/shop-accounts/<email>/`.
+
+**Login state verification (3-layer):**
+
+1. **Static cookie analysis** (`lib/cookie-checker.ts`): `analyzeStorageState()` checks `storageState.json` — cookie expiry dates, file age (14-day threshold). No browser needed.
+
+2. **Browser verification snapshot** (`verified-at.json`): Written by login flow (always `verified: true`) and verify API. 24-hour validity.
+
+3. **Active browser verification** (`POST /api/shop/verify`): Launches headless Chromium, navigates to shop home, uses shared stage detection from `scripts/douyin-shop/lib/page-utils.js`.
+
+**Merge logic** (`mergeVerificationIntoAnalysis()` in `cookie-checker.ts`): Browser result only overrides static analysis when `verified-at.json` timestamp ≥ `storageState.json` mtime (i.e., verification was done after last login).
+
+**Stage detection** (`page-utils.js` `detectStage()`): Recognizes LOGIN_FORM (phone + email tabs), SHOP_PICKER, COMPASS_VIDEO, COMPASS_GRAPHIC, COMPASS_OTHER, FXG_WORKSPACE, CAPTCHA, UNKNOWN. `isAuthenticatedStage()` returns true for SHOP_PICKER + all COMPASS/FXG stages.
+
+**Key login flow** (`login.js` `runShopLogin()`):
+- Tries cookie reuse first (`tryReuseCookieLogin`)
+- Falls back to full email+password login with captcha handling
+- Supports `loginOnly` option to skip `runPostLoginFlow()` (shop selection + data export)
+- `saveStorageState()` writes both `storageState.json` and `verified-at.json`
+
 ### MongoDB collections
 
 - `app_config` — singleton config document (`_id: "default"`)
@@ -73,3 +99,4 @@ To add a new page:
 已知的弃用项：
 - `InputNumber` 的 `addonBefore` / `addonAfter` → 用 `Space.Compact` + `Button` 替代
 - `Modal` 的 `destroyOnClose` → 用 `destroyOnHidden` 替代
+- `Space` 的 `direction` → 用 `orientation` 替代

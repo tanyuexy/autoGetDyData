@@ -131,6 +131,11 @@ async function waitForLoginFormFields(page, tag, options = {}) {
     .first();
 
   while (Date.now() < hardDeadline) {
+    const currentStage = await detectStage(page);
+    if (isAuthenticatedStage(currentStage.stage)) {
+      return { authenticatedStage: currentStage };
+    }
+
     const emailVisible = await emailInput.isVisible({ timeout: 250 }).catch(() => false);
     const passwordVisible = await passwordInput.isVisible({ timeout: 250 }).catch(() => false);
     if (emailVisible && passwordVisible) {
@@ -163,6 +168,25 @@ async function waitForLoginFormFields(page, tag, options = {}) {
   );
 }
 
+async function waitBrieflyForAuthenticatedStage(page, tag, reason) {
+  const stage = await waitForStageWithActivity(
+    page,
+    [
+      STAGES.SHOP_PICKER,
+      STAGES.COMPASS_VIDEO,
+      STAGES.COMPASS_GRAPHIC,
+      STAGES.COMPASS_OTHER,
+      STAGES.FXG_WORKSPACE
+    ],
+    { timeoutMs: 2500, maxWaitMs: 8000, intervalMs: 250, tag }
+  );
+  if (isAuthenticatedStage(stage.stage)) {
+    console.log(`[${tag}] ${reason}发现已登录 (stage=${stage.stage})，跳过账号密码流程`);
+    return stage;
+  }
+  return null;
+}
+
 function getAccountPaths(email) {
   const safeName = String(email).replace(/[\\/:*?"<>|]+/g, "_");
   const accountDir = path.join(ACCOUNTS_DIR, safeName);
@@ -187,6 +211,11 @@ async function ensureAccountPaths(paths) {
  * 切完后必须等到"邮箱输入框"和"密码输入框"同时可见，否则下一步会把两个值写到同一个框里。
  */
 async function switchToEmailTab(page) {
+  const beforeStage = await detectStage(page);
+  if (isAuthenticatedStage(beforeStage.stage)) {
+    return { authenticatedStage: beforeStage };
+  }
+
   const tabLoc = page
     .locator(
       'div[role="tab"]:has-text("邮箱登录"), span:has-text("邮箱登录"), :text-is("邮箱登录")'
@@ -195,13 +224,25 @@ async function switchToEmailTab(page) {
   if (await tabLoc.isVisible({ timeout: 2000 }).catch(() => false)) {
     await tabLoc.click({ timeout: 2000 }).catch(() => {});
   }
+
+  const afterClickStage = await detectStage(page);
+  if (isAuthenticatedStage(afterClickStage.stage)) {
+    return { authenticatedStage: afterClickStage };
+  }
+
   // 关键：必须等密码输入框也已渲染，否则 fillCredentials 会把密码写进邮箱框
   await page
     .locator('input[type="password"]')
     .first()
     .waitFor({ state: "visible", timeout: 5000 })
     .catch(() => {});
-  return true;
+
+  const afterWaitStage = await detectStage(page);
+  if (isAuthenticatedStage(afterWaitStage.stage)) {
+    return { authenticatedStage: afterWaitStage };
+  }
+
+  return { authenticatedStage: null };
 }
 
 /**
@@ -218,7 +259,10 @@ async function clearAndFill(input, value) {
  * 填写邮箱 + 密码；填完回读校验，发现串行写入到同一框就清空重填。
  */
 async function fillCredentials(page, email, password) {
-  const { emailInput, passwordInput } = await waitForLoginFormFields(page, email);
+  const { emailInput, passwordInput, authenticatedStage } = await waitForLoginFormFields(page, email);
+  if (authenticatedStage) {
+    return { authenticatedStage };
+  }
 
   // 先把焦点打到 email 上一次性写入（不在填写中途切换焦点）
   await clearAndFill(emailInput, email);
@@ -252,6 +296,7 @@ async function fillCredentials(page, email, password) {
       );
     }
   }
+  return { authenticatedStage: null };
 }
 
 /**
@@ -465,6 +510,23 @@ async function saveStorageState(context, paths) {
   } catch {
     // 忽略
   }
+  // 登录成功后写入浏览器验证快照，使 /api/shop/list 的静态分析能合并到此结果
+  try {
+    const vp = path.join(paths.accountDir, "verified-at.json");
+    const fsSync = require("fs");
+    fsSync.writeFileSync(
+      vp,
+      JSON.stringify({
+        time: Date.now(),
+        detail: "登录流程中验证通过",
+        verified: true,
+        status: "valid",
+      }),
+      "utf-8"
+    );
+  } catch {
+    // 忽略
+  }
 }
 
 /**
@@ -544,8 +606,12 @@ async function runShopLogin(context, account, options = {}) {
     if (await tryReuseCookieLogin(page, tag)) {
       console.log(`[${tag}] cookie 仍然有效，跳过账号密码登录`);
       await saveStorageState(context, paths);
-      const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
-      return { ok: true, reused: true, paths, ...extra };
+      if (!options.loginOnly) {
+        const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
+        return { ok: true, reused: true, paths, ...extra };
+      }
+      console.log(`[${tag}] 纯登录模式，跳过后续流程`);
+      return { ok: true, reused: true, paths };
     }
 
     console.log(`[${tag}] 打开抖店登录页 ${SHOP_LOGIN_URL}`);
@@ -581,8 +647,12 @@ async function runShopLogin(context, account, options = {}) {
         `[${tag}] 当前已处于登录态（阶段=${preFormStage.stage}），跳过账号密码流程`
       );
       await saveStorageState(context, paths);
-      const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
-      return { ok: true, reused: true, paths, ...extra };
+      if (!options.loginOnly) {
+        const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
+        return { ok: true, reused: true, paths, ...extra };
+      }
+      console.log(`[${tag}] 纯登录模式，跳过后续流程`);
+      return { ok: true, reused: true, paths };
     }
 
     // 只有在「真的处于登录表单」时才执行 tab 切换/填密码；其它阶段全部按异常走兜底路径
@@ -592,6 +662,23 @@ async function runShopLogin(context, account, options = {}) {
       );
     }
 
+    if (preFormStage.stage === STAGES.LOGIN_FORM) {
+      const authenticatedStage = await waitBrieflyForAuthenticatedStage(
+        page,
+        tag,
+        "登录表单出现后等待页面跳转时"
+      );
+      if (authenticatedStage) {
+        await saveStorageState(context, paths);
+        if (!options.loginOnly) {
+          const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
+          return { ok: true, reused: true, paths, ...extra };
+        }
+        console.log(`[${tag}] 纯登录模式，跳过后续流程`);
+        return { ok: true, reused: true, paths };
+      }
+    }
+
     // === Gate: 准备填表前再确认一次阶段 ===
     const beforeFillStage = (await detectStage(page)).stage;
     if (isAuthenticatedStage(beforeFillStage)) {
@@ -599,16 +686,44 @@ async function runShopLogin(context, account, options = {}) {
         `[${tag}] 填表前发现已登录 (stage=${beforeFillStage})，跳过填表/点击登录`
       );
       await saveStorageState(context, paths);
-      const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
-      return { ok: true, reused: true, paths, ...extra };
+      if (!options.loginOnly) {
+        const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
+        return { ok: true, reused: true, paths, ...extra };
+      }
+      console.log(`[${tag}] 纯登录模式，跳过后续流程`);
+      return { ok: true, reused: true, paths };
     }
 
     if (beforeFillStage === STAGES.LOGIN_FORM) {
       console.log(`[${tag}] 切换到邮箱登录 tab`);
-      await switchToEmailTab(page);
+      const switchResult = await switchToEmailTab(page);
+      if (switchResult.authenticatedStage) {
+        console.log(
+          `[${tag}] 切换邮箱登录前后发现已登录 (stage=${switchResult.authenticatedStage.stage})，跳过填表/点击登录`
+        );
+        await saveStorageState(context, paths);
+        if (!options.loginOnly) {
+          const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
+          return { ok: true, reused: true, paths, ...extra };
+        }
+        console.log(`[${tag}] 纯登录模式，跳过后续流程`);
+        return { ok: true, reused: true, paths };
+      }
 
       console.log(`[${tag}] 填写邮箱与密码`);
-      await fillCredentials(page, email, password);
+      const fillResult = await fillCredentials(page, email, password);
+      if (fillResult.authenticatedStage) {
+        console.log(
+          `[${tag}] 填写邮箱密码前发现已登录 (stage=${fillResult.authenticatedStage.stage})，跳过点击登录`
+        );
+        await saveStorageState(context, paths);
+        if (!options.loginOnly) {
+          const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
+          return { ok: true, reused: true, paths, ...extra };
+        }
+        console.log(`[${tag}] 纯登录模式，跳过后续流程`);
+        return { ok: true, reused: true, paths };
+      }
       await ensureAgreementChecked(page);
     } else if (beforeFillStage === STAGES.CAPTCHA) {
       console.log(`[${tag}] 进入页面即遇滑块，直接跳到滑块处理阶段`);
@@ -616,8 +731,32 @@ async function runShopLogin(context, account, options = {}) {
       console.warn(
         `[${tag}] 未能识别为登录表单阶段 (${beforeFillStage})，仍按标准流程执行一次填表`
       );
-      await switchToEmailTab(page);
-      await fillCredentials(page, email, password);
+      const switchResult = await switchToEmailTab(page);
+      if (switchResult.authenticatedStage) {
+        console.log(
+          `[${tag}] 切换邮箱登录前后发现已登录 (stage=${switchResult.authenticatedStage.stage})，跳过填表/点击登录`
+        );
+        await saveStorageState(context, paths);
+        if (!options.loginOnly) {
+          const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
+          return { ok: true, reused: true, paths, ...extra };
+        }
+        console.log(`[${tag}] 纯登录模式，跳过后续流程`);
+        return { ok: true, reused: true, paths };
+      }
+      const fillResult = await fillCredentials(page, email, password);
+      if (fillResult.authenticatedStage) {
+        console.log(
+          `[${tag}] 填写邮箱密码前发现已登录 (stage=${fillResult.authenticatedStage.stage})，跳过点击登录`
+        );
+        await saveStorageState(context, paths);
+        if (!options.loginOnly) {
+          const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
+          return { ok: true, reused: true, paths, ...extra };
+        }
+        console.log(`[${tag}] 纯登录模式，跳过后续流程`);
+        return { ok: true, reused: true, paths };
+      }
       await ensureAgreementChecked(page);
     }
 
@@ -628,8 +767,12 @@ async function runShopLogin(context, account, options = {}) {
         `[${tag}] 点登录前发现已登录 (stage=${beforeClickStage})，跳过点击`
       );
       await saveStorageState(context, paths);
-      const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
-      return { ok: true, reused: true, paths, ...extra };
+      if (!options.loginOnly) {
+        const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
+        return { ok: true, reused: true, paths, ...extra };
+      }
+      console.log(`[${tag}] 纯登录模式，跳过后续流程`);
+      return { ok: true, reused: true, paths };
     }
 
     if (beforeClickStage === STAGES.LOGIN_FORM) {
@@ -702,8 +845,12 @@ async function runShopLogin(context, account, options = {}) {
       `[${tag}] 登录态已保存到 ${paths.storageStatePath}`
     );
 
-    const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
-    return { ok: true, reused: false, paths, ...extra };
+    if (!options.loginOnly) {
+      const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
+      return { ok: true, reused: false, paths, ...extra };
+    }
+    console.log(`[${tag}] 纯登录模式，跳过后续流程`);
+    return { ok: true, reused: false, paths };
   } catch (error) {
     // 保留一张失败截图便于排查
     try {

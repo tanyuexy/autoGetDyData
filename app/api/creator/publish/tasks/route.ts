@@ -8,7 +8,6 @@ import {
   type CreatorPublishPayload,
   type CreatorPublishTask,
 } from "@/lib/creatorPublishStore";
-import { importPublishTasksFromFeishu } from "@/lib/feishu/service";
 
 export const maxDuration = 0;
 
@@ -72,16 +71,6 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json();
     const action = String(body.action || "").trim();
     const id = String(body.id || "").trim();
-
-    if (action === "refresh-from-feishu") {
-      const summary = await importPublishTasksFromFeishu({
-        autoStart: false,
-        allowCreate: false,
-        logger: () => {},
-      });
-      const tasks = await readCreatorPublishTasks();
-      return NextResponse.json({ ok: true, summary, tasks });
-    }
 
     if (action === "kill-all") {
       const tasks = await readCreatorPublishTasks();

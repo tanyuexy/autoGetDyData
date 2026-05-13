@@ -14,6 +14,7 @@ interface Props {
   emails: EmailEntry[];
   onChange: (emails: EmailEntry[]) => void;
   onLogin?: (email: string) => void;
+  refreshKey?: number;
 }
 
 function formatShortDateTime(value?: string | null) {
@@ -30,7 +31,7 @@ function formatShortDateTime(value?: string | null) {
   }).format(date);
 }
 
-export default function ConfigEmailTab({ emails: initial, onChange, onLogin }: Props) {
+export default function ConfigEmailTab({ emails: initial, onChange, onLogin, refreshKey = 0 }: Props) {
   const { message } = App.useApp();
   const [emails, setEmails] = useState<EmailEntry[]>(initial || []);
   const [accounts, setAccounts] = useState<ShopAccount[]>([]);
@@ -73,6 +74,11 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin }: P
     refreshLoginStatus();
   }, []);
 
+  useEffect(() => {
+    if (!refreshKey) return;
+    refreshLoginStatus();
+  }, [refreshKey]);
+
   async function handleVerify(email: string) {
     setVerifying((prev) => new Set(prev).add(email));
     try {
@@ -86,6 +92,8 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin }: P
 
       if (result.verified) {
         message.success(`账号 ${email} 验证通过 (${(result.elapsed / 1000).toFixed(1)}s)`);
+      } else if (result.status === "warning") {
+        message.warning(`账号 ${email} 验证不确定: ${result.detail}`);
       } else {
         message.warning(`账号 ${email} 验证失败: ${result.detail}`);
       }
@@ -95,13 +103,14 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin }: P
           if (a.email === email) {
             return {
               ...a,
-              cookieStatus: result.verified ? "valid" : "expired",
+              cookieStatus: result.status || (result.verified ? "valid" : "expired"),
               cookieDetail: result.detail,
             };
           }
           return a;
         })
       );
+      await refreshLoginStatus();
     } catch (e: any) {
       message.error(`验证失败: ${e.message || e}`);
     }
@@ -247,7 +256,7 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin }: P
               <Button
                 size="small"
                 type="primary"
-                disabled={!!hasState}
+                disabled={!!hasState && acc?.cookieStatus === "valid"}
                 onClick={() => onLogin(row.email)}
               >
                 登录

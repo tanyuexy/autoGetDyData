@@ -33,6 +33,7 @@ function splitDescription(text) {
       }
       return "";
     })
+    .replace(/(^|\s)#(?=\s|$)/g, " ")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
@@ -43,6 +44,13 @@ function splitDescription(text) {
   }
 
   return { body, hashtags, plainHashtags };
+}
+
+function normalizeDescriptionForPublish(text) {
+  const { body, hashtags, plainHashtags } = splitDescription(text);
+  const topicText = hashtags.map((tag) => `#${tag}`).join(" ");
+  const normalizedText = [body, topicText].filter(Boolean).join("\n\n");
+  return { body, hashtags, plainHashtags, normalizedText };
 }
 
 async function getEditor(page) {
@@ -57,6 +65,14 @@ async function getEditor(page) {
 
 async function focusEditorEnd(editor) {
   await editor.click();
+  await editor.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }).catch(() => {});
   const endKeys =
     process.platform === "darwin"
       ? ["Meta+ArrowDown", "Meta+End", "Control+End"]
@@ -81,14 +97,85 @@ async function closeMentionSuggest(page) {
   }
 }
 
-async function typeTopicAndConfirmBySpace(page, editor, topic, isFirstTopic) {
+async function getRecognizedTopicTexts(page) {
+  const topicEls = page.locator('[data-mention="#"] span, [class*="topic"], [class*="hashtag"]');
+  const topicCount = await topicEls.count().catch(() => 0);
+  const topicTexts = [];
+  for (let i = 0; i < topicCount; i += 1) {
+    const text = (await topicEls.nth(i).textContent().catch(() => "")).trim();
+    if (text) topicTexts.push(text);
+  }
+  return topicTexts;
+}
+
+function topicTextMatches(actualText, expectedTopic) {
+  const actual = cleanHashtag(actualText.replace(/^#/, ""));
+  const expected = cleanHashtag(expectedTopic);
+  if (!actual || !expected) return false;
+  return actual.includes(expected) || expected.includes(actual);
+}
+
+async function waitForTopicRecognized(page, topic, timeout = 2500) {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    const topicTexts = await getRecognizedTopicTexts(page);
+    if (topicTexts.some((text) => topicTextMatches(text, topic))) {
+      return true;
+    }
+    await page.waitForTimeout(200);
+  }
+  return false;
+}
+
+async function confirmPendingTopic(page, topic) {
+  const confirmKeys = ["Space", "Enter", "Tab"];
+  for (const key of confirmKeys) {
+    await page.keyboard.press(key).catch(() => {});
+    if (await waitForTopicRecognized(page, topic, 1200)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function typeTopicDirectly(page, editor, topic, isFirstTopic) {
   await focusEditorEnd(editor);
   await page.waitForTimeout(300);
   await page.keyboard.type(`${isFirstTopic ? "" : " "}#${topic}`);
   await page.waitForTimeout(500);
-  await page.keyboard.press("Space");
-  await page.waitForTimeout(500);
+  return confirmPendingTopic(page, topic);
+}
+
+async function typeTopicFromToolbar(page, editor, topic) {
+  const button = page.locator('.toolbar-button-spPS4r:has-text("#添加话题"), text="#添加话题"').first();
+  if (!(await button.isVisible({ timeout: 800 }).catch(() => false))) {
+    return false;
+  }
+
+  await button.click().catch(() => {});
+  await page.waitForTimeout(300);
+  await page.keyboard.type(topic);
+  if (await confirmPendingTopic(page, topic)) {
+    return true;
+  }
+
+  await focusEditorEnd(editor);
+  await page.keyboard.type(` #${topic}`);
+  return confirmPendingTopic(page, topic);
+}
+
+async function typeTopicAndConfirm(page, editor, topic, isFirstTopic) {
+  if (await waitForTopicRecognized(page, topic, 300)) {
+    return true;
+  }
+
+  let recognized = await typeTopicDirectly(page, editor, topic, isFirstTopic);
+  if (!recognized) {
+    recognized = await typeTopicFromToolbar(page, editor, topic);
+  }
+
   await closeMentionSuggest(page);
+  return recognized || waitForTopicRecognized(page, topic, 1000);
 }
 
 async function insertTopicSectionBreak(page, editor, body) {
@@ -106,9 +193,12 @@ async function addHashtags(page, topics) {
   for (let i = 0; i < topics.length; i += 1) {
     const topic = topics[i];
     info(`话题 ${i + 1}/${topics.length}  #${topic}`);
-    await typeTopicAndConfirmBySpace(page, editor, topic, i === 0);
-    step(`已输入: #${topic}`);
-    successCount++;
+    if (await typeTopicAndConfirm(page, editor, topic, i === 0)) {
+      step(`已识别: #${topic}`);
+      successCount++;
+    } else {
+      step(`未识别: #${topic}`);
+    }
   }
 
   step(`话题添加完成: ${successCount}/${topics.length}`);
@@ -122,8 +212,11 @@ async function fillTitleAndDescription(page, title, description) {
   await setTextLikeInput(titleInput, title || "");
 
   const descText = description || "";
-  const { body, hashtags, plainHashtags } = splitDescription(descText);
+  const { body, hashtags, plainHashtags, normalizedText } = normalizeDescriptionForPublish(descText);
   step(`正文拆分: 长度 ${body.length}，话题标签 ${hashtags.length} 个`);
+  if (normalizedText !== descText.trim()) {
+    info(`正文已归一化: ${normalizedText.replace(/\n+/g, " / ")}`);
+  }
   if (plainHashtags.length > 0) {
     info(`超长话题已保留为正文: ${plainHashtags.map((tag) => `#${tag}`).join(", ")}`);
   }
@@ -158,5 +251,6 @@ async function fillTitleAndDescription(page, title, description) {
 
 module.exports = {
   fillTitleAndDescription,
+  normalizeDescriptionForPublish,
   splitDescription,
 };

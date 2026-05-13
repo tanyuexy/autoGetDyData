@@ -21,7 +21,7 @@ const {
   checkScheduleSet,
   checkProductLinkSet,
   checkSelfDeclarationSet,
-  splitDescription,
+  normalizeDescriptionForPublish,
   MAX_HASHTAGS,
   scaledMs,
   waitForPageSettled,
@@ -161,7 +161,7 @@ async function runPublishVideo(options) {
     await gotoVideoPublishPage(page);
     await optimizePublishPageForViewing(page);
 
-    const { body: expectedBody, hashtags: expectedHashtags } = splitDescription(String(options.desc || ""));
+    const { body: expectedBody, hashtags: expectedHashtags } = normalizeDescriptionForPublish(String(options.desc || ""));
     const limitedHashtags = expectedHashtags.slice(0, MAX_HASHTAGS);
 
     stage(3, `上传视频素材: ${videoKey}`);

@@ -24,7 +24,7 @@ const {
   checkProductLinkSet,
   checkSelfDeclarationSet,
   checkMusicSelected,
-  splitDescription,
+  normalizeDescriptionForPublish,
   MAX_HASHTAGS,
   scaledMs,
   waitForPageSettled,
@@ -239,7 +239,7 @@ async function runPublishArticle(options) {
     await ensureLoggedIn(page, accountName, paths);
     await saveStepDebug(page, accountName, "01-login", options);
 
-    const { body: expectedBody, hashtags: expectedHashtags } = splitDescription(String(options.desc || ""));
+    const { body: expectedBody, hashtags: expectedHashtags } = normalizeDescriptionForPublish(String(options.desc || ""));
     const limitedHashtags = expectedHashtags.slice(0, MAX_HASHTAGS);
 
     stage(2, "进入图文发布页");
