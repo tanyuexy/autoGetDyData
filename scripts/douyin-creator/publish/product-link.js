@@ -1,3 +1,5 @@
+const { step, info } = require("./logger");
+
 async function dismissBlockingPortals(page) {
   await page.keyboard.press("Escape").catch(() => {});
   await page.waitForTimeout(250);
@@ -42,18 +44,18 @@ async function fillProductEditModal(page, productTitle, approvalNumber) {
   await page.waitForTimeout(500);
 
   if (!(await editModal.isVisible().catch(() => false))) {
-    console.log("  → 无弹窗，链接可能已直接添加");
+    info("无弹窗，链接可能已直接添加");
     return;
   }
 
-  console.log("  商品编辑弹窗已打开");
+  step("商品编辑弹窗已打开");
   const modalContent = await editModal.evaluate((m) => ({
     text: m.textContent.trim().slice(0, 500),
     inputs: Array.from(m.querySelectorAll('input')).map((i) => ({ ph: i.placeholder, v: i.value })),
     buttons: Array.from(m.querySelectorAll('button, [class*="btn"]')).map((b) => b.textContent.trim().slice(0, 20)).filter(Boolean),
   })).catch(() => null);
   if (modalContent?.inputs?.length) {
-    modalContent.inputs.forEach((inp) => console.log(`    [输入框] "${inp.ph}"`));
+    modalContent.inputs.forEach((inp) => info(`[输入框] "${inp.ph}"`));
   }
 
   async function fillFieldByLabel(labelText, value, placeholderSelector) {
@@ -62,25 +64,25 @@ async function fillProductEditModal(page, productTitle, approvalNumber) {
     const directInput = editModal.locator(placeholderSelector).first();
     if (await directInput.isVisible().catch(() => false)) {
       await directInput.fill(value);
-      console.log(`  ✓ 已填写${labelText}: ${value}`);
+      step(`已填写${labelText}: ${value}`);
       return;
     }
 
     const byLabel = editModal.locator(`xpath=.//*[normalize-space()="${labelText}"]/ancestor::*[contains(@class,"semi-form-field")][1]//input`).first();
     if (await byLabel.isVisible().catch(() => false)) {
       await byLabel.fill(value);
-      console.log(`  ✓ 已填写${labelText}: ${value}`);
+      step(`已填写${labelText}: ${value}`);
       return;
     }
 
     const fallbackByText = editModal.locator(`xpath=.//*[contains(normalize-space(),"${labelText}")]/following::input[1]`).first();
     if (await fallbackByText.isVisible().catch(() => false)) {
       await fallbackByText.fill(value);
-      console.log(`  ✓ 已填写${labelText}: ${value}`);
+      step(`已填写${labelText}: ${value}`);
       return;
     }
 
-    console.log(`  ⚠️ 未找到${labelText}输入框`);
+    info(`⚠️ 未找到${labelText}输入框`);
   }
 
   await fillFieldByLabel("商品短标题", productTitle, 'input[placeholder="请输入商品短标题"], input[placeholder*="短标题"]');
@@ -90,22 +92,22 @@ async function fillProductEditModal(page, productTitle, approvalNumber) {
   if (await finishBtn.isVisible().catch(() => false)) {
     await finishBtn.click();
     await page.waitForTimeout(3000);
-    console.log("  ✓ 已点击完成编辑");
+    step("已点击完成编辑");
   } else {
-    console.log("  ⚠️ 未找到完成编辑按钮，停留在弹窗供查看");
+    info("⚠️ 未找到完成编辑按钮，停留在弹窗供查看");
   }
 }
 
 async function selectCartAndLinkForVideo(page, productLink, productTitle, approvalNumber) {
   if (!productLink) {
-    console.log("  [跳过] 挂车链接为空，跳过添加标签和购物车");
+    info("挂车链接为空，跳过");
     return;
   }
-  console.log("设置购物车...");
+  step("设置购物车");
 
   const tagSelect = page.locator('section:has-text("添加标签") .semi-select, .select-lJTtRL, .anchor-container-hgj7gj .semi-select').first();
   if (!(await tagSelect.isVisible().catch(() => false))) {
-    console.log("  未找到购物车下拉框，跳过");
+    info("未找到购物车下拉框，跳过");
     return;
   }
   await dismissBlockingPortals(page);
@@ -116,17 +118,17 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
   if (await cartOpt.isVisible({ timeout: 3000 }).catch(() => false)) {
     await clickEvenIfCovered(cartOpt, "购物车选项");
     await page.waitForTimeout(2000);
-    console.log("  已选择购物车");
+    step("已选择购物车");
   } else {
     await page.keyboard.press("Escape");
-    console.log("  未找到购物车选项，跳过");
+    info("未找到购物车选项，跳过");
     return;
   }
 
   const linkInput = page.locator('#douyin_creator_pc_anchor_jump input, section:has-text("添加标签") input, input[placeholder*="粘贴商品"], input[placeholder*="链接"]').first();
   if (await linkInput.isVisible().catch(() => false)) {
     await linkInput.fill(productLink);
-    console.log("  链接已填入");
+    step("链接已填入");
     await page.waitForTimeout(3000);
   }
 
@@ -154,10 +156,10 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
 
 async function selectCartAndLinkForArticle(page, productLink, productTitle, approvalNumber) {
   if (!productLink) {
-    console.log("  [跳过] 挂车链接为空，跳过添加标签和购物车");
+    info("挂车链接为空，跳过");
     return;
   }
-  console.log("设置购物车...");
+  step("设置购物车");
 
   const anchor = page.locator('#douyin_creator_pc_anchor_jump');
   const cartSelect = anchor.locator('.semi-select').first();
@@ -165,7 +167,7 @@ async function selectCartAndLinkForArticle(page, productLink, productTitle, appr
   const select = (await cartSelect.isVisible().catch(() => false)) ? cartSelect : tagSelect;
 
   if (!(await select.isVisible().catch(() => false))) {
-    console.log("  未找到购物车下拉框，跳过");
+    info("未找到购物车下拉框，跳过");
     return;
   }
 
@@ -176,7 +178,7 @@ async function selectCartAndLinkForArticle(page, productLink, productTitle, appr
   if (await cartOpt.isVisible().catch(() => false)) {
     await clickEvenIfCovered(cartOpt, "购物车选项");
     await page.waitForTimeout(2000);
-    console.log("  已选择购物车");
+    step("已选择购物车");
   } else {
     await page.keyboard.press("Escape");
     console.log("  未找到购物车选项，跳过");

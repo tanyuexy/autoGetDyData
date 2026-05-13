@@ -494,16 +494,21 @@ async function syncPublishTasks(options = {}) {
         }
       } catch (e) {
         log(`    ❌ 同步失败: ${e.message}`);
-        try {
-          await updateBitableRecord(
-            feishuCfg,
-            accessToken,
-            record.record_id,
-            { 已创建任务: formatImportErrorStatus(e) }
-          );
-          log("    ↺ 已回写飞书已创建任务列为失败原因");
-        } catch (writebackError) {
-          log(`    ⚠️ 回写飞书失败: ${writebackError.message}`);
+        const f = record.fields || {};
+        if (String(f["已创建任务"] || "").trim() === "是") {
+          log("    ↺ 跳过飞书回写：已创建任务已为「是」");
+        } else {
+          try {
+            await updateBitableRecord(
+              feishuCfg,
+              accessToken,
+              record.record_id,
+              { 已创建任务: formatImportErrorStatus(e) }
+            );
+            log("    ↺ 已回写飞书已创建任务列为失败原因");
+          } catch (writebackError) {
+            log(`    ⚠️ 回写飞书失败: ${writebackError.message}`);
+          }
         }
         failedCount++;
       }

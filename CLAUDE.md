@@ -65,3 +65,11 @@ To add a new page:
 3. Add API routes under `app/api/<route>/`
 4. If it triggers a Playwright task: register a route in `scripts/run.js`, add namespace to `TaskNamespace` in `lib/taskManager.ts`
 5. If persistent data: create a service in `lib/`, add MongoDB indexes in `lib/db/mongo.ts`, define types in `types/index.ts`
+
+### antd 组件使用规范
+
+使用 antd 组件前，先确认该属性/方法在当前版本是否已弃用（deprecated）。遇到控制台 deprecation warning 时主动修复，不要留下已知的弃用警告。
+
+已知的弃用项：
+- `InputNumber` 的 `addonBefore` / `addonAfter` → 用 `Space.Compact` + `Button` 替代
+- `Modal` 的 `destroyOnClose` → 用 `destroyOnHidden` 替代

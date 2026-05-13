@@ -62,5 +62,10 @@ export async function ensureMongoIndexes(): Promise<void> {
       { key: { postId: 1 }, name: "postId_unique", unique: true, sparse: true },
       { key: { reviewStatus: 1 }, name: "reviewStatus" },
     ]),
+    db.collection("creator_comment_items").createIndexes([
+      { key: { accountName: 1, fetchedAt: -1 }, name: "account_fetchedAt" },
+      { key: { cid: 1 }, name: "cid_sparse", sparse: true },
+      { key: { awemeId: 1 }, name: "awemeId" },
+    ]),
   ]);
 }

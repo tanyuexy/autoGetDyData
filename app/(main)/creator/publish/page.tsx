@@ -790,7 +790,7 @@ export default function CreatorPublishPage() {
     {
       title: "更新时间",
       dataIndex: "updatedAt",
-      width: 92,
+      width: 100,
       align: "center" as const,
       render: (v: string) => dayjs(v).format("MM-DD HH:mm"),
     },

@@ -79,6 +79,10 @@ export async function generateFeishuTaskAiContent(options: {
   });
 }
 
+function feishuCreatedTaskFieldIsYes(fields: Record<string, unknown> | undefined): boolean {
+  return String((fields || {})["已创建任务"] ?? "").trim() === "是";
+}
+
 export async function writeFeishuTaskStatus(options: {
   recordId: string;
   statusText: string;
@@ -87,7 +91,7 @@ export async function writeFeishuTaskStatus(options: {
   await prepareProjectConfigEnv("task");
   const { loadFeishuBitableConfigForProfile } = require("@/lib/feishu/core/config");
   const { getValidAccessToken } = require("@/lib/feishu/core/oauth");
-  const { updateBitableRecord } = require("@/lib/feishu/core/bitable");
+  const { getBitableRecord, updateBitableRecord } = require("@/lib/feishu/core/bitable");
 
   const recordId = String(options.recordId || "").trim();
   const statusText = String(options.statusText || "").replace(/\s+/g, " ").trim().slice(0, 200);
@@ -97,6 +101,16 @@ export async function writeFeishuTaskStatus(options: {
 
   const cfg = loadFeishuBitableConfigForProfile("task");
   const tokenCache = await getValidAccessToken(cfg);
+
+  try {
+    const existing = await getBitableRecord(cfg, tokenCache.accessToken, recordId);
+    if (feishuCreatedTaskFieldIsYes(existing?.fields as Record<string, unknown> | undefined)) {
+      return;
+    }
+  } catch {
+    // 读失败时仍尝试写入，与原先「读审批失败仍更新」行为一致
+  }
+
   const fields: Record<string, string> = { 已创建任务: statusText };
   if (approvalText) fields.审批 = approvalText;
   await updateBitableRecord(cfg, tokenCache.accessToken, recordId, fields);
@@ -114,6 +128,10 @@ export async function markFeishuTaskPublished(recordId: string) {
     const cfg = loadFeishuBitableConfigForProfile("task");
     const tokenCache = await getValidAccessToken(cfg);
     const record = await getBitableRecord(cfg, tokenCache.accessToken, recordId);
+
+    if (feishuCreatedTaskFieldIsYes(record?.fields as Record<string, unknown> | undefined)) {
+      return;
+    }
 
     const approvalValue = String(record?.fields?.审批 ?? "").trim();
     if (approvalValue && approvalValue.includes("异常待修改")) {

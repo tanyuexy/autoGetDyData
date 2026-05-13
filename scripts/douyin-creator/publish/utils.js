@@ -10,7 +10,19 @@ const {
   scrollPublishFormToBottom,
   optimizePublishPageForViewing,
   clickPublishButton,
+  checkVideoUploaded,
+  checkImagesUploaded,
+  checkTitleFilled,
+  checkBodyFilled,
+  checkHashtagsSet,
+  checkScheduleSet,
+  checkProductLinkSet,
+  checkSelfDeclarationSet,
+  checkMusicSelected,
 } = require("./runtime");
+const { splitDescription } = require("./editor");
+
+const MAX_HASHTAGS = 5;
 
 const MATERIALS_DIR = path.resolve(
   process.env.CREATOR_MATERIALS_DIR ||
@@ -38,4 +50,15 @@ module.exports = {
   scrollPublishFormToBottom,
   optimizePublishPageForViewing,
   clickPublishButton,
+  checkVideoUploaded,
+  checkImagesUploaded,
+  checkTitleFilled,
+  checkBodyFilled,
+  checkHashtagsSet,
+  checkScheduleSet,
+  checkProductLinkSet,
+  checkSelfDeclarationSet,
+  checkMusicSelected,
+  splitDescription,
+  MAX_HASHTAGS,
 };

@@ -1,4 +1,5 @@
 const { waitVisible, setTextLikeInput } = require("./dom");
+const { step, info } = require("./logger");
 const MAX_HASHTAGS = 5;
 const MAX_RECOGNIZED_HASHTAG_LENGTH = 10;
 const MENTION_SUGGEST_SELECTOR = '.mention-suggest-mount-dom, [class*="mention-suggest"], [role="listbox"]';
@@ -104,14 +105,13 @@ async function addHashtags(page, topics) {
 
   for (let i = 0; i < topics.length; i += 1) {
     const topic = topics[i];
-    console.log(`  [话题 ${i + 1}/${topics.length}] #${topic}`);
-
+    info(`话题 ${i + 1}/${topics.length}  #${topic}`);
     await typeTopicAndConfirmBySpace(page, editor, topic, i === 0);
-    console.log(`    ✓ 已输入话题并按空格: #${topic}`);
+    step(`已输入: #${topic}`);
     successCount++;
   }
 
-  console.log(`话题添加完成: ${successCount}/${topics.length}`);
+  step(`话题添加完成: ${successCount}/${topics.length}`);
 }
 
 async function fillTitleAndDescription(page, title, description) {
@@ -123,11 +123,9 @@ async function fillTitleAndDescription(page, title, description) {
 
   const descText = description || "";
   const { body, hashtags, plainHashtags } = splitDescription(descText);
-  console.log(`正文拆分完成: 正文长度 ${body.length}，识别到可自动话题化标签 ${hashtags.length} 个`);
+  step(`正文拆分: 长度 ${body.length}，话题标签 ${hashtags.length} 个`);
   if (plainHashtags.length > 0) {
-    console.log(
-      `以下话题超过 ${MAX_RECOGNIZED_HASHTAG_LENGTH} 个字，已去掉 # 后保留为正文: ${plainHashtags.map((tag) => `#${tag}`).join(", ")}`
-    );
+    info(`超长话题已保留为正文: ${plainHashtags.map((tag) => `#${tag}`).join(", ")}`);
   }
 
   let editor;
@@ -138,7 +136,6 @@ async function fillTitleAndDescription(page, title, description) {
     editor = await waitVisible(page, [
       '[data-placeholder*="描述"]',
       '[contenteditable="true"]',
-      'textarea[placeholder*="描述"]',
     ]);
   }
 
@@ -146,17 +143,15 @@ async function fillTitleAndDescription(page, title, description) {
   if (hashtags.length > 0) {
     await insertTopicSectionBreak(page, editor, body);
   }
-  console.log("已填写标题与正文");
+  step("已填写标题与正文");
   await page.waitForTimeout(500);
 
   if (hashtags.length > 0) {
     const limitedHashtags = hashtags.slice(0, MAX_HASHTAGS);
     if (hashtags.length > MAX_HASHTAGS) {
-      console.log(
-        `话题标签共 ${hashtags.length} 个，平台最多添加 ${MAX_HASHTAGS} 个，已跳过后续 ${hashtags.length - MAX_HASHTAGS} 个`
-      );
+      info(`平台最多 ${MAX_HASHTAGS} 个话题，已跳过 ${hashtags.length - MAX_HASHTAGS} 个`);
     }
-    console.log(`准备添加 ${limitedHashtags.length} 个话题标签: ${limitedHashtags.join(", ")}`);
+    step(`添加 ${limitedHashtags.length} 个话题: ${limitedHashtags.join(", ")}`);
     await addHashtags(page, limitedHashtags);
   }
 }

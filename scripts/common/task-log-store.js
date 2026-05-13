@@ -4,6 +4,9 @@ const crypto = require("crypto");
 
 const DEFAULT_TASK_LOGS_DIR = "storage/task-logs";
 
+/** Rolling window of `YYYY-MM-DD` folders for listing logs and resolving a taskId to its file. */
+const TASK_LOG_DAY_LOOKBACK = 30;
+
 const PREFIX_MAP = {
   "creator-publish-": "creator-publish",
   "creator-feishu-sync-": "creator-feishu-sync",
@@ -174,8 +177,17 @@ function parseDone(content) {
 }
 
 function candidateDates(taskId) {
-  const dates = [new Date().toISOString().slice(0, 10)];
-  const match = String(taskId || "").match(/^(?:creator-|shop-|feishu-|)(?:publish-|export-|login-|sync-|backup-)(\d{4}-\d{2}-\d{2})/);
+  const dates = [];
+  const now = new Date();
+  for (let i = 0; i < TASK_LOG_DAY_LOOKBACK; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    const day = d.toISOString().slice(0, 10);
+    if (!dates.includes(day)) dates.push(day);
+  }
+  const match = String(taskId || "").match(
+    /^(?:creator-|shop-|feishu-|)(?:publish-|export-|login-|sync-|backup-)(\d{4}-\d{2}-\d{2})/
+  );
   if (match && !dates.includes(match[1])) dates.unshift(match[1]);
   return dates;
 }
@@ -280,7 +292,7 @@ function listRecentTaskLogs(limit = 10) {
   const resultsByKey = new Map();
   const now = new Date();
   const dates = new Set();
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < TASK_LOG_DAY_LOOKBACK; i++) {
     const date = new Date(now);
     date.setDate(date.getDate() - i);
     dates.add(date.toISOString().slice(0, 10));

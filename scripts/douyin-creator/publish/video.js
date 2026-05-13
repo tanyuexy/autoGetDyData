@@ -4,6 +4,7 @@ const { ensureDir, fileExists } = require("../../common/fs");
 const { getAccountPaths } = require("../lib/accounts");
 const { PUBLISH_BROWSER_VIEWPORT, HEADLESS } = require("../lib/env");
 const { attachQrDataUrlSniffer } = require("../lib/qr");
+const { stage, step } = require("./logger");
 const {
   MATERIALS_DIR,
   saveDebugArtifacts,
@@ -13,6 +14,15 @@ const {
   ensureLoggedIn,
   optimizePublishPageForViewing,
   clickPublishButton,
+  checkVideoUploaded,
+  checkTitleFilled,
+  checkBodyFilled,
+  checkHashtagsSet,
+  checkScheduleSet,
+  checkProductLinkSet,
+  checkSelfDeclarationSet,
+  splitDescription,
+  MAX_HASHTAGS,
 } = require("./utils");
 const {
   logVideoPublishStart,
@@ -24,10 +34,6 @@ const { selectCartAndLinkForVideo } = require("./product-link");
 let activeBrowser = null;
 let activeContext = null;
 let shuttingDown = false;
-
-function logStage(index, text) {
-  console.log(`[阶段 ${index}] ${text}`);
-}
 
 async function shutdown(signal) {
   if (shuttingDown) return;
@@ -146,45 +152,69 @@ async function runPublishVideo(options) {
     attachQrDataUrlSniffer(page);
     logVideoPublishStart(accountName, options);
 
-    logStage(1, "检查登录状态");
+    stage(1, "检查登录状态");
     await ensureLoggedIn(page, accountName, paths);
 
-    logStage(2, "进入视频发布页");
+    stage(2, "进入视频发布页");
     await gotoVideoPublishPage(page);
     await optimizePublishPageForViewing(page);
 
-    logStage(3, `上传视频素材: ${videoKey}`);
+    const { body: expectedBody, hashtags: expectedHashtags } = splitDescription(String(options.desc || ""));
+    const limitedHashtags = expectedHashtags.slice(0, MAX_HASHTAGS);
+
+    stage(3, `上传视频素材: ${videoKey}`);
     await uploadVideo(page, videoKey, accountName);
-    logStage(4, "选择推荐封面");
+    await checkVideoUploaded(page);
+
+    stage(4, "选择推荐封面");
     await selectFirstAiCover(page);
-    logStage(5, "校验并设置定时发布");
-    await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
-    logStage(6, "设置购物车商品链接");
-    await selectCartAndLinkForVideo(
-      page,
-      String(options.productLink || ""),
-      String(options.productTitle || ""),
-      String(options.approvalNumber || "")
-    );
-    logStage(7, "填写标题、正文与话题");
+
+    if (String(options.scheduleAt || "")) {
+      stage(5, "校验并设置定时发布");
+      await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
+      await checkScheduleSet(page);
+    } else {
+      stage(5, "定时发布（跳过，未配置）");
+    }
+
+    if (String(options.productLink || "")) {
+      stage(6, "设置购物车商品链接");
+      await selectCartAndLinkForVideo(
+        page,
+        String(options.productLink || ""),
+        String(options.productTitle || ""),
+        String(options.approvalNumber || "")
+      );
+      await checkProductLinkSet(page);
+    } else {
+      stage(6, "购物车商品链接（跳过，未配置）");
+    }
+
+    stage(7, "填写标题、正文与话题");
     await fillTitleAndDescription(
       page,
       String(options.title || ""),
       String(options.desc || "")
     );
-    logStage(8, "设置自主声明");
-    await selectSelfDeclaration(page, options.isAiContent === true || options.isAiContent === "true");
+    await checkTitleFilled(page, String(options.title || ""));
+    await checkBodyFilled(page, expectedBody);
+    await checkHashtagsSet(page, limitedHashtags);
+
+    stage(8, "设置自主声明");
+    const isAi = options.isAiContent === true || options.isAiContent === "true";
+    await selectSelfDeclaration(page, isAi);
+    await checkSelfDeclarationSet(page, isAi);
 
     const { publishEnabled, publishWaitSec } = resolveVideoPublishControls(options);
 
     if (publishEnabled) {
-      logStage(9, "点击发布按钮");
+      stage(9, "点击发布按钮");
       await clickPublishButton(page);
     } else {
-      logStage(9, "跳过点击发布（publishEnabled=false）");
+      stage(9, "跳过点击发布（publishEnabled=false）");
     }
 
-    logStage(10, `发布后停留 ${publishWaitSec}s`);
+    stage(10, `发布后停留 ${publishWaitSec}s`);
     await page.waitForTimeout(publishWaitSec * 1000);
   } catch (error) {
     await saveDebugArtifacts(page, accountName, "run-failed").catch(() => {});

@@ -1,20 +1,21 @@
 const { waitVisible, setTextLikeInput } = require("./dom");
+const { step, info } = require("./logger");
 
 async function selectSelfDeclaration(page, isAiContent) {
-  console.log(`设置自主声明... (参数 isAiContent=${JSON.stringify(isAiContent)})`);
+  step(`设置自主声明 (isAiContent=${isAiContent})`);
   const targetLabel = isAiContent ? "内容由AI生成" : "无需添加自主声明";
 
   const section = page.locator('section:has(.title-cnbkZe:has-text("自主声明"))').first();
   const selectBox = section.locator('[class*="selectBox"]').first();
 
   if (!(await selectBox.isVisible().catch(() => false))) {
-    console.log("未找到自主声明下拉框，跳过");
+    info("未找到自主声明下拉框，跳过");
     return;
   }
 
   const currentText = await selectBox.locator('[class*="selectText"]').first().textContent().catch(() => "");
   if (currentText.includes(targetLabel)) {
-    console.log(`自主声明已是: ${targetLabel}`);
+    info(`自主声明已是: ${targetLabel}`);
     return;
   }
 
@@ -25,16 +26,16 @@ async function selectSelfDeclaration(page, isAiContent) {
   if (await targetOption.isVisible().catch(() => false)) {
     await targetOption.click();
     await page.waitForTimeout(500);
-    console.log(`已选择: ${targetLabel}`);
+    step(`已选择: ${targetLabel}`);
   } else {
-    console.log(`未找到选项: ${targetLabel}`);
+    info(`未找到选项: ${targetLabel}`);
   }
 
   const confirmBtn = page.locator('.semi-modal-content button:has-text("确定")').first();
   if (await confirmBtn.isVisible().catch(() => false)) {
     await confirmBtn.click();
     await page.waitForTimeout(1000);
-    console.log("已确定关闭自主声明弹窗");
+    step("已确定关闭自主声明弹窗");
   }
 }
 
@@ -103,7 +104,7 @@ async function setScheduleIfNeeded(page, scheduleAt) {
     if (active && typeof active.blur === "function") active.blur();
   }).catch(() => {});
   await page.waitForTimeout(500);
-  console.log(`已设置定时发布时间: ${text}`);
+  step(`已设置定时发布: ${text}`);
 }
 
 module.exports = {

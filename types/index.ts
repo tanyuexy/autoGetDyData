@@ -97,3 +97,20 @@ export interface ReviewItem {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface CommentItem {
+  id: string;
+  accountName: string;
+  awemeId: string;
+  cid: string;
+  text: string;
+  user: string;
+  userId: string;
+  likeCount: number;
+  replyCount: number;
+  createTime: string;
+  status: number;
+  workTitle: string;
+  workCreateTime: string;
+  fetchedAt: string;
+}
