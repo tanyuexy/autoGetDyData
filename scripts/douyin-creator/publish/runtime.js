@@ -37,13 +37,19 @@ function networkLabel(multiplier) {
  * 自动校准网络速度。在首次大页面加载后调用一次即可。
  * 测量 networkidle 耗时 vs 基准，自动提升后续等待倍率。
  */
-async function calibrateNetworkSpeed(page, { baselineMs = NETWORK_IDLE_BASELINE_MS } = {}) {
+async function calibrateNetworkSpeed(
+  page,
+  { baselineMs = NETWORK_IDLE_BASELINE_MS } = {}
+) {
   if (_calibratedMultiplier !== null) return;
   try {
     const start = Date.now();
     await page.waitForLoadState("networkidle").catch(() => {});
     const elapsed = Date.now() - start;
-    const computed = Math.min(Math.max(1, Math.round((elapsed / baselineMs) * 10) / 10), 5);
+    const computed = Math.min(
+      Math.max(1, Math.round((elapsed / baselineMs) * 10) / 10),
+      5
+    );
     _calibratedMultiplier = computed;
 
     const envNote =
@@ -244,7 +250,11 @@ async function clickPublishButton(page) {
     )
     .first();
 
-  if (!(await publishBtn.isVisible({ timeout: scaledMs(5000) }).catch(() => false))) {
+  if (
+    !(await publishBtn
+      .isVisible({ timeout: scaledMs(5000) })
+      .catch(() => false))
+  ) {
     console.log("  ⚠️ 未找到发布按钮，可能已自动发布或按钮被遮挡");
     return false;
   }
@@ -300,10 +310,10 @@ async function clickPublishButton(page) {
 
 async function checkVideoUploaded(page) {
   const selectors = [
-    'video',
+    "video",
     '[class*="cover-"]',
     'img[src*="creator-media-private.douyin.com"]',
-    'img[src^="blob:"]',
+    'img[src^="blob:"]'
   ];
   for (const sel of selectors) {
     const el = page.locator(sel).first();
@@ -323,8 +333,16 @@ async function checkImagesUploaded(page, expectedCount) {
 
   for (let attempt = 0; attempt < 15; attempt++) {
     // 页面编辑区"已添加X张图片" + 旁边的"继续添加"按钮，双重确认区域正确
-    const countText = await page.locator('text=/已添加(\\d+)张图片/').first().textContent().catch(() => "");
-    const nearby = await page.locator('button:has-text("继续添加")').first().isVisible().catch(() => false);
+    const countText = await page
+      .locator("text=/已添加(\\d+)张图片/")
+      .first()
+      .textContent()
+      .catch(() => "");
+    const nearby = await page
+      .locator('button:has-text("继续添加")')
+      .first()
+      .isVisible()
+      .catch(() => false);
     const count = (() => {
       const m = countText.match(/已添加(\d+)张图片/);
       return m && nearby ? parseInt(m[1], 10) : 0;
@@ -337,12 +355,16 @@ async function checkImagesUploaded(page, expectedCount) {
     await page.waitForTimeout(2000);
   }
 
-  throw new Error(`图文素材校验失败：期望 ${expectedCount} 张，未匹配到足够图片`);
+  throw new Error(
+    `图文素材校验失败：期望 ${expectedCount} 张，未匹配到足够图片`
+  );
 }
 
 async function checkTitleFilled(page, expectedTitle) {
   if (!expectedTitle) return;
-  const titleInput = page.locator('input[placeholder*="标题"], input[placeholder*="作品标题"]').first();
+  const titleInput = page
+    .locator('input[placeholder*="标题"], input[placeholder*="作品标题"]')
+    .first();
   const actual = (await titleInput.inputValue().catch(() => "")).trim();
   if (actual) {
     checkOk("标题校验通过");
@@ -355,21 +377,36 @@ async function checkBodyFilled(page, expectedBody) {
   if (!expectedBody) return;
   const editor = page.locator('[contenteditable="true"]').first();
   const text = (await editor.textContent().catch(() => "")).trim();
-  if (text && text.includes(expectedBody.slice(0, 20))) {
+  // 编辑器内通过 Enter 换行会插入零宽空格，统一清理后再比较
+  const clean = (s) =>
+    s
+      .replace(/[​‌‍﻿]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  if (text && clean(text).includes(clean(expectedBody.slice(0, 20)))) {
     checkOk("正文校验通过");
     return;
   }
-  throw new Error(`正文校验失败：编辑器内未找到期望正文 "${expectedBody.slice(0, 40)}"`);
+  throw new Error(
+    `正文校验失败：编辑器内未找到期望正文 "${expectedBody.slice(0, 40)}"`
+  );
 }
 
 async function checkHashtagsSet(page, expectedHashtags) {
   if (!expectedHashtags || expectedHashtags.length === 0) return;
 
-  const topicEls = page.locator('[data-mention="#"] span, [class*="topic"], [class*="hashtag"]');
+  const topicEls = page.locator(
+    '[data-mention="#"] span, [class*="topic"], [class*="hashtag"]'
+  );
   const topicCount = await topicEls.count().catch(() => 0);
   const topicTexts = [];
   for (let i = 0; i < topicCount; i++) {
-    const t = (await topicEls.nth(i).textContent().catch(() => "")).trim();
+    const t = (
+      await topicEls
+        .nth(i)
+        .textContent()
+        .catch(() => "")
+    ).trim();
     if (t) topicTexts.push(t);
   }
 
@@ -377,7 +414,13 @@ async function checkHashtagsSet(page, expectedHashtags) {
   const unmatched = [];
   for (const expected of expectedHashtags) {
     const clean = expected.replace(/\s+/g, "");
-    if (topicTexts.some((t) => t.replace(/\s+/g, "").includes(clean) || clean.includes(t.replace(/\s+/g, "")))) {
+    if (
+      topicTexts.some(
+        (t) =>
+          t.replace(/\s+/g, "").includes(clean) ||
+          clean.includes(t.replace(/\s+/g, ""))
+      )
+    ) {
       matchedCount++;
     } else {
       unmatched.push(expected);
@@ -390,13 +433,15 @@ async function checkHashtagsSet(page, expectedHashtags) {
   }
   throw new Error(
     `话题标签校验失败：${matchedCount}/${expectedHashtags.length} 匹配` +
-    `，缺失: ${unmatched.join(", ")}` +
-    `，实际: ${topicTexts.join(", ") || "(空)"}`
+      `，缺失: ${unmatched.join(", ")}` +
+      `，实际: ${topicTexts.join(", ") || "(空)"}`
   );
 }
 
 async function checkScheduleSet(page) {
-  const dateInput = page.locator('.semi-datepicker input, input[placeholder*="日期"]').first();
+  const dateInput = page
+    .locator('.semi-datepicker input, input[placeholder*="日期"]')
+    .first();
   const actual = (await dateInput.inputValue().catch(() => "")).trim();
   if (actual) {
     checkOk(`定时发布校验通过 (${actual})`);
@@ -412,11 +457,17 @@ async function checkProductLinkSet(page) {
   const cartSelectors = [
     '.semi-select-selection-text:has-text("购物车")',
     '[class*="select-dropdown-option"]:has-text("购物车")',
-    '[class*="selectText"]:has-text("购物车")',
+    '[class*="selectText"]:has-text("购物车")'
   ];
   let cartSelected = false;
   for (const sel of cartSelectors) {
-    if (await page.locator(sel).first().isVisible({ timeout: 1000 }).catch(() => false)) {
+    if (
+      await page
+        .locator(sel)
+        .first()
+        .isVisible({ timeout: 1000 })
+        .catch(() => false)
+    ) {
       cartSelected = true;
       break;
     }
@@ -427,11 +478,17 @@ async function checkProductLinkSet(page) {
   const productAddedSelectors = [
     '[class*="cart-item"]',
     '[class*="cart-container"]',
-    'text=已添加商品',
+    "text=已添加商品"
   ];
   let productAdded = false;
   for (const sel of productAddedSelectors) {
-    if (await page.locator(sel).first().isVisible({ timeout: 1000 }).catch(() => false)) {
+    if (
+      await page
+        .locator(sel)
+        .first()
+        .isVisible({ timeout: 1000 })
+        .catch(() => false)
+    ) {
       productAdded = true;
       break;
     }
@@ -464,24 +521,38 @@ async function checkProductLinkSet(page) {
 
 async function checkSelfDeclarationSet(page, isAiContent) {
   const targetLabel = isAiContent ? "内容由AI生成" : "无需添加自主声明";
-  const section = page.locator('section:has(.title-cnbkZe:has-text("自主声明"))').first();
+  const section = page
+    .locator('section:has(.title-cnbkZe:has-text("自主声明"))')
+    .first();
   if (!(await section.isVisible({ timeout: 2000 }).catch(() => false))) {
     checkOk("自主声明校验通过 (未找到声明区域)");
     return;
   }
-  const currentText = (await section.locator('[class*="selectText"]').first().textContent().catch(() => "")).trim();
+  const currentText = (
+    await section
+      .locator('[class*="selectText"]')
+      .first()
+      .textContent()
+      .catch(() => "")
+  ).trim();
   if (currentText && currentText.includes(targetLabel)) {
     checkOk(`自主声明校验通过 (${targetLabel})`);
     return;
   }
-  throw new Error(`自主声明校验失败：期望 "${targetLabel}"，实际 "${currentText || "(空)"}"`);
+  throw new Error(
+    `自主声明校验失败：期望 "${targetLabel}"，实际 "${currentText || "(空)"}"`
+  );
 }
 
 async function checkMusicSelected(page) {
   // 配乐区域有两个"选择音乐"文本：标题区 title-content-oaqcSp 和操作区 action-Q1y01k
   // 选中后标题区保持不变，操作区文字会变成歌曲名
-  const actionSpan = page.locator('span[class*="action"]:has-text("选择音乐")').first();
-  const stillDefault = await actionSpan.isVisible({ timeout: 2000 }).catch(() => false);
+  const actionSpan = page
+    .locator('span[class*="action"]:has-text("选择音乐")')
+    .first();
+  const stillDefault = await actionSpan
+    .isVisible({ timeout: 2000 })
+    .catch(() => false);
 
   if (!stillDefault) {
     checkOk("配乐校验通过");
@@ -489,8 +560,10 @@ async function checkMusicSelected(page) {
   }
 
   // 操作区仍显示"选择音乐"，检查默认占位文字是否已消失
-  const placeholder = page.locator('text=点击添加合适作品风格音乐').first();
-  const placeholderGone = !(await placeholder.isVisible({ timeout: 1000 }).catch(() => false));
+  const placeholder = page.locator("text=点击添加合适作品风格音乐").first();
+  const placeholderGone = !(await placeholder
+    .isVisible({ timeout: 1000 })
+    .catch(() => false));
 
   if (placeholderGone) {
     checkOk("配乐校验通过 (占位文字已消失)");
@@ -518,5 +591,5 @@ module.exports = {
   checkScheduleSet,
   checkProductLinkSet,
   checkSelfDeclarationSet,
-  checkMusicSelected,
+  checkMusicSelected
 };
