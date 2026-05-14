@@ -1,5 +1,6 @@
 import type { ConfigData } from "@/types";
 import { getDb } from "./db/mongo";
+import { normalizePublishMaxConcurrent, PUBLISH_MAX_CONCURRENT_DEFAULT } from "./publishConcurrency";
 
 function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigData {
   return {
@@ -13,6 +14,9 @@ function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigDa
     creatorPublish: {
       publishEnabled: data?.creatorPublish?.publishEnabled ?? true,
       publishWaitSec: data?.creatorPublish?.publishWaitSec ?? 3,
+      publishMaxConcurrent: normalizePublishMaxConcurrent(
+        data?.creatorPublish?.publishMaxConcurrent ?? PUBLISH_MAX_CONCURRENT_DEFAULT
+      ),
       automation: {
         enabled: data?.creatorPublish?.automation?.enabled ?? false,
         mode: data?.creatorPublish?.automation?.mode ?? "weekly",

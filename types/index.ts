@@ -36,6 +36,8 @@ export interface ConfigData {
   creatorPublish?: {
     publishEnabled?: boolean; // 是否点击发布按钮（默认 true）
     publishWaitSec?: number;  // 发布后停留秒数（默认 3）
+    /** API + Worker 可同时运行的发布浏览器进程上限（默认 3，范围 1–20） */
+    publishMaxConcurrent?: number;
     automation?: {
       enabled?: boolean;
       mode?: "weekly" | "interval";

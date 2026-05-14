@@ -8,12 +8,18 @@ import ConfigCreatorDatesSection from "@/components/ConfigCreatorDatesSection";
 import AccountTable from "@/components/AccountTable";
 import { useTaskContext } from "@/contexts/TaskContext";
 import type { ConfigData, CreatorAccount } from "@/types";
+import {
+  normalizePublishMaxConcurrent,
+  PUBLISH_MAX_CONCURRENT_DEFAULT,
+  PUBLISH_MAX_CONCURRENT_HARD_MAX,
+} from "@/lib/publishConcurrency";
 
 type CreatorPublishConfig = NonNullable<ConfigData["creatorPublish"]>;
 
 const DEFAULT_CREATOR_PUBLISH_CONFIG: CreatorPublishConfig = {
   publishEnabled: true,
   publishWaitSec: 3,
+  publishMaxConcurrent: PUBLISH_MAX_CONCURRENT_DEFAULT,
   automation: {
     enabled: false,
     mode: "weekly",
@@ -53,6 +59,9 @@ function normalizeCreatorPublishConfig(input?: Partial<CreatorPublishConfig> | n
   return {
     publishEnabled: input?.publishEnabled ?? DEFAULT_CREATOR_PUBLISH_CONFIG.publishEnabled,
     publishWaitSec: input?.publishWaitSec ?? DEFAULT_CREATOR_PUBLISH_CONFIG.publishWaitSec,
+    publishMaxConcurrent: normalizePublishMaxConcurrent(
+      input?.publishMaxConcurrent ?? DEFAULT_CREATOR_PUBLISH_CONFIG.publishMaxConcurrent
+    ),
     automation: {
       enabled: input?.automation?.enabled ?? DEFAULT_CREATOR_PUBLISH_CONFIG.automation!.enabled,
       mode: input?.automation?.mode ?? DEFAULT_CREATOR_PUBLISH_CONFIG.automation!.mode,
@@ -361,7 +370,7 @@ export default function ConfigPage() {
 
           <SettingSection
             title="发布行为"
-            description="控制自动发布是否真的点击提交，以及发布完成后在页面停留多久。"
+            description="控制发布并发、是否点击提交，以及发布后页面停留时长。"
           >
             <Space orientation="vertical" size={16} style={{ width: "100%" }}>
               <Space align="start" size={12}>
@@ -407,6 +416,35 @@ export default function ConfigPage() {
                     style={{ width: 92 }}
                   />
                   <Button disabled>秒</Button>
+                </Space.Compact>
+              </Space>
+
+              <Space align="center" size={16}>
+                <Space orientation="vertical" size={0}>
+                  <Typography.Text strong>发布并发进程数</Typography.Text>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    同时拉起多少个浏览器跑发布脚本（前台与后台 Worker 共用）。调高易占满内存。
+                  </Typography.Text>
+                </Space>
+                <Space.Compact>
+                  <InputNumber
+                    min={1}
+                    max={PUBLISH_MAX_CONCURRENT_HARD_MAX}
+                    value={normalizePublishMaxConcurrent(publishConfig.publishMaxConcurrent)}
+                    onChange={(v) =>
+                      autoSave({
+                        creatorPublish: {
+                          ...publishConfig,
+                          publishMaxConcurrent:
+                            v == null || !Number.isFinite(Number(v))
+                              ? normalizePublishMaxConcurrent(undefined)
+                              : normalizePublishMaxConcurrent(Number(v)),
+                        },
+                      })
+                    }
+                    style={{ width: 92 }}
+                  />
+                  <Button disabled>个</Button>
                 </Space.Compact>
               </Space>
             </Space>

@@ -20,7 +20,6 @@ const POLL_MS = Number(
     process.env.CREATOR_PUBLISH_WORKER_POLL_MS ||
     5000
 );
-const PUBLISH_MAX_CONCURRENT = Number(process.env.CREATOR_PUBLISH_MAX_CONCURRENT || 3);
 const PUBLISH_TIMEOUT_MS = Number(process.env.CREATOR_PUBLISH_TIMEOUT_MS || 30 * 60 * 1000);
 const DEFAULT_NAMESPACE_LIMITS = {
   "creator-export": 1,
@@ -321,10 +320,24 @@ async function removeRuntimeProcess(taskId) {
   await db.collection("runtime_processes").deleteOne({ taskId });
 }
 
-function namespaceLimit(namespace) {
+/** 与各 namespace 并行上限对齐；creator-publish 同时考虑 Mongo 配置与 CREATOR_PUBLISH_MAX_CONCURRENT */
+function getWorkerNamespaceLimit(namespace, appConfig) {
   const envKey = `JOB_MAX_${String(namespace || "system").toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`;
-  const fromEnv = Number(process.env[envKey]);
-  if (Number.isFinite(fromEnv) && fromEnv > 0) return Math.floor(fromEnv);
+  const fromJobEnv = Number(process.env[envKey]);
+  if (Number.isFinite(fromJobEnv) && fromJobEnv > 0) return Math.floor(fromJobEnv);
+
+  if (namespace === "creator-publish") {
+    const legacyEnv = Number(process.env.CREATOR_PUBLISH_MAX_CONCURRENT);
+    if (Number.isFinite(legacyEnv) && legacyEnv > 0) return Math.floor(legacyEnv);
+
+    const raw = Number(appConfig?.creatorPublish?.publishMaxConcurrent);
+    if (Number.isFinite(raw)) {
+      const n = Math.floor(raw);
+      if (n >= 1 && n <= 20) return n;
+    }
+    return DEFAULT_NAMESPACE_LIMITS["creator-publish"] || 3;
+  }
+
   return DEFAULT_NAMESPACE_LIMITS[namespace] || 1;
 }
 
@@ -800,7 +813,7 @@ async function reconcileStaleJobs() {
   }
 }
 
-async function processQueuedJobs() {
+async function processQueuedJobs(appConfig) {
   await reconcileStaleJobs();
   const running = await readRunningJobs();
   const runningByNamespace = new Map();
@@ -813,7 +826,7 @@ async function processQueuedJobs() {
   for (const job of queued) {
     const ns = job.namespace || "system";
     const used = runningByNamespace.get(ns) || 0;
-    if (used >= namespaceLimit(ns)) continue;
+    if (used >= getWorkerNamespaceLimit(ns, appConfig)) continue;
     const started = await startJob(job);
     if (!started) continue;
     runningByNamespace.set(ns, used + 1);
@@ -822,14 +835,16 @@ async function processQueuedJobs() {
 
 async function tick() {
   await processCreatorPublishAutomation();
-  await processQueuedJobs();
+  const appConfig = await readConfig();
+  await processQueuedJobs(appConfig);
   await reconcileStaleRunningTasks();
 
   const running = await readRunningTasks();
   const runningJobs = await readRunningJobs();
   const runningPublishJobs = runningJobs.filter((job) => job.namespace === "creator-publish").length;
   const runningAccounts = new Set(running.map((task) => task.accountName).filter(Boolean));
-  let available = Math.max(0, PUBLISH_MAX_CONCURRENT - running.length - runningPublishJobs);
+  const publishCap = getWorkerNamespaceLimit("creator-publish", appConfig);
+  let available = Math.max(0, publishCap - running.length - runningPublishJobs);
   if (available <= 0) return;
 
   const queued = await readQueuedTasks();

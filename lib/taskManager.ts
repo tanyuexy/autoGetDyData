@@ -1,6 +1,7 @@
 import type { ChildProcess } from "child_process";
 import { createChannel } from "./sseManager";
 import { getConfig } from "./configService";
+import { normalizePublishMaxConcurrent } from "./publishConcurrency";
 import { getDb } from "./db/mongo";
 import { appendTaskLog, ensureTaskLogMeta, type TaskLogMeta } from "./taskLogStore";
 import {
@@ -104,6 +105,16 @@ function getOrCreateNamespace(ns: TaskNamespace): NamespaceState {
   return state;
 }
 
+async function syncCreatorPublishConcurrencyFromConfig(): Promise<void> {
+  try {
+    const cfg = await getConfig();
+    const limit = normalizePublishMaxConcurrent(cfg.creatorPublish?.publishMaxConcurrent);
+    getOrCreateNamespace("creator-publish").maxConcurrent = limit;
+  } catch {
+    /* 保持内存中已有上限 */
+  }
+}
+
 function countMemoryRunning(ns: NamespaceState): number {
   let running = 0;
   for (const id of ns.tasks.keys()) {
@@ -134,6 +145,9 @@ async function countRegistryRunning(namespace: TaskNamespace): Promise<number> {
 
 /** Check if a namespace can accept a new task */
 export async function canStartTask(namespace: TaskNamespace): Promise<boolean> {
+  if (namespace === "creator-publish") {
+    await syncCreatorPublishConcurrencyFromConfig();
+  }
   const ns = getOrCreateNamespace(namespace);
   return (await countRegistryRunning(namespace)) < ns.maxConcurrent;
 }

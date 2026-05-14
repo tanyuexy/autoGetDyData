@@ -99,6 +99,13 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [runningTasks, setRunningTasks] = useState<RunningTaskInfo[]>([]);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalMinimized, setTerminalMinimized] = useState(false);
+  const [namespaceLimits, setNamespaceLimits] = useState<Record<string, number>>({
+    "creator-export": 1,
+    "shop-export": 1,
+    login: 1,
+    "creator-publish": 3,
+    system: 1,
+  });
   const connectionsRef = useRef<Map<string, EventSource>>(new Map());
   const logsRef = useRef<Map<string, LogEntry[]>>(new Map());
   const seenLogKeysRef = useRef<Map<string, Set<string>>>(new Map());
@@ -115,6 +122,9 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         const data = await r.json();
         const running: RunningTaskInfo[] = data.running || [];
         setRunningTasks(running);
+        if (data.namespaceLimits && typeof data.namespaceLimits === "object") {
+          setNamespaceLimits((prev) => ({ ...prev, ...data.namespaceLimits }));
+        }
         const runningIds = new Set(running.map((t) => t.taskId));
 
         const toSync: string[] = [];
@@ -184,22 +194,16 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Compute busy namespaces from running tasks
-  const MAX_CONCURRENT: Record<string, number> = {
-    "creator-export": 1,
-    "shop-export": 1,
-    login: 1,
-    "creator-publish": 3,
-    system: 1,
-  };
-
   const busyNamespaces = useMemo(() => {
     const busy = new Set<string>();
-    for (const [ns, max] of Object.entries(MAX_CONCURRENT)) {
+    for (const ns of Object.keys(namespaceLimits)) {
+      const max = namespaceLimits[ns];
+      if (max == null || !Number.isFinite(max)) continue;
       const count = runningTasks.filter((t) => t.namespace === ns).length;
       if (count >= max) busy.add(ns);
     }
     return busy;
-  }, [runningTasks]);
+  }, [runningTasks, namespaceLimits]);
 
   function isNamespaceBusy(namespace: string): boolean {
     return busyNamespaces.has(namespace);
