@@ -377,9 +377,9 @@ export default function ReviewPage() {
     },
   ];
 
-  const underReviewCount = items.filter((i) => i.reviewStatus === "under_review").length;
-  const rejectedCount = items.filter((i) => i.reviewStatus === "rejected").length;
-  const approvedCount = items.filter((i) => i.reviewStatus === "approved").length;
+  const underReviewCount = filteredItems.filter((i) => i.reviewStatus === "under_review").length;
+  const rejectedCount = filteredItems.filter((i) => i.reviewStatus === "rejected").length;
+  const approvedCount = filteredItems.filter((i) => i.reviewStatus === "approved").length;
 
   return (
     <div style={{ width: "100%" }}>
@@ -430,7 +430,7 @@ export default function ReviewPage() {
             </Popconfirm>
           )}
           <Text type="secondary" style={{ fontSize: 12 }}>
-            共 {items.length} 条
+            共 {filteredItems.length} 条
           </Text>
           {approvedCount > 0 && (
             <Tag color="success" style={{ margin: 0 }}>
