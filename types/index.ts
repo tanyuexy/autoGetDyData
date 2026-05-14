@@ -83,7 +83,7 @@ export interface RunningTaskInfo {
   startedAt: number;
 }
 
-export type ReviewStatus = "under_review" | "approved" | "rejected";
+export type ReviewStatus = "under_review" | "approved" | "rejected" | "needs_optimization";
 
 export interface ReviewItem {
   id: string;

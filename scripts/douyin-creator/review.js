@@ -34,6 +34,7 @@ function inferReviewStatus(item) {
   const status = item?.review?.status;
   if (status === 2) return "approved";
   if (status === 3) return "rejected";
+  if (status === 5) return "needs_optimization";
   return "under_review";
 }
 
@@ -57,14 +58,73 @@ function normalizeItem(item) {
 }
 
 /**
+ * 通过 item/mget API 批量获取非通过作品的拒绝/优化原因
+ */
+async function fetchRejectionReasons(page, items) {
+  const nonApproved = items.filter((i) => i.reviewStatus !== "approved");
+  if (nonApproved.length === 0) return;
+
+  console.log(`[review] 正在获取 ${nonApproved.length} 条非通过作品的拒绝原因...`);
+  const batchSize = 20;
+  let filled = 0;
+
+  for (let i = 0; i < nonApproved.length; i += batchSize) {
+    const batch = nonApproved.slice(i, i + batchSize);
+    const ids = batch.map((it) => it.postId).join(",");
+    try {
+      const resp = await page.evaluate(async (url) => {
+        const r = await fetch(url);
+        const text = await r.text();
+        // 作品 ID 超出 JS 安全整数范围，先将数字 ID 转为字符串再解析
+        const fixed = text.replace(/"id":(\d{15,25})/g, '"id":"$1"');
+        return JSON.parse(fixed);
+      }, `/web/api/creator/item/mget?ids=${ids}&fields=review`);
+
+      const apiItems = resp?.items || [];
+      for (const apiItem of apiItems) {
+        const detail = apiItem?.review?.details?.[0];
+        if (!detail?.text) continue;
+        const local = nonApproved.find((it) => it.postId === String(apiItem.id));
+        if (local) {
+          local.rejectionReason = detail.text;
+          filled++;
+        }
+      }
+    } catch (e) {
+      console.warn(`[review] 获取拒绝原因批次失败 (${i}-${i + batch.length}): ${e.message}`);
+    }
+  }
+
+  console.log(`[review] 已填充 ${filled}/${nonApproved.length} 条拒绝原因`);
+}
+
+/**
  * 等待投稿列表页面加载完成，然后切换到"投稿列表"tab，
  * 通过拦截页面自身的 API 响应来收集所有作品数据。
+ * @param {import('playwright').Page} page
+ * @param {{ startYmd: string, endYmd: string }} [dateRange] 自定义日期范围
  */
-async function fetchAllItemsFromPage(page) {
+async function fetchAllItemsFromPage(page, dateRange) {
   return new Promise(async (resolve, reject) => {
     const collected = new Map();
     let done = false;
     let error = null;
+
+    // 如果传入了自定义日期范围，拦截 API 请求替换 start_time/end_time
+    if (dateRange) {
+      const startMs = new Date(dateRange.startYmd + "T00:00:00+08:00").getTime();
+      const endMs = new Date(dateRange.endYmd + "T23:59:59+08:00").getTime();
+      await page.route("**/item/list**", async (route) => {
+        const url = new URL(route.request().url());
+        if (url.searchParams.has("start_time")) {
+          url.searchParams.set("start_time", String(startMs));
+          url.searchParams.set("end_time", String(endMs));
+          await route.continue({ url: url.toString() });
+        } else {
+          await route.continue();
+        }
+      });
+    }
 
     const onResponse = async (response) => {
       if (done) return;
@@ -81,7 +141,6 @@ async function fetchAllItemsFromPage(page) {
           if (!item) continue;
           if (!collected.has(item.postId)) {
             collected.set(item.postId, item);
-            // 打印前几条便于调试
             if (collected.size <= 3) {
               console.log(`[review] 示例作品: id=${item.postId} link=${item.workLink} title=${item.title.slice(0, 40)}`);
             }
@@ -151,6 +210,9 @@ async function fetchAllItemsFromPage(page) {
       error = e;
     } finally {
       page.off("response", onResponse);
+      try {
+        await page.unroute("**/item/list**");
+      } catch (_) {}
     }
 
     if (error && collected.size === 0) {
@@ -212,8 +274,10 @@ async function scrapeReviewForAccount(browser, accountName) {
     }
 
     console.log(`[review] 账号 ${accountName} 拦截页面 API 响应抓取作品列表`);
-    const items = await fetchAllItemsFromPage(page);
+    const items = await fetchAllItemsFromPage(page, dateRange);
     console.log(`[review] 账号 ${accountName} 共抓取 ${items.length} 条作品`);
+
+    await fetchRejectionReasons(page, items);
 
     const statusCounts = items.reduce((acc, item) => {
       acc[item.reviewStatus] = (acc[item.reviewStatus] || 0) + 1;

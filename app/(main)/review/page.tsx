@@ -24,14 +24,16 @@ const { RangePicker } = DatePicker;
 
 const REVIEW_STATUS_MAP: Record<ReviewStatus, { color: string; text: string }> = {
   under_review: { color: "processing", text: "审核中" },
-  approved: { color: "success", text: "已通过" },
+  approved: { color: "success", text: "已发布" },
   rejected: { color: "error", text: "未通过" },
+  needs_optimization: { color: "warning", text: "需优化" },
 };
 
 const STATUS_FILTER_OPTIONS = [
   { label: "全部", value: "all" },
+  { label: "已发布", value: "approved" },
   { label: "审核中", value: "under_review" },
-  { label: "已通过", value: "approved" },
+  { label: "需优化", value: "needs_optimization" },
   { label: "未通过", value: "rejected" },
 ];
 
@@ -267,7 +269,7 @@ export default function ReviewPage() {
   }
 
   async function handleOpenWorkDetail(item: ReviewItem) {
-    if (item.reviewStatus !== "approved") {
+    if (item.reviewStatus !== "approved" && item.reviewStatus !== "needs_optimization") {
       message.warning("只有已发布作品可以打开详情页");
       return;
     }
@@ -370,7 +372,7 @@ export default function ReviewPage() {
       },
     },
     {
-      title: "拒绝原因",
+      title: "原因",
       dataIndex: "rejectionReason",
       width: 160,
       render: (_: string | undefined, r: ReviewItem) => renderRejectionReason(r),
@@ -405,10 +407,10 @@ export default function ReviewPage() {
       align: "center" as const,
       width: 80,
       render: (_: any, r: ReviewItem) => {
-        const canOpenDetail = r.reviewStatus === "approved" && Boolean(r.postId);
+        const canOpenDetail = (r.reviewStatus === "approved" || r.reviewStatus === "needs_optimization") && Boolean(r.postId);
         return (
           <Space size={0}>
-            <Tooltip title={canOpenDetail ? "用该店铺登录态打开作品详情" : "只有已发布作品可以打开详情"}>
+            <Tooltip title={canOpenDetail ? "用该店铺登录态打开作品详情" : "只有已发布/需优化作品可以打开详情"}>
               <Button
                 type="text"
                 size="small"
@@ -433,6 +435,7 @@ export default function ReviewPage() {
   const underReviewCount = filteredItems.filter((i) => i.reviewStatus === "under_review").length;
   const rejectedCount = filteredItems.filter((i) => i.reviewStatus === "rejected").length;
   const approvedCount = filteredItems.filter((i) => i.reviewStatus === "approved").length;
+  const needsOptimizationCount = filteredItems.filter((i) => i.reviewStatus === "needs_optimization").length;
 
   return (
     <div style={{ width: "100%" }}>
@@ -495,7 +498,12 @@ export default function ReviewPage() {
           </Text>
           {approvedCount > 0 && (
             <Tag color="success" style={{ margin: 0 }}>
-              通过 {approvedCount}
+              发布 {approvedCount}
+            </Tag>
+          )}
+          {needsOptimizationCount > 0 && (
+            <Tag color="warning" style={{ margin: 0 }}>
+              需优化 {needsOptimizationCount}
             </Tag>
           )}
           {underReviewCount > 0 && (
