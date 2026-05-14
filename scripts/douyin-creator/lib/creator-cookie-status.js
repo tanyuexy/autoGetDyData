@@ -37,7 +37,7 @@ function splitAccountsByCreatorSettingsStatus(accountNames) {
   const withoutAuth = [];
   for (const accountName of accountNames) {
     const { cookieStatus } = getEffectiveCreatorCookieStatus(accountName);
-    if (cookieStatus === "valid") {
+    if (cookieStatus === "valid" || cookieStatus === "warning") {
       withAuth.push(accountName);
     } else {
       withoutAuth.push(accountName);
