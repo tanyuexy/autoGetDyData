@@ -14,7 +14,7 @@ const { ensureDir } = require("../common/fs");
 const { getAccountPaths } = require("./lib/accounts");
 const { BROWSER_VIEWPORT, HEADLESS } = require("./lib/env");
 const { openTargetAndEnsureLogin } = require("./lib/login");
-const { saveAuth } = require("./lib/exporter");
+const { saveAuth, setPostListDateRange } = require("./lib/exporter");
 
 const CONTENT_PAGE_URL = "https://creator.douyin.com/creator-micro/data-center/content";
 
@@ -192,6 +192,24 @@ async function scrapeReviewForAccount(browser, accountName) {
     });
     await page.waitForLoadState("networkidle").catch(() => {});
     await page.waitForTimeout(2000);
+
+    const reviewDateStart = process.env.REVIEW_DATE_START || "";
+    const reviewDateEnd = process.env.REVIEW_DATE_END || "";
+    const hasDateRange = Boolean(reviewDateStart && reviewDateEnd);
+    const dateRangeMsg = hasDateRange
+      ? `${reviewDateStart} ~ ${reviewDateEnd}（自定义）`
+      : "默认 90 天";
+    console.log(`[review] 账号 ${accountName} 设置发布时间范围: ${dateRangeMsg}`);
+    let dateRange;
+    try {
+      const dateOpts = hasDateRange
+        ? { startDate: reviewDateStart, endDate: reviewDateEnd }
+        : { defaultStartDaysAgo: 90 };
+      dateRange = await setPostListDateRange(page, accountName, dateOpts);
+      console.log(`[review] 账号 ${accountName} 日期范围: ${dateRange.startYmd} ~ ${dateRange.endYmd}`);
+    } catch (e) {
+      console.warn(`[review] 账号 ${accountName} 设置日期范围失败，将继续使用页面默认范围: ${e.message}`);
+    }
 
     console.log(`[review] 账号 ${accountName} 拦截页面 API 响应抓取作品列表`);
     const items = await fetchAllItemsFromPage(page);

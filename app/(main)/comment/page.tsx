@@ -22,6 +22,9 @@ import type { CommentItem } from "@/types";
 
 const { Text } = Typography;
 
+/** 工具栏账号多选的「一键全选」，不会作为真实账号名传给接口 */
+const MULTI_SELECT_ALL_ACCOUNTS = "__toolbar_all_creator_accounts__";
+
 export default function CommentPage() {
   const { message } = App.useApp();
   const { isNamespaceBusy, startTask, activeTasks } = useTaskContext();
@@ -88,6 +91,45 @@ export default function CommentPage() {
     () => accounts.map((a) => ({ label: a.name, value: a.name })),
     [accounts]
   );
+
+  const allCreatorAccountNames = useMemo(() => accounts.map((a) => a.name), [accounts]);
+
+  const toolbarAccountSelectOptions = useMemo(
+    () => [
+      {
+        label: accounts.length ? `全部（${accounts.length} 个账号）` : "全部（无账号）",
+        value: MULTI_SELECT_ALL_ACCOUNTS,
+        disabled: accounts.length === 0,
+      },
+      ...accountOptions,
+    ],
+    [accounts.length, accountOptions]
+  );
+
+  const toolbarAccountsSanitized = useMemo(
+    () => selectedAccounts.filter((n) => allCreatorAccountNames.includes(n)),
+    [selectedAccounts, allCreatorAccountNames]
+  );
+
+  const toolbarAccountSelectValue = useMemo(() => {
+    if (allCreatorAccountNames.length === 0) return [];
+    if (
+      toolbarAccountsSanitized.length === allCreatorAccountNames.length &&
+      allCreatorAccountNames.every((n) => toolbarAccountsSanitized.includes(n))
+    ) {
+      return [MULTI_SELECT_ALL_ACCOUNTS];
+    }
+    return toolbarAccountsSanitized;
+  }, [allCreatorAccountNames, toolbarAccountsSanitized]);
+
+  function handleToolbarAccountSelectChange(vals: string[]) {
+    const picked = [...new Set(vals)];
+    if (picked.includes(MULTI_SELECT_ALL_ACCOUNTS)) {
+      setSelectedAccounts([...allCreatorAccountNames]);
+      return;
+    }
+    setSelectedAccounts(picked.filter((v) => v !== MULTI_SELECT_ALL_ACCOUNTS));
+  }
 
   const workTitleOptions = useMemo(() => {
     const base = accountFilter === "all" ? items : items.filter((item) => item.accountName === accountFilter);
@@ -399,9 +441,9 @@ export default function CommentPage() {
             allowClear
             size="middle"
             style={{ minWidth: 240 }}
-            value={selectedAccounts}
-            onChange={setSelectedAccounts}
-            options={accountOptions}
+            value={toolbarAccountSelectValue}
+            onChange={handleToolbarAccountSelectChange}
+            options={toolbarAccountSelectOptions}
             loading={loadingAccounts}
             placeholder="选择账号"
             maxTagCount={3}

@@ -83,7 +83,7 @@ function parseCreatorExportStartSpec(spec, now) {
   return currentYearDate;
 }
 
-function getPostListDateRange(accountName) {
+function getPostListDateRange(accountName, options = {}) {
   const now = new Date();
   const yesterday = new Date(
     now.getFullYear(),
@@ -91,7 +91,10 @@ function getPostListDateRange(accountName) {
     now.getDate() - 1
   );
 
-  const defaultMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const defaultStart =
+    options.defaultStartDaysAgo != null
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - options.defaultStartDaysAgo)
+      : new Date(now.getFullYear(), now.getMonth(), 1);
   const spec = getCreatorExportDateStartSpec(accountName);
 
   let start;
@@ -101,12 +104,12 @@ function getPostListDateRange(accountName) {
       start = parsed;
     } else {
       console.warn(
-        `[抖创] creatorExportDateStart 无法解析（${spec}），改用本月一日`
+        `[抖创] creatorExportDateStart 无法解析（${spec}），改用 ${formatYmd(defaultStart)}`
       );
-      start = defaultMonthStart;
+      start = defaultStart;
     }
   } else {
-    start = defaultMonthStart;
+    start = defaultStart;
   }
 
   let end = yesterday < start ? start : yesterday;
@@ -115,9 +118,9 @@ function getPostListDateRange(accountName) {
     console.warn(
       `[抖创] 配置的开始日期（${formatYmd(start)}）晚于昨天（${formatYmd(
         yesterday
-      )}），改回「本月一日～昨天」`
+      )}），改回「${formatYmd(defaultStart)}～昨天」`
     );
-    start = defaultMonthStart;
+    start = defaultStart;
     end = yesterday < start ? start : yesterday;
   }
 
@@ -486,10 +489,23 @@ async function isDateRangeApplied(page, startYmd, endYmd) {
   return false;
 }
 
-async function setPostListDateRange(page, accountName) {
-  const { start, end } = getPostListDateRange(accountName);
-  const startYmd = formatYmd(start);
-  const endYmd = formatYmd(end);
+async function setPostListDateRange(page, accountName, options = {}) {
+  let start;
+  let end;
+  let startYmd;
+  let endYmd;
+  if (options.startDate && options.endDate) {
+    startYmd = options.startDate;
+    endYmd = options.endDate;
+    start = parseFullDateSpec(startYmd) || new Date();
+    end = parseFullDateSpec(endYmd) || new Date();
+  } else {
+    const range = getPostListDateRange(accountName, options);
+    start = range.start;
+    end = range.end;
+    startYmd = formatYmd(start);
+    endYmd = formatYmd(end);
+  }
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     await applyDateRangeSelection(page, startYmd, endYmd);
@@ -718,4 +734,4 @@ async function exportPostListData(page, paths, accountName) {
   return savePath;
 }
 
-module.exports = { saveAuth, exportPostListData };
+module.exports = { saveAuth, exportPostListData, setPostListDateRange };
