@@ -100,3 +100,4 @@ To add a new page:
 - `InputNumber` 的 `addonBefore` / `addonAfter` → 用 `Space.Compact` + `Button` 替代
 - `Modal` 的 `destroyOnClose` → 用 `destroyOnHidden` 替代
 - `Space` 的 `direction` → 用 `orientation` 替代
+- `Tag` 的 `bordered={false}`（antd v6）→ 用 **`variant="filled"`** 替代；“无边框实心”语义与旧时 `bordered={false}` 一致。**不要**把这些 Tag 写法套到 **`Table`** 上：`Table` 仍是 `bordered={false}` 控制是否显示格子线，`Table` 没有与 Tag 通用的 `variant` 用法。

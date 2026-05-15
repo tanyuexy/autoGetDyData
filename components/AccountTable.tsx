@@ -10,6 +10,8 @@ import {
   Input,
   App,
   Tooltip,
+  Typography,
+  Flex,
 } from "antd";
 import {
   CheckCircleOutlined,
@@ -22,6 +24,7 @@ import {
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
 import type { CreatorAccount, ShopAccount } from "@/types";
+import type { CSSProperties } from "react";
 import { useState, useMemo, useEffect } from "react";
 import { useTaskContext } from "@/contexts/TaskContext";
 
@@ -44,6 +47,17 @@ interface ShopProps {
 }
 
 type Props = CreatorProps | ShopProps;
+
+/** 抖创数据 / 配置里账号区块的版面与外层表格容器 */
+function accountTableShellSx(): CSSProperties {
+  return {
+    border: "1px solid rgba(15, 23, 42, 0.08)",
+    borderRadius: 12,
+    overflow: "hidden",
+    background: "rgba(255, 255, 255, 0.72)",
+    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+  };
+}
 
 function formatShortDateTime(value?: string | null) {
   if (!value) return "-";
@@ -106,7 +120,7 @@ function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | n
 
   if (!status || status === "missing") {
     return (
-      <Tag icon={<CloseCircleOutlined />} color="default">
+      <Tag icon={<CloseCircleOutlined />} color="default" variant="filled" style={{ borderRadius: 6 }}>
         未登录
       </Tag>
     );
@@ -115,7 +129,7 @@ function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | n
   if (status === "valid") {
     return (
       <Tooltip title={acc.cookieDetail || "登录态有效"}>
-        <Tag icon={<CheckCircleOutlined />} color="success">
+        <Tag icon={<CheckCircleOutlined />} color="success" variant="filled" style={{ borderRadius: 6 }}>
           有效
         </Tag>
       </Tooltip>
@@ -125,7 +139,7 @@ function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | n
   if (status === "warning") {
     return (
       <Tooltip title={acc.cookieDetail || "登录态可能过期"}>
-        <Tag icon={<ExclamationCircleOutlined />} color="warning">
+        <Tag icon={<ExclamationCircleOutlined />} color="warning" variant="filled" style={{ borderRadius: 6 }}>
           可能过期
         </Tag>
       </Tooltip>
@@ -135,7 +149,7 @@ function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | n
   if (status === "expired") {
     return (
       <Tooltip title={acc.cookieDetail || "登录态已过期"}>
-        <Tag icon={<CloseCircleOutlined />} color="error">
+        <Tag icon={<CloseCircleOutlined />} color="error" variant="filled" style={{ borderRadius: 6 }}>
           已过期
         </Tag>
       </Tooltip>
@@ -144,7 +158,7 @@ function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | n
 
   return (
     <Tooltip title={acc.cookieDetail || "未知状态"}>
-      <Tag icon={<QuestionCircleOutlined />} color="default">
+      <Tag icon={<QuestionCircleOutlined />} color="default" variant="filled" style={{ borderRadius: 6 }}>
         未知
       </Tag>
     </Tooltip>
@@ -212,10 +226,10 @@ export default function AccountTable(props: Props) {
 
         if (result.verified) {
           message.success(
-            `账号 ${accountName} 验证通过 (${((result.elapsed ?? 0) / 1000).toFixed(1)}s)`
+            `账号 ${accountName} 校验通过 (${((result.elapsed ?? 0) / 1000).toFixed(1)}s)`
           );
         } else {
-          message.warning(`账号 ${accountName} 验证失败: ${result.detail}`);
+          message.warning(`账号 ${accountName} 校验未通过: ${result.detail}`);
         }
 
         setVerifyResults((prev) => ({
@@ -226,7 +240,7 @@ export default function AccountTable(props: Props) {
           },
         }));
       } catch (e: any) {
-        message.error(`验证失败: ${e.message || e}`);
+        message.error(`校验异常: ${e.message || e}`);
       }
       setVerifying((prev) => {
         const next = new Set(prev);
@@ -277,26 +291,53 @@ export default function AccountTable(props: Props) {
     }
 
     const columns = [
-      { title: "账号名称", dataIndex: "name", key: "name" },
+      {
+        title: "账号名称",
+        key: "name",
+        ellipsis: true,
+        render: (_: unknown, row: CreatorAccount) => (
+          <Tooltip title={row.name} placement="topLeft">
+            <span
+              style={{
+                fontWeight: 500,
+                color: "rgba(15, 23, 42, 0.9)",
+              }}
+            >
+              {row.name}
+            </span>
+          </Tooltip>
+        ),
+      },
       {
         title: "登录态",
         dataIndex: "cookieStatus",
         key: "cookieStatus",
-        width: 100,
-        render: (_: any, row: CreatorAccount) => renderCookieTag(row),
+        width: 112,
+        render: (_: unknown, row: CreatorAccount) => renderCookieTag(row),
       },
       {
         title: "最后登录",
         dataIndex: "lastLoginAt",
         key: "lastLoginAt",
-        width: 130,
-        render: (_: any, row: CreatorAccount) => formatShortDateTime(row.lastLoginAt),
+        width: 132,
+        render: (_: unknown, row: CreatorAccount) => (
+          <span
+            style={{
+              fontSize: 13,
+              fontVariantNumeric: "tabular-nums",
+              color: "rgba(15, 23, 42, 0.58)",
+            }}
+          >
+            {formatShortDateTime(row.lastLoginAt)}
+          </span>
+        ),
       },
       {
         title: "操作",
         key: "actions",
-        width: 280,
-        render: (_: any, row: CreatorAccount) => {
+        align: "right",
+        width: onLogin ? 280 : 200,
+        render: (_: unknown, row: CreatorAccount) => {
           const hasReusableLoginState =
             row.hasStorageState &&
             row.cookieStatus !== "expired" &&
@@ -305,69 +346,94 @@ export default function AccountTable(props: Props) {
             row.hasStorageState && row.cookieStatus !== "expired";
           const isVerifying = verifying.has(row.name);
 
-          const items = [
-            {
-              key: "email_qr",
-              label: "邮箱二维码登录",
-              onClick: () => onLogin?.(row.name, "email_qr"),
-            },
-            {
-              key: "local_manual",
-              label: "本机人工登录",
-              onClick: () => onLogin?.(row.name, "local_manual"),
-            },
-          ];
+          const loginMenuItems =
+            onLogin &&
+            ([
+              {
+                key: "email_qr",
+                label: "邮箱二维码登录",
+                onClick: () => onLogin(row.name, "email_qr"),
+              },
+              {
+                key: "local_manual",
+                label: "本机人工登录",
+                onClick: () => onLogin(row.name, "local_manual"),
+              },
+            ] as const);
 
           return (
-            <Space size={4}>
-              <Dropdown
-                trigger={["hover"]}
-                placement="bottomRight"
-                menu={{ items: items as any }}
-                disabled={hasReusableLoginState || loginBusy}
-              >
-                <Button
-                  size="small"
-                  type="primary"
+            <Flex wrap="wrap" gap={6} justify="flex-end" align="center">
+              {onLogin && loginMenuItems && (
+                <Dropdown
+                  trigger={["hover"]}
+                  placement="bottomRight"
+                  menu={{ items: loginMenuItems as any }}
                   disabled={hasReusableLoginState || loginBusy}
-                  onClick={() => onLogin?.(row.name, "email_qr")}
                 >
-                  <Space size={4}>
-                    登录
-                    <DownOutlined style={{ fontSize: 10 }} />
-                  </Space>
-                </Button>
-              </Dropdown>
-              <Button
-                size="small"
-                icon={<SafetyCertificateOutlined />}
-                loading={isVerifying}
-                disabled={!canUseLoggedInActions}
-                onClick={() => handleVerify(row.name)}
+                  <Button
+                    size="small"
+                    type="primary"
+                    style={{ borderRadius: 6 }}
+                    disabled={hasReusableLoginState || loginBusy}
+                    onClick={() => onLogin(row.name, "email_qr")}
+                  >
+                    <Flex align="center" gap={6}>
+                      登录
+                      <DownOutlined style={{ fontSize: 10 }} />
+                    </Flex>
+                  </Button>
+                </Dropdown>
+              )}
+              <Tooltip
+                title={
+                  !canUseLoggedInActions
+                    ? "需要本地可用的登录存档，且当前未被静态判定为「已过期」，方可校验。"
+                    : "在浏览器中校验登录态是否仍有效。"
+                }
               >
-                验证
-              </Button>
+                <span>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="cyan"
+                    style={{ borderRadius: 6 }}
+                    icon={<SafetyCertificateOutlined />}
+                    loading={isVerifying}
+                    disabled={!canUseLoggedInActions}
+                    onClick={() => handleVerify(row.name)}
+                  >
+                    校验
+                  </Button>
+                </span>
+              </Tooltip>
               {onOpenCreator && (
-                <Button
-                  size="small"
-                  type="primary"
-                  disabled={!canUseLoggedInActions}
-                  onClick={() => onOpenCreator(row.name)}
-                >
-                  抖创页面
-                </Button>
+                <Tooltip title={canUseLoggedInActions ? "使用该账号会话打开抖音创作者后台" : "登录态不可用，无法浏览器打开后台。"}>
+                  <span>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="primary"
+                      style={{ borderRadius: 6 }}
+                      disabled={!canUseLoggedInActions}
+                      onClick={() => onOpenCreator(row.name)}
+                    >
+                      抖创页面
+                    </Button>
+                  </span>
+                </Tooltip>
               )}
               {onDeleteAccount && (
                 <Button
                   size="small"
                   type="link"
                   danger
+                  style={{ paddingInline: 4 }}
                   onClick={() => onDeleteAccount(row.name)}
                 >
                   删除
                 </Button>
               )}
-            </Space>
+            </Flex>
           );
         },
       },
@@ -380,39 +446,74 @@ export default function AccountTable(props: Props) {
 
     return (
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 15 }}>店铺账号设置</h3>
-          <Space>
+        <Flex justify="space-between" align="flex-start" gap={14} wrap="wrap" style={{ marginBottom: 14 }}>
+          <div style={{ minWidth: 200 }}>
+            <Typography.Title level={5} style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>
+              店铺账号设置
+            </Typography.Title>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {onAddAccount
+                ? "在此添加或删除配置的账号；可登录浏览器、校验登录态、打开创作者中心。"
+                : "查看各账号静态登录快照；在浏览器内校验请点击「校验」或「校验所有账号」；如需登录请到「配置管理」。"}
+            </Typography.Text>
+          </div>
+          <Space wrap size={[8, 10]}>
             {onAddAccount && (
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => setModalOpen(true)}
-              >
+              <Button type="primary" icon={<PlusOutlined />} style={{ borderRadius: 8 }} onClick={() => setModalOpen(true)}>
                 添加账号
               </Button>
             )}
-            <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>
+            <Button icon={<ReloadOutlined />} variant="outlined" loading={loading} style={{ borderRadius: 8 }} onClick={() => void onRefresh()}>
               刷新
             </Button>
             <Button
               icon={<SafetyCertificateOutlined />}
+              type="primary"
+              variant="outlined"
               loading={verifyAllLoading}
               disabled={accounts.length === 0 || loading}
+              style={{ borderRadius: 8 }}
               onClick={() => void handleVerifyAll()}
             >
               校验所有账号
             </Button>
           </Space>
+        </Flex>
+
+        <div style={accountTableShellSx()}>
+          <Table<CreatorAccount>
+            columns={columns as any}
+            dataSource={dataSource}
+            pagination={false}
+            loading={loading}
+            size="middle"
+            bordered={false}
+            rowHoverable={false}
+            locale={{
+              emptyText: (
+                <Typography.Text type="secondary" style={{ display: "block", paddingBlock: 24 }}>
+                  {onAddAccount ? "暂无账号，点击「添加账号」开始配置。" : "暂无账号数据。"}
+                </Typography.Text>
+              ),
+            }}
+            styles={{
+              header: {
+                cell: {
+                  background: "rgba(248, 250, 252, 0.95)",
+                  color: "rgba(15,23,42,0.65)",
+                  fontWeight: 500,
+                  fontSize: 12,
+                  letterSpacing: "0.02em",
+                },
+              },
+              body: {
+                cell: {
+                  padding: "12px 14px",
+                },
+              },
+            }}
+          />
         </div>
-        <Table
-          columns={columns as any}
-          dataSource={dataSource}
-          pagination={false}
-          loading={loading}
-          size="small"
-          locale={{ emptyText: "暂无账号，请点击右上角添加" }}
-        />
 
         {onAddAccount && (
           <AddAccountModal
@@ -431,45 +532,98 @@ export default function AccountTable(props: Props) {
   // Shop mode - simpler version (used when AccountTable is called with type="shop")
   const shopAccounts = (accounts as ShopAccount[]);
 
-  const columns = [
-    { title: "邮箱", dataIndex: "email", key: "email" },
+  const shopColumns = [
+    {
+      title: "邮箱",
+      key: "email",
+      ellipsis: true,
+      render: (_: unknown, row: ShopAccount) => (
+        <Tooltip title={row.email} placement="topLeft">
+          <span style={{ fontWeight: 500, color: "rgba(15, 23, 42, 0.88)" }}>{row.email}</span>
+        </Tooltip>
+      ),
+    },
     {
       title: "登录态",
       dataIndex: "cookieStatus",
       key: "cookieStatus",
-      width: 100,
-      render: (_: any, row: ShopAccount) => renderCookieTag(row),
+      width: 112,
+      render: (_: unknown, row: ShopAccount) => renderCookieTag(row),
     },
     {
       title: "最后登录",
       dataIndex: "lastLoginAt",
       key: "lastLoginAt",
-      width: 130,
-      render: (_: any, row: ShopAccount) => formatShortDateTime(row.lastLoginAt),
+      width: 132,
+      render: (_: unknown, row: ShopAccount) => (
+        <span
+          style={{
+            fontSize: 13,
+            fontVariantNumeric: "tabular-nums",
+            color: "rgba(15, 23, 42, 0.58)",
+          }}
+        >
+          {formatShortDateTime(row.lastLoginAt)}
+        </span>
+      ),
     },
   ];
 
-  const dataSource = shopAccounts.map((a, i) => ({
+  const shopDataSource = shopAccounts.map((a, i) => ({
     ...a,
     key: a.email || String(i),
   }));
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-        <h3 style={{ margin: 0, fontSize: 15 }}>邮箱账号状态</h3>
-        <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>
+      <Flex justify="space-between" align="flex-start" gap={14} wrap="wrap" style={{ marginBottom: 14 }}>
+        <div style={{ minWidth: 200 }}>
+          <Typography.Title level={5} style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>
+            邮箱账号状态
+          </Typography.Title>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            各邮箱最近一次持久化会话与静态快照（完整校验请到配置或抖店任务流）。
+          </Typography.Text>
+        </div>
+        <Button icon={<ReloadOutlined />} variant="outlined" loading={loading} style={{ borderRadius: 8 }} onClick={() => void onRefresh()}>
           刷新
         </Button>
+      </Flex>
+
+      <div style={accountTableShellSx()}>
+        <Table<ShopAccount>
+          columns={shopColumns}
+          dataSource={shopDataSource}
+          pagination={false}
+          loading={loading}
+          size="middle"
+          bordered={false}
+          rowHoverable={false}
+          locale={{
+            emptyText: (
+              <Typography.Text type="secondary" style={{ display: "block", paddingBlock: 24 }}>
+                暂无邮箱账号。
+              </Typography.Text>
+            ),
+          }}
+          styles={{
+            header: {
+              cell: {
+                background: "rgba(248, 250, 252, 0.95)",
+                color: "rgba(15,23,42,0.65)",
+                fontWeight: 500,
+                fontSize: 12,
+                letterSpacing: "0.02em",
+              },
+            },
+            body: {
+              cell: {
+                padding: "12px 14px",
+              },
+            },
+          }}
+        />
       </div>
-      <Table
-        columns={columns}
-        dataSource={dataSource}
-        pagination={false}
-        loading={loading}
-        size="small"
-        locale={{ emptyText: "暂无邮箱账号" }}
-      />
     </div>
   );
 }
