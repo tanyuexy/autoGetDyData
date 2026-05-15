@@ -16,6 +16,7 @@ const {
   faceNotifySentByAccount,
   loginStageHintByAccount,
   lastSmsConfirmClickAtByAccount,
+  otpRequestIdByAccount,
   otpRequestSinceByAccount,
   otpLastPollAtByAccount,
   otpLastAppliedByAccount,
@@ -539,12 +540,11 @@ async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options =
       reason: "首次进入接收短信验证码阶段，请回复验证码"
     }).catch((error) => {
       console.error(
-        `账号 [${accountName}] 首次发送接收验证码提醒邮件失败:`,
+        `账号 [${accountName}] 首次发送接收验证码提醒失败:`,
         error.message || error
       );
     });
     receiveOtpNotifySentByAccount.add(notifyKey);
-    otpRequestSinceByAccount.set(accountName, Date.now());
     otpLastResendAtByAccount.set(accountName, Date.now());
     otpReceiveWaitLoggedByAccount.delete(accountName);
   }
@@ -571,14 +571,12 @@ async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options =
           reason: "已先点击“重新发送”，请回复最新验证码"
         }).catch((error) => {
           console.error(
-            `账号 [${accountName}] 重发验证码后邮件提醒失败:`,
+            `账号 [${accountName}] 重发验证码后提醒失败:`,
             error.message || error
           );
         });
-        // 重试发送后刷新验证码邮件时间基准，后续仅比对这之后的新回复。
-        otpRequestSinceByAccount.set(accountName, Date.now());
         console.log(
-          `账号 [${accountName}] 已先点击“重新发送”，再发送验证码回复邮件提醒。`
+          `账号 [${accountName}] 已先点击“重新发送”，再发送验证码填写页提醒。`
         );
       }
     }
@@ -590,8 +588,9 @@ async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options =
   }
   otpLastPollAtByAccount.set(accountName, now);
 
+  const requestId = otpRequestIdByAccount.get(accountName) || "";
   const sinceMs = otpRequestSinceByAccount.get(accountName) || now;
-  const pollResult = await fetchOtpCode({ accountName, sinceMs });
+  const pollResult = await fetchOtpCode({ accountName, requestId, sinceMs });
   const otpCode = pollResult.otpCode || "";
   const lastStatusLogAt = otpLastStatusLogAtByAccount.get(accountName) || 0;
   const shouldLogStatus = now - lastStatusLogAt >= 15000;
@@ -600,6 +599,8 @@ async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options =
       console.log(
         `账号 [${accountName}] 未配置完整 OTP_IMAP_*，暂无法从邮箱读取验证码。`
       );
+    } else if (pollResult.bridgeEnabled && pollResult.missingRequestId) {
+      console.log(`账号 [${accountName}] OTP 中转会话尚未创建成功，暂无法读取填写页验证码。`);
     } else if (pollResult.bridgeEnabled) {
       console.log(`账号 [${accountName}] 正在等待 OTP 中转页或邮箱中的新验证码。`);
     } else if (pollResult.checkedCount === 0) {
@@ -623,6 +624,7 @@ async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options =
   const submitted = await fillReceiveOtpCodeAndSubmit(page, otpCode);
   if (submitted) {
     otpLastAppliedByAccount.set(accountName, otpCode);
+    otpRequestIdByAccount.delete(accountName);
     console.log(`账号 [${accountName}] 已自动填入验证码并提交。`);
   }
   return true;

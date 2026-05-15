@@ -18,28 +18,55 @@ function isOtpBridgeLinkEnabled(cfg = getOtpBridgeConfig()) {
   return Boolean(cfg.baseUrl);
 }
 
-function buildOtpBridgeEntryUrl(
+async function createOtpBridgeSession(
   { accountName, maskedPhone = "", reason = "" } = {},
   cfg = getOtpBridgeConfig()
 ) {
-  if (!isOtpBridgeLinkEnabled(cfg)) return "";
-  let url;
+  if (!isOtpBridgeLinkEnabled(cfg)) {
+    return {
+      requestId: "",
+      entryUrl: "",
+      missingConfig: false,
+      bridgeEnabled: false
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
   try {
-    url = new URL(`${cfg.baseUrl}/`);
-  } catch {
-    return "";
+    const res = await fetch(`${cfg.baseUrl}/api/session/create`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        accountName,
+        maskedPhone,
+        reason,
+        token: cfg.accessToken || undefined
+      })
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const data = await res.json().catch(() => ({}));
+    return {
+      requestId: String(data?.requestId || ""),
+      entryUrl: String(data?.entryUrl || ""),
+      expiresAt: Number(data?.expiresAt || 0),
+      ttlMs: Number(data?.ttlMs || 0),
+      missingConfig: false,
+      bridgeEnabled: true
+    };
+  } finally {
+    clearTimeout(timer);
   }
-  if (accountName) url.searchParams.set("accountName", String(accountName));
-  if (maskedPhone) url.searchParams.set("maskedPhone", String(maskedPhone));
-  if (reason) url.searchParams.set("reason", String(reason));
-  if (cfg.accessToken) {
-    url.searchParams.set("token", cfg.accessToken);
-  }
-  return url.toString();
 }
 
 async function fetchOtpCodeFromBridge(
-  { accountName, sinceMs },
+  { requestId },
   cfg = getOtpBridgeConfig()
 ) {
   if (!isOtpBridgeLinkEnabled(cfg)) {
@@ -52,12 +79,20 @@ async function fetchOtpCodeFromBridge(
       source: ""
     };
   }
+  if (!requestId) {
+    return {
+      otpCode: "",
+      checkedCount: 0,
+      matchedSubjectCount: 0,
+      missingConfig: false,
+      bridgeEnabled: true,
+      missingRequestId: true,
+      source: ""
+    };
+  }
 
   const url = new URL(`${cfg.baseUrl}/api/latest`);
-  if (accountName) url.searchParams.set("accountName", String(accountName));
-  if (Number.isFinite(sinceMs) && sinceMs > 0) {
-    url.searchParams.set("sinceMs", String(sinceMs));
-  }
+  url.searchParams.set("requestId", String(requestId));
   if (cfg.accessToken) {
     url.searchParams.set("token", cfg.accessToken);
   }
@@ -80,6 +115,8 @@ async function fetchOtpCodeFromBridge(
       matchedSubjectCount: Number(data?.matchedSubjectCount || 0),
       missingConfig: false,
       bridgeEnabled: true,
+      missingRequestId: false,
+      requestId: String(data?.requestId || requestId),
       source: data?.source ? String(data.source) : ""
     };
   } finally {
@@ -90,6 +127,6 @@ async function fetchOtpCodeFromBridge(
 module.exports = {
   getOtpBridgeConfig,
   isOtpBridgeLinkEnabled,
-  buildOtpBridgeEntryUrl,
+  createOtpBridgeSession,
   fetchOtpCodeFromBridge
 };

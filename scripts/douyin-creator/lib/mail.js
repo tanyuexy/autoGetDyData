@@ -9,11 +9,17 @@ const {
   sendWeComText,
 } = require("./wecom");
 const {
-  buildOtpBridgeEntryUrl,
+  createOtpBridgeSession,
   fetchOtpCodeFromBridge,
   isOtpBridgeLinkEnabled
 } = require("./otp-bridge");
 const { postInternalApi } = require("../../common/internal-api-client");
+const {
+  otpRequestIdByAccount,
+  otpRequestSinceByAccount,
+  otpLastAppliedByAccount,
+  otpLastStatusLogAtByAccount,
+} = require("./state");
 
 function getMailConfig() {
   const host = process.env.SMTP_HOST || "smtp.qq.com";
@@ -349,11 +355,34 @@ async function sendSmsVerifyEmail({
 
 async function sendReceiveOtpEmail({ accountName, maskedPhone, reason }) {
   const subject = buildOtpReplySubject(accountName);
-  const otpBridgeUrl = buildOtpBridgeEntryUrl({
-    accountName,
-    maskedPhone,
-    reason: reason || "等待用户填写验证码"
-  });
+  const reasonText = reason || "等待用户填写验证码";
+  let otpBridgeUrl = "";
+  let requestId = "";
+  if (isOtpBridgeLinkEnabled()) {
+    try {
+      const session = await createOtpBridgeSession({
+        accountName,
+        maskedPhone,
+        reason: reasonText
+      });
+      otpBridgeUrl = String(session.entryUrl || "");
+      requestId = String(session.requestId || "");
+    } catch (error) {
+      console.error(
+        `账号 [${accountName}] 创建 OTP 中转会话失败:`,
+        error?.message || error
+      );
+    }
+  }
+
+  if (requestId) {
+    otpRequestIdByAccount.set(accountName, requestId);
+  } else {
+    otpRequestIdByAccount.delete(accountName);
+  }
+  otpRequestSinceByAccount.set(accountName, Date.now());
+  otpLastAppliedByAccount.delete(accountName);
+  otpLastStatusLogAtByAccount.delete(accountName);
 
   const wecomSent = await sendWeComSafely("接收验证码", accountName, async () => {
     return sendWeComMarkdown(
@@ -361,9 +390,9 @@ async function sendReceiveOtpEmail({ accountName, maskedPhone, reason }) {
         "### 抖音验证码",
         `账号：\`${accountName}\``,
         `手机号：\`${maskedPhone || "未识别"}\``,
-        `说明：${reason || "等待用户回复验证码"}`,
+        `说明：${reasonText}`,
         `时间：${formatNow()}`,
-        otpBridgeUrl ? `[打开验证码填写页](${otpBridgeUrl})` : "验证码填写页未配置，请检查 OTP_BRIDGE_BASE_URL。",
+        otpBridgeUrl ? `[打开验证码填写页](${otpBridgeUrl})` : "验证码填写页创建失败，请检查 OTP bridge 服务是否可用。",
       ]
         .filter(Boolean)
         .join("\n")
@@ -388,9 +417,9 @@ async function sendReceiveOtpEmail({ accountName, maskedPhone, reason }) {
       ${
         otpBridgeUrl
           ? `<p>推荐直接打开验证码填写页：<a href="${otpBridgeUrl.replace(/"/g, "&quot;")}">${otpBridgeUrl.replace(/</g, "&lt;")}</a></p>`
-          : ""
+          : "<p>验证码填写页创建失败，请检查 OTP bridge 服务是否可用。</p>"
       }
-      <p>说明: ${reason || "等待用户回复验证码"}</p>
+      <p>说明: ${reasonText}</p>
       <p>时间: ${formatNow()}</p>
     </div>
   `;
@@ -403,6 +432,10 @@ async function sendReceiveOtpEmail({ accountName, maskedPhone, reason }) {
     html
   });
   console.log(`账号 [${accountName}] 已发送接收验证码提醒邮件到: ${cfg.to}`);
+  return {
+    requestId,
+    otpBridgeUrl,
+  };
 }
 
 async function fetchOtpCodeFromEmailOnly({ accountName, sinceMs }) {
@@ -583,9 +616,9 @@ async function fetchOtpCodeFromEmailOnly({ accountName, sinceMs }) {
   };
 }
 
-async function fetchOtpCode({ accountName, sinceMs }) {
+async function fetchOtpCode({ accountName, requestId, sinceMs }) {
   try {
-    const bridgeResult = await fetchOtpCodeFromBridge({ accountName, sinceMs });
+    const bridgeResult = await fetchOtpCodeFromBridge({ requestId });
     if (bridgeResult.otpCode) {
       console.log(
         `账号 [${accountName}] 已提取验证码: ${bridgeResult.otpCode}（来自 OTP 中转页）`
@@ -602,7 +635,8 @@ async function fetchOtpCode({ accountName, sinceMs }) {
   const emailResult = await fetchOtpCodeFromEmailOnly({ accountName, sinceMs });
   return {
     ...emailResult,
-    bridgeEnabled: isOtpBridgeLinkEnabled()
+    bridgeEnabled: isOtpBridgeLinkEnabled(),
+    missingRequestId: !requestId
   };
 }
 

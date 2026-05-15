@@ -137,7 +137,7 @@ async function resendLoginReminderByStage(page, paths, accountName, baseReason) 
     await sendReceiveOtpEmail({
       accountName,
       maskedPhone,
-      reason: `${baseReason}（仍在等待用户邮件回复验证码）`
+      reason: `${baseReason}（仍在等待用户填写验证码）`
     }).catch((error) => {
       console.error(`账号 [${accountName}] 接收验证码重发邮件失败:`, error.message || error);
     });

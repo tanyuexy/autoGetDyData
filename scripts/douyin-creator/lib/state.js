@@ -3,6 +3,7 @@ const receiveOtpNotifySentByAccount = new Set();
 const faceNotifySentByAccount = new Set();
 const loginStageHintByAccount = new Map();
 const lastSmsConfirmClickAtByAccount = new Map();
+const otpRequestIdByAccount = new Map();
 const otpRequestSinceByAccount = new Map();
 const otpLastPollAtByAccount = new Map();
 const otpLastAppliedByAccount = new Map();
@@ -16,6 +17,7 @@ module.exports = {
   faceNotifySentByAccount,
   loginStageHintByAccount,
   lastSmsConfirmClickAtByAccount,
+  otpRequestIdByAccount,
   otpRequestSinceByAccount,
   otpLastPollAtByAccount,
   otpLastAppliedByAccount,
