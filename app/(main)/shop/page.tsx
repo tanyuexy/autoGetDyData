@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Space, Divider, App, Button, Select, Typography, DatePicker } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import AccountTable from "@/components/AccountTable";
@@ -9,6 +9,10 @@ import type { ShopAccount } from "@/types";
 
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
+
+/** Select 第一项「一键全选」的哨兵值，不会作为店铺名传给接口 */
+const MULTI_SELECT_ALL_SHOPS = "__toolbar_all_shop_export_shops__";
+
 const SHOP_SELECTION_CACHE_KEY = "shop:selectedShopNames";
 
 function readCachedShopSelection() {
@@ -114,6 +118,46 @@ export default function ShopPage() {
     isApplyingInitialSelectionRef.current = false;
   }, [shopNames]);
 
+  const shopSelectOptions = useMemo(
+    () => [
+      {
+        label: shopNames.length ? `全选（${shopNames.length} 个店铺）` : "全选（无店铺）",
+        value: MULTI_SELECT_ALL_SHOPS,
+        disabled: shopNames.length === 0,
+      },
+      ...shopNames.map((name) => ({ label: name, value: name })),
+    ],
+    [shopNames]
+  );
+
+  const shopsSanitized = useMemo(
+    () => selectedShopNames.filter((name) => shopNames.includes(name)),
+    [selectedShopNames, shopNames]
+  );
+
+  const shopSelectValue = useMemo(() => {
+    if (shopNames.length === 0) return [];
+    if (
+      shopsSanitized.length === shopNames.length &&
+      shopNames.every((name) => shopsSanitized.includes(name))
+    ) {
+      return [MULTI_SELECT_ALL_SHOPS];
+    }
+    return shopsSanitized;
+  }, [shopNames, shopsSanitized]);
+
+  const handleShopSelectChange = useCallback(
+    (vals: string[]) => {
+      const picked = [...new Set(vals)];
+      if (picked.includes(MULTI_SELECT_ALL_SHOPS)) {
+        setSelectedShopNames([...shopNames]);
+        return;
+      }
+      setSelectedShopNames(picked.filter((v) => v !== MULTI_SELECT_ALL_SHOPS));
+    },
+    [setSelectedShopNames, shopNames]
+  );
+
   async function handleAction(action: "export" | "feishu-sync" | "sync-feishu" | "retry-failed") {
     if (action !== "retry-failed" && !selectedShopNames.length) {
       message.warning("请先选择店铺");
@@ -187,12 +231,9 @@ export default function ShopPage() {
             allowClear
             placeholder="请选择店铺（默认选中全部配置店铺）"
             style={{ minWidth: 360 }}
-            value={selectedShopNames}
-            onChange={(v) => setSelectedShopNames(v)}
-            options={shopNames.map((name) => ({
-              label: name,
-              value: name,
-            }))}
+            value={shopSelectValue}
+            onChange={(v) => handleShopSelectChange(v as string[])}
+            options={shopSelectOptions}
           />
         </Space>
         <div>

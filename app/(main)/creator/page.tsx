@@ -7,6 +7,10 @@ import { useTaskContext } from "@/contexts/TaskContext";
 import type { CreatorAccount } from "@/types";
 
 const { Text } = Typography;
+
+/** Select 第一项「一键全选」的哨兵值，不会作为账号名传给接口 */
+const MULTI_SELECT_ALL_ACCOUNTS = "__toolbar_all_creator_export_accounts__";
+
 const CREATOR_SELECTION_CACHE_KEY = "creator:selectedAccounts";
 
 function readCachedCreatorSelection() {
@@ -70,6 +74,49 @@ export default function CreatorPage() {
     () => accounts.filter((a) => a.hasStorageState).map((a) => a.name),
     [accounts]
   );
+
+  const accountSelectOptions = useMemo(
+    () => [
+      {
+        label: validAccounts.length
+          ? `全选（${validAccounts.length} 个已登录账号）`
+          : "全选（无已登录账号）",
+        value: MULTI_SELECT_ALL_ACCOUNTS,
+        disabled: validAccounts.length === 0,
+      },
+      ...accounts.map((a) => ({
+        label: a.name,
+        value: a.name,
+        disabled: !a.hasStorageState,
+      })),
+    ],
+    [accounts, validAccounts.length]
+  );
+
+  const exportAccountsSanitized = useMemo(
+    () => selectedAccounts.filter((name) => validAccounts.includes(name)),
+    [selectedAccounts, validAccounts]
+  );
+
+  const accountSelectValue = useMemo(() => {
+    if (validAccounts.length === 0) return [];
+    if (
+      exportAccountsSanitized.length === validAccounts.length &&
+      validAccounts.every((name) => exportAccountsSanitized.includes(name))
+    ) {
+      return [MULTI_SELECT_ALL_ACCOUNTS];
+    }
+    return exportAccountsSanitized;
+  }, [validAccounts, exportAccountsSanitized]);
+
+  const handleAccountSelectChange = useCallback((vals: string[]) => {
+    const picked = [...new Set(vals)];
+    if (picked.includes(MULTI_SELECT_ALL_ACCOUNTS)) {
+      setSelectedAccounts([...validAccounts]);
+      return;
+    }
+    setSelectedAccounts(picked.filter((v) => v !== MULTI_SELECT_ALL_ACCOUNTS));
+  }, [setSelectedAccounts, validAccounts]);
 
   useEffect(() => {
     if (!validAccounts.length) return;
@@ -141,13 +188,9 @@ export default function CreatorPage() {
             allowClear
             placeholder="请选择账号（默认选中已登录账号）"
             style={{ minWidth: 360 }}
-            value={selectedAccounts}
-            onChange={(v) => setSelectedAccounts(v)}
-            options={accounts.map((a) => ({
-              label: a.name,
-              value: a.name,
-              disabled: !a.hasStorageState,
-            }))}
+            value={accountSelectValue}
+            onChange={(v) => handleAccountSelectChange(v as string[])}
+            options={accountSelectOptions}
           />
           <Text type="secondary" style={{ fontSize: 12 }}>
             未登录账号不可选
