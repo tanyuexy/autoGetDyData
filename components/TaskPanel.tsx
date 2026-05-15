@@ -28,6 +28,7 @@ const NAMESPACE_LABELS: Record<string, string> = {
   system: "系统",
   feishu: "飞书",
   review: "获取作品信息",
+  "review-sync": "同步作品信息",
 };
 
 interface RecentLogFile {

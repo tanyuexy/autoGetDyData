@@ -48,6 +48,7 @@ function normalizeItem(item) {
 
   return {
     postId,
+    userId: String(item?.user_id || ""),
     title: String(item?.description || "").trim(),
     publishDate: formatUnixSeconds(item?.create_time) || new Date().toISOString(),
     reviewStatus: inferReviewStatus(item),
@@ -58,7 +59,74 @@ function normalizeItem(item) {
 }
 
 /**
- * 通过 item/mget API 批量获取非通过作品的拒绝/优化原因
+ * 解析 review/result API 返回的违规原因字段，提取完整描述
+ */
+function parseReviewReasons(fields) {
+  const parts = [];
+  for (const field of fields) {
+    if (field.type === "multi_reason_detail" || field.type === "reason_detail") {
+      try {
+        const reasons = JSON.parse(field.value);
+        for (const r of reasons) {
+          const brief = r.brief || "";
+          const detail = r.detail || "";
+          if (brief && detail) {
+            parts.push(`【${brief}】${detail}`);
+          } else if (brief) {
+            parts.push(brief);
+          } else if (detail) {
+            parts.push(detail);
+          }
+          if (r.suggestion) {
+            parts.push(`修改建议：${r.suggestion}`);
+          }
+        }
+      } catch (_) {}
+    }
+  }
+  return parts.join(" | ") || null;
+}
+
+/**
+ * 通过 review/result API 获取单条作品的完整审核详情
+ */
+async function fetchReviewResult(page, userId, postId) {
+  try {
+    const params = new URLSearchParams({
+      user_id: userId,
+      object_id: postId,
+      scene: "73",
+      from_message: "false",
+      app_source: "0",
+      enter_from: "scene_73",
+      item_appeal_id: "0",
+      music_appeal_id: "0",
+      hide_nav_bar: "1",
+      hybrid_sdk_version: "bullet",
+      use_bdx: "1",
+      should_full_screen: "1",
+      sdkScene: "creator",
+      visit_platform: "creator",
+    });
+    const text = await page.evaluate(async (url) => {
+      const r = await fetch(url);
+      return await r.text();
+    }, `/aweme/v1/review/result/?${params.toString()}`);
+
+    const json = JSON.parse(text);
+    if (json?.status_code !== 0) return null;
+
+    const fields = json?.review_detail?.fields || [];
+    return parseReviewReasons(fields);
+  } catch (e) {
+    console.warn(`[review] 获取作品 ${postId} 审核详情失败: ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * 通过 item/mget API 批量获取非通过作品的拒绝/优化原因，
+ * 并进一步通过 review/result API 获取完整审核详情
  */
 async function fetchRejectionReasons(page, items) {
   const nonApproved = items.filter((i) => i.reviewStatus !== "approved");
@@ -68,6 +136,7 @@ async function fetchRejectionReasons(page, items) {
   const batchSize = 20;
   let filled = 0;
 
+  // 第一步：通过 item/mget 获取简要原因和 userId
   for (let i = 0; i < nonApproved.length; i += batchSize) {
     const batch = nonApproved.slice(i, i + batchSize);
     const ids = batch.map((it) => it.postId).join(",");
@@ -82,10 +151,15 @@ async function fetchRejectionReasons(page, items) {
 
       const apiItems = resp?.items || [];
       for (const apiItem of apiItems) {
+        const postId = String(apiItem.id);
+        const local = nonApproved.find((it) => it.postId === postId);
+        if (!local) continue;
+        // 补全 userId（item/list 中的 userId 可能更可靠）
+        if (!local.userId && apiItem.user_id) {
+          local.userId = String(apiItem.user_id);
+        }
         const detail = apiItem?.review?.details?.[0];
-        if (!detail?.text) continue;
-        const local = nonApproved.find((it) => it.postId === String(apiItem.id));
-        if (local) {
+        if (detail?.text) {
           local.rejectionReason = detail.text;
           filled++;
         }
@@ -95,7 +169,24 @@ async function fetchRejectionReasons(page, items) {
     }
   }
 
-  console.log(`[review] 已填充 ${filled}/${nonApproved.length} 条拒绝原因`);
+  console.log(`[review] 简要原因已填充 ${filled}/${nonApproved.length} 条`);
+
+  // 第二步：通过 review/result API 获取每条非通过作品的完整审核详情
+  let enrichedCount = 0;
+  for (const item of nonApproved) {
+    if (!item.userId) continue;
+    const fullReason = await fetchReviewResult(page, item.userId, item.postId);
+    if (fullReason) {
+      item.rejectionReason = fullReason;
+      enrichedCount++;
+    } else {
+      console.warn(`[review] 作品 ${item.postId} 未获取到完整审核详情，保留简要原因`);
+    }
+    // 避免请求过于频繁
+    await page.waitForTimeout(500);
+  }
+
+  console.log(`[review] 完整原因已填充 ${enrichedCount}/${nonApproved.length} 条`);
 }
 
 /**

@@ -90,9 +90,32 @@ function renderRejectionReason(item: ReviewItem) {
   }
 
   return (
-    <Typography.Text type="danger" style={{ fontSize: 12 }}>
-      {value.length > 60 ? `${value.slice(0, 60)}...` : value}
-    </Typography.Text>
+    <Popover
+      trigger="hover"
+      placement="topLeft"
+      styles={{ root: { maxWidth: 480 } }}
+      content={
+        <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.6, maxHeight: 400, overflow: "auto" }}>
+          {value}
+        </div>
+      }
+    >
+      <Typography.Text type="danger" style={{ fontSize: 12 }}>
+        <div
+          style={{
+            display: "-webkit-box",
+            WebkitBoxOrient: "vertical",
+            WebkitLineClamp: 2,
+            overflow: "hidden",
+            wordBreak: "break-word",
+            lineHeight: 1.5,
+            cursor: "pointer",
+          }}
+        >
+          {value}
+        </div>
+      </Typography.Text>
+    </Popover>
   );
 }
 
@@ -103,14 +126,16 @@ export default function ReviewPage() {
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [loadingItems, setLoadingItems] = useState(true);
   const [fetching, setFetching] = useState(false);
+  const [syncingFeishu, setSyncingFeishu] = useState(false);
   const [accounts, setAccounts] = useState<{ name: string }[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [accountFilter, setAccountFilter] = useState<string>("all");
+  const [workTitleFilter, setWorkTitleFilter] = useState<string>("");
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [reviewDateRange, setReviewDateRange] = useState<[Dayjs, Dayjs] | null>(() => [
-    dayjs().subtract(90, "day").startOf("day"),
-    dayjs().subtract(1, "day").startOf("day"),
+    dayjs().subtract(7, "day").startOf("day"),
+    dayjs().startOf("day"),
   ]);
 
   const fetchAccounts = useCallback(async () => {
@@ -200,6 +225,19 @@ export default function ReviewPage() {
     setSelectedAccounts(picked.filter((v) => v !== MULTI_SELECT_ALL_ACCOUNTS));
   }
 
+  const workTitleOptions = useMemo(() => {
+    const base = accountFilter === "all" ? items : items.filter((item) => item.accountName === accountFilter);
+    const seen = new Set<string>();
+    return base
+      .map((item) => item.title)
+      .filter((t) => {
+        if (!t || seen.has(t)) return false;
+        seen.add(t);
+        return true;
+      })
+      .map((t) => ({ label: t, value: t }));
+  }, [items, accountFilter]);
+
   const filteredItems = useMemo(() => {
     let result = items;
     if (accountFilter !== "all") {
@@ -208,8 +246,12 @@ export default function ReviewPage() {
     if (statusFilter !== "all") {
       result = result.filter((item) => item.reviewStatus === statusFilter);
     }
+    if (workTitleFilter.trim()) {
+      const kw = workTitleFilter.trim().toLowerCase();
+      result = result.filter((item) => item.title.toLowerCase().includes(kw));
+    }
     return result;
-  }, [items, statusFilter, accountFilter]);
+  }, [items, statusFilter, accountFilter, workTitleFilter]);
 
   async function handleDelete(id: string) {
     try {
@@ -266,6 +308,17 @@ export default function ReviewPage() {
       message.error(e.message || "启动作品信息抓取失败");
     }
     setFetching(false);
+  }
+
+  async function handleSyncFeishuLinks() {
+    setSyncingFeishu(true);
+    try {
+      const taskId = await startTask("/api/review/sync-feishu", {}, "review-sync");
+      message.info(`同步任务已启动: ${taskId}`);
+    } catch (e: any) {
+      message.error(e.message || "同步作品链接到飞书失败");
+    }
+    setSyncingFeishu(false);
   }
 
   async function handleOpenWorkDetail(item: ReviewItem) {
@@ -374,7 +427,7 @@ export default function ReviewPage() {
     {
       title: "原因",
       dataIndex: "rejectionReason",
-      width: 160,
+      width: 200,
       render: (_: string | undefined, r: ReviewItem) => renderRejectionReason(r),
     },
     {
@@ -467,7 +520,7 @@ export default function ReviewPage() {
             onChange={(dates) => setReviewDateRange(dates as [Dayjs, Dayjs] | null)}
             placeholder={["开始日期", "结束日期"]}
             allowClear
-            maxDate={dayjs().subtract(1, "day")}
+            maxDate={dayjs()}
           />
           <Button
             type="primary"
@@ -534,6 +587,26 @@ export default function ReviewPage() {
           onChange={(v) => setAccountFilter(v)}
           options={[{ label: "全部账号", value: "all" }, ...accountOptions]}
         />
+        <Select
+          size="small"
+          showSearch
+          allowClear
+          style={{ width: 220 }}
+          placeholder="搜索作品名"
+          value={workTitleFilter || undefined}
+          onChange={(v) => setWorkTitleFilter(v || "")}
+          options={workTitleOptions}
+        />
+        <Button
+          type="primary"
+          size="small"
+          onClick={handleSyncFeishuLinks}
+          loading={syncingFeishu}
+          icon={<LinkOutlined />}
+          style={{ marginLeft: "auto", fontWeight: 500 }}
+        >
+          同步到飞书
+        </Button>
       </div>
 
       <Table
