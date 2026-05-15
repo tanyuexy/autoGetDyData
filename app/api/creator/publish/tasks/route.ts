@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
       id,
       createdAt: now,
       updatedAt: now,
+      displayUpdatedAt: now,
       accountName,
       status: "pending",
       payload: {
@@ -82,7 +83,9 @@ export async function PATCH(req: NextRequest) {
           await killTask(task.taskId);
         }
         task.status = "cancelled";
-        task.updatedAt = new Date().toISOString();
+        const ts = new Date().toISOString();
+        task.updatedAt = ts;
+        task.displayUpdatedAt = ts;
         task.lastError = "管理员手动终止";
         killed++;
       }
@@ -106,7 +109,9 @@ export async function PATCH(req: NextRequest) {
           await killTask(task.taskId);
         }
         task.status = "cancelled";
-        task.updatedAt = new Date().toISOString();
+        const ts = new Date().toISOString();
+        task.updatedAt = ts;
+        task.displayUpdatedAt = ts;
         task.lastError = "管理员手动终止";
         killed++;
       }
@@ -125,7 +130,9 @@ export async function PATCH(req: NextRequest) {
       for (const t of tasks) {
         if (!ids.includes(t.id)) continue;
         t.status = "queued";
-        t.updatedAt = new Date().toISOString();
+        const ts = new Date().toISOString();
+        t.updatedAt = ts;
+        t.displayUpdatedAt = ts;
         started++;
       }
       await writeCreatorPublishTasks(tasks);

@@ -7,7 +7,7 @@ const {
   sendFaceVerifyEmail,
   sendSmsVerifyEmail,
   sendReceiveOtpEmail,
-  fetchOtpCodeFromEmail
+  fetchOtpCode
 } = require("./mail");
 const { captureFaceQrScreenshot } = require("./qr");
 const {
@@ -591,7 +591,7 @@ async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options =
   otpLastPollAtByAccount.set(accountName, now);
 
   const sinceMs = otpRequestSinceByAccount.get(accountName) || now;
-  const pollResult = await fetchOtpCodeFromEmail({ accountName, sinceMs });
+  const pollResult = await fetchOtpCode({ accountName, sinceMs });
   const otpCode = pollResult.otpCode || "";
   const lastStatusLogAt = otpLastStatusLogAtByAccount.get(accountName) || 0;
   const shouldLogStatus = now - lastStatusLogAt >= 15000;
@@ -600,6 +600,8 @@ async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options =
       console.log(
         `账号 [${accountName}] 未配置完整 OTP_IMAP_*，暂无法从邮箱读取验证码。`
       );
+    } else if (pollResult.bridgeEnabled) {
+      console.log(`账号 [${accountName}] 正在等待 OTP 中转页或邮箱中的新验证码。`);
     } else if (pollResult.checkedCount === 0) {
       console.log(`账号 [${accountName}] 轮询邮箱中：近时间窗口未发现新邮件。`);
     } else if (pollResult.matchedSubjectCount === 0) {
@@ -621,7 +623,7 @@ async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options =
   const submitted = await fillReceiveOtpCodeAndSubmit(page, otpCode);
   if (submitted) {
     otpLastAppliedByAccount.set(accountName, otpCode);
-    console.log(`账号 [${accountName}] 已自动填入邮件回复验证码并提交。`);
+    console.log(`账号 [${accountName}] 已自动填入验证码并提交。`);
   }
   return true;
 }

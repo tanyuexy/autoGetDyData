@@ -98,17 +98,6 @@ export default function CreatorPage() {
     [selectedAccounts, validAccounts]
   );
 
-  const accountSelectValue = useMemo(() => {
-    if (validAccounts.length === 0) return [];
-    if (
-      exportAccountsSanitized.length === validAccounts.length &&
-      validAccounts.every((name) => exportAccountsSanitized.includes(name))
-    ) {
-      return [MULTI_SELECT_ALL_ACCOUNTS];
-    }
-    return exportAccountsSanitized;
-  }, [validAccounts, exportAccountsSanitized]);
-
   const handleAccountSelectChange = useCallback((vals: string[]) => {
     const picked = [...new Set(vals)];
     if (picked.includes(MULTI_SELECT_ALL_ACCOUNTS)) {
@@ -143,7 +132,7 @@ export default function CreatorPage() {
   }, [validAccounts]);
 
   async function handleAction(action: "export" | "feishu-sync" | "sync-feishu") {
-    if (!selectedAccounts.length) {
+    if (!exportAccountsSanitized.length) {
       message.warning("请先选择账号");
       return;
     }
@@ -151,7 +140,7 @@ export default function CreatorPage() {
     try {
       window.localStorage.setItem(
         CREATOR_SELECTION_CACHE_KEY,
-        JSON.stringify(selectedAccounts)
+        JSON.stringify(exportAccountsSanitized)
       );
     } catch {}
 
@@ -162,7 +151,11 @@ export default function CreatorPage() {
     };
 
     try {
-      await startTask(endpoints[action], { accounts: selectedAccounts }, "creator-export");
+      await startTask(
+        endpoints[action],
+        { accounts: exportAccountsSanitized },
+        "creator-export"
+      );
       message.info("任务已启动");
     } catch (e: any) {
       message.error(e.message || "启动任务失败");
@@ -188,7 +181,7 @@ export default function CreatorPage() {
             allowClear
             placeholder="请选择账号（默认选中已登录账号）"
             style={{ minWidth: 360 }}
-            value={accountSelectValue}
+            value={exportAccountsSanitized}
             onChange={(v) => handleAccountSelectChange(v as string[])}
             options={accountSelectOptions}
           />
@@ -233,6 +226,7 @@ export default function CreatorPage() {
         accounts={accounts}
         loading={loading}
         onRefresh={fetchAccounts}
+        centerHeader
       />
     </Space>
   );

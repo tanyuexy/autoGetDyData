@@ -57,6 +57,7 @@ export interface ConfigData {
     creator: { baseUrl?: string; appToken: string; tableId: string; keepRows?: number };
     task: { baseUrl?: string; appToken: string; tableId: string };
     product: { baseUrl?: string; appToken: string; tableId: string };
+    shopInfo: { baseUrl?: string; appToken: string; tableId: string };
   };
 }
 

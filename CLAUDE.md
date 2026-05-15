@@ -15,6 +15,7 @@ npx tsc --noEmit     # TypeScript type check
 ```
 
 **Scripts** (run via `node scripts/run.js <route>`):
+
 - `creator:export` / `creator:export-feishu` — export post data from Douyin Creator, optionally sync to Feishu
 - `creator:login` — manual login for creator accounts
 - `creator:publish-video` / `creator:publish-article` — publish content
@@ -51,6 +52,7 @@ All Douyin Creator Playwright scripts reuse `scripts/douyin-creator/lib/login.js
 ### Shop account automation
 
 **Two modes:**
+
 - `shop:login` — pure login only, saves cookies and exits (no data export)
 - `shop:export` — full login + post-login flow (shop selection → data download → merge → Feishu sync)
 
@@ -69,6 +71,7 @@ Both use `scripts/douyin-shop/cli.js` with different command branches. Accounts 
 **Stage detection** (`page-utils.js` `detectStage()`): Recognizes LOGIN_FORM (phone + email tabs), SHOP_PICKER, COMPASS_VIDEO, COMPASS_GRAPHIC, COMPASS_OTHER, FXG_WORKSPACE, CAPTCHA, UNKNOWN. `isAuthenticatedStage()` returns true for SHOP_PICKER + all COMPASS/FXG stages.
 
 **Key login flow** (`login.js` `runShopLogin()`):
+
 - Tries cookie reuse first (`tryReuseCookieLogin`)
 - Falls back to full email+password login with captcha handling
 - Supports `loginOnly` option to skip `runPostLoginFlow()` (shop selection + data export)
@@ -86,6 +89,7 @@ Both use `scripts/douyin-shop/cli.js` with different command branches. Accounts 
 ### New page checklist
 
 To add a new page:
+
 1. Create `app/(main)/<route>/page.tsx` ("use client", wrapped by `AppLayout` + `TaskProvider`)
 2. Add menu item in `components/AppLayout.tsx` `menuItems` array
 3. Add API routes under `app/api/<route>/`
@@ -97,7 +101,26 @@ To add a new page:
 使用 antd 组件前，先确认该属性/方法在当前版本是否已弃用（deprecated）。遇到控制台 deprecation warning 时主动修复，不要留下已知的弃用警告。
 
 已知的弃用项：
+
 - `InputNumber` 的 `addonBefore` / `addonAfter` → 用 `Space.Compact` + `Button` 替代
 - `Modal` 的 `destroyOnClose` → 用 `destroyOnHidden` 替代
 - `Space` 的 `direction` → 用 `orientation` 替代
 - `Tag` 的 `bordered={false}`（antd v6）→ 用 **`variant="filled"`** 替代；“无边框实心”语义与旧时 `bordered={false}` 一致。**不要**把这些 Tag 写法套到 **`Table`** 上：`Table` 仍是 `bordered={false}` 控制是否显示格子线，`Table` 没有与 Tag 通用的 `variant` 用法。
+
+### 企业微信推送与验证码回复
+
+抖创登录验证可使用企业微信 webhook 推送提醒，但 webhook 只负责发消息，不接收用户回复。当前推荐链路是：企业微信推送公网 OTP 中转页链接（优先）或 `mailto:` 链接（兜底）→ 用户填写验证码 → 当前项目通过 HTTP 轮询 OTP 中转服务，再回退 IMAP 轮询并自动回填验证码。
+
+相关配置：
+
+- `WECOM_NOTIFY_ENABLED=true`
+- `WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx`
+- `WECOM_MENTION_USERS` / `WECOM_MENTION_MOBILES` 可选，用于提醒指定成员
+- `OTP_BRIDGE_BASE_URL`：验证码填写页公网地址；配置后企微优先发这个链接
+- `OTP_BRIDGE_ACCESS_TOKEN`：公网 OTP 中转服务的可选访问令牌
+- `OTP_BRIDGE_TIMEOUT_MS`：当前项目轮询公网 OTP 中转服务的超时时间
+- `OTP_REPLY_TO`：`mailto:` 链接中的验证码收件邮箱，默认回退到 `OTP_IMAP_USER`
+- `OTP_REPLY_SUBJECT_PREFIX`：验证码回复邮件主题前缀，默认 `[抖音验证码回复]`
+- `OTP_IMAP_HOST` / `OTP_IMAP_USER` / `OTP_IMAP_PASS`：验证码收件箱 IMAP 轮询配置
+
+不要把 `WECOM_WEBHOOK_URL`、`OTP_IMAP_PASS`、`SMTP_PASS` 等敏感信息提交到仓库。

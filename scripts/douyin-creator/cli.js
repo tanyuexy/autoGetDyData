@@ -75,12 +75,12 @@ async function saveAuthIfPossible(context, page, paths, accountName, reason) {
 
     if (!loggedIn) {
       console.log(
-        `账号 [${accountName}] ${reason}，检测到上下文内已有 ${cookies.length} 个 cookie，先补存一次登录态。`
+        `账号 [${accountName}] ${reason}，检测到上下文内已有 ${cookies.length} 个 cookie，但未检测到已登录，跳过保存。`
       );
-    } else {
-      console.log(`账号 [${accountName}] ${reason}，立即保存登录态。`);
+      return false;
     }
 
+    console.log(`账号 [${accountName}] ${reason}，立即保存登录态。`);
     await saveAuth(context, paths, accountName);
     return true;
   } catch (error) {

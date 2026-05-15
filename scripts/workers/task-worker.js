@@ -81,13 +81,29 @@ async function readJob(taskId) {
   return db.collection("task_jobs").findOne({ taskId });
 }
 
-function buildPatchUpdate(patch, updatedAt) {
+const TASK_TABLE_PATCH_KEYS = new Set([
+  "status",
+  "lastError",
+  "accountName",
+  "payload",
+  "feishuRowNumber",
+]);
+
+function publishPatchTouchesDisplay(patch) {
+  return Object.keys(patch).some((k) => TASK_TABLE_PATCH_KEYS.has(k));
+}
+
+function buildPatchUpdate(patch, updatedAt, options = {}) {
   const $set = { updatedAt: new Date() };
   if (updatedAt !== undefined) $set.updatedAt = updatedAt;
   const $unset = {};
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) $unset[key] = "";
     else $set[key] = value;
+  }
+  if (options.forCreatorPublish && publishPatchTouchesDisplay(patch)) {
+    const u = $set.updatedAt;
+    $set.displayUpdatedAt = u instanceof Date ? u.toISOString() : new Date(u).toISOString();
   }
   return {
     ...(Object.keys($set).length ? { $set } : {}),
@@ -283,7 +299,7 @@ async function patchTask(id, patch) {
   const db = await getDb();
   await db.collection("creator_publish_tasks").updateOne(
     { id },
-    buildPatchUpdate(patch, new Date().toISOString())
+    buildPatchUpdate(patch, new Date().toISOString(), { forCreatorPublish: true })
   );
 }
 
@@ -298,6 +314,7 @@ async function claimTask(task, runtimeTaskId) {
         taskId: runtimeTaskId,
         workerId: WORKER_ID,
         updatedAt: now,
+        displayUpdatedAt: now,
       },
       $unset: { lastError: "" },
     }

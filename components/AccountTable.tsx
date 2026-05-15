@@ -33,6 +33,8 @@ interface CreatorProps {
   accounts: CreatorAccount[];
   loading: boolean;
   onRefresh: () => void | Promise<void>;
+  /** 表头与单元格内容居中（抖创数据页、配置管理等） */
+  centerHeader?: boolean;
   onLogin?: (accountName: string, mode: "email_qr" | "local_manual") => void;
   onAddAccount?: (name: string) => void;
   onDeleteAccount?: (name: string) => void;
@@ -44,6 +46,7 @@ interface ShopProps {
   accounts: ShopAccount[];
   loading: boolean;
   onRefresh: () => void;
+  centerHeader?: boolean;
 }
 
 type Props = CreatorProps | ShopProps;
@@ -166,7 +169,7 @@ function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | n
 }
 
 export default function AccountTable(props: Props) {
-  const { accounts, loading, onRefresh, type } = props;
+  const { accounts, loading, onRefresh, type, centerHeader = false } = props;
   const { message } = App.useApp();
 
   if (type === "creator") {
@@ -295,8 +298,9 @@ export default function AccountTable(props: Props) {
         title: "账号名称",
         key: "name",
         ellipsis: true,
+        ...(centerHeader ? { align: "center" as const } : {}),
         render: (_: unknown, row: CreatorAccount) => (
-          <Tooltip title={row.name} placement="topLeft">
+          <Tooltip title={row.name} placement={centerHeader ? "top" : "topLeft"}>
             <span
               style={{
                 fontWeight: 500,
@@ -313,6 +317,7 @@ export default function AccountTable(props: Props) {
         dataIndex: "cookieStatus",
         key: "cookieStatus",
         width: 112,
+        ...(centerHeader ? { align: "center" as const } : {}),
         render: (_: unknown, row: CreatorAccount) => renderCookieTag(row),
       },
       {
@@ -320,6 +325,7 @@ export default function AccountTable(props: Props) {
         dataIndex: "lastLoginAt",
         key: "lastLoginAt",
         width: 132,
+        ...(centerHeader ? { align: "center" as const } : {}),
         render: (_: unknown, row: CreatorAccount) => (
           <span
             style={{
@@ -335,7 +341,7 @@ export default function AccountTable(props: Props) {
       {
         title: "操作",
         key: "actions",
-        align: "right",
+        align: centerHeader ? "center" : "right",
         width: onLogin ? 280 : 200,
         render: (_: unknown, row: CreatorAccount) => {
           const hasReusableLoginState =
@@ -351,7 +357,7 @@ export default function AccountTable(props: Props) {
             ([
               {
                 key: "email_qr",
-                label: "邮箱二维码登录",
+                label: "远程扫码登录（企微/邮件提醒）",
                 onClick: () => onLogin(row.name, "email_qr"),
               },
               {
@@ -362,7 +368,7 @@ export default function AccountTable(props: Props) {
             ] as const);
 
           return (
-            <Flex wrap="wrap" gap={6} justify="flex-end" align="center">
+            <Flex wrap="wrap" gap={6} justify={centerHeader ? "center" : "flex-end"} align="center">
               {onLogin && loginMenuItems && (
                 <Dropdown
                   trigger={["hover"]}
@@ -504,11 +510,13 @@ export default function AccountTable(props: Props) {
                   fontWeight: 500,
                   fontSize: 12,
                   letterSpacing: "0.02em",
+                  ...(centerHeader ? { textAlign: "center" as const } : {}),
                 },
               },
               body: {
                 cell: {
                   padding: "12px 14px",
+                  ...(centerHeader ? { textAlign: "center" as const } : {}),
                 },
               },
             }}
@@ -537,8 +545,9 @@ export default function AccountTable(props: Props) {
       title: "邮箱",
       key: "email",
       ellipsis: true,
+      ...(centerHeader ? { align: "center" as const } : {}),
       render: (_: unknown, row: ShopAccount) => (
-        <Tooltip title={row.email} placement="topLeft">
+        <Tooltip title={row.email} placement={centerHeader ? "top" : "topLeft"}>
           <span style={{ fontWeight: 500, color: "rgba(15, 23, 42, 0.88)" }}>{row.email}</span>
         </Tooltip>
       ),
@@ -548,6 +557,7 @@ export default function AccountTable(props: Props) {
       dataIndex: "cookieStatus",
       key: "cookieStatus",
       width: 112,
+      ...(centerHeader ? { align: "center" as const } : {}),
       render: (_: unknown, row: ShopAccount) => renderCookieTag(row),
     },
     {
@@ -555,6 +565,7 @@ export default function AccountTable(props: Props) {
       dataIndex: "lastLoginAt",
       key: "lastLoginAt",
       width: 132,
+      ...(centerHeader ? { align: "center" as const } : {}),
       render: (_: unknown, row: ShopAccount) => (
         <span
           style={{
@@ -614,11 +625,13 @@ export default function AccountTable(props: Props) {
                 fontWeight: 500,
                 fontSize: 12,
                 letterSpacing: "0.02em",
+                ...(centerHeader ? { textAlign: "center" as const } : {}),
               },
             },
             body: {
               cell: {
                 padding: "12px 14px",
+                ...(centerHeader ? { textAlign: "center" as const } : {}),
               },
             },
           }}

@@ -40,10 +40,27 @@ export type CreatorPublishPayload =
   | CreatorPublishVideoPayload
   | CreatorPublishArticlePayload;
 
+const TASK_TABLE_PATCH_KEYS = new Set<string>([
+  "status",
+  "lastError",
+  "accountName",
+  "payload",
+  "feishuRowNumber",
+]);
+
+export function patchTouchesTaskTable(patch: Partial<CreatorPublishTask>): boolean {
+  for (const k of TASK_TABLE_PATCH_KEYS) {
+    if (k in patch) return true;
+  }
+  return false;
+}
+
 export interface CreatorPublishTask {
   id: string;
   createdAt: string;
   updatedAt: string;
+  /** 表格可见字段（见 patchTouchesTaskTable）最后变更时间；未迁移的旧任务可回落到 updatedAt */
+  displayUpdatedAt?: string;
   accountName: string;
   status: CreatorPublishTaskStatus;
   payload: CreatorPublishPayload;
@@ -101,7 +118,12 @@ export async function patchCreatorPublishTask(
 ): Promise<CreatorPublishTask | null> {
   const db = await getDb();
   const updatedAt = new Date().toISOString();
-  const nextPatch = { ...patch, updatedAt };
+  const touchDisplay = patchTouchesTaskTable(patch);
+  const nextPatch = {
+    ...patch,
+    updatedAt,
+    ...(touchDisplay ? { displayUpdatedAt: updatedAt } : {}),
+  };
   await db.collection("creator_publish_tasks").updateOne(
     { id },
     {

@@ -217,12 +217,13 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin, ref
   }
 
   const columns = [
-    { title: "邮箱", dataIndex: "email", key: "email" },
+    { title: "邮箱", dataIndex: "email", key: "email", align: "center" as const },
     {
       title: "登录态",
       dataIndex: "hasStorageState",
       key: "hasStorageState",
       width: 110,
+      align: "center" as const,
       render: (_: any, row: EmailEntry) => renderCookieTag(row),
     },
     {
@@ -230,6 +231,7 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin, ref
       dataIndex: "lastLoginAt",
       key: "lastLoginAt",
       width: 130,
+      align: "center" as const,
       render: (_: any, row: EmailEntry) => {
         const acc = accountMap.get(row.email);
         return formatShortDateTime(acc?.lastLoginAt);
@@ -239,19 +241,21 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin, ref
       title: "密码",
       dataIndex: "password",
       key: "password",
+      align: "center" as const,
       render: () => "********",
     },
     {
       title: "操作",
       key: "actions",
       width: 280,
+      align: "center" as const,
       render: (_: any, row: EmailEntry, index: number) => {
         const acc = accountMap.get(row.email);
         const hasState = acc?.hasStorageState;
         const isVerifying = verifying.has(row.email);
 
         return (
-          <Space>
+          <Space wrap style={{ width: "100%", justifyContent: "center" }}>
             {onLogin && (
               <Button
                 size="small"
@@ -303,6 +307,10 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin, ref
         pagination={false}
         size="small"
         locale={{ emptyText: "暂无邮箱账号" }}
+        styles={{
+          header: { cell: { textAlign: "center" } },
+          body: { cell: { textAlign: "center" } },
+        }}
       />
       <Modal
         title={editIndex !== null ? "编辑邮箱" : "添加邮箱"}

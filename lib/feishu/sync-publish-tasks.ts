@@ -328,15 +328,27 @@ async function syncPublishTasks(options = {}) {
     for (const [recordId, task] of existingTasksByRecordId) {
       const nextRowNumber = rowNumberMap.get(recordId);
       if ((task.feishuRowNumber || null) === (nextRowNumber || null)) continue;
+      const rowTs = new Date().toISOString();
       await db.collection("creator_publish_tasks").updateOne(
         { id: task.id },
         nextRowNumber
-          ? { $set: { feishuRowNumber: nextRowNumber, updatedAt: new Date().toISOString() } }
-          : { $unset: { feishuRowNumber: "" }, $set: { updatedAt: new Date().toISOString() } }
+          ? {
+              $set: {
+                feishuRowNumber: nextRowNumber,
+                updatedAt: rowTs,
+                displayUpdatedAt: rowTs,
+              },
+            }
+          : {
+              $unset: { feishuRowNumber: "" },
+              $set: { updatedAt: rowTs, displayUpdatedAt: rowTs },
+            }
       );
       existingTasksByRecordId.set(recordId, {
         ...task,
         feishuRowNumber: nextRowNumber,
+        updatedAt: rowTs,
+        displayUpdatedAt: rowTs,
       });
       rowUpdatedCount++;
     }
@@ -412,14 +424,12 @@ async function syncPublishTasks(options = {}) {
       }
 
       if (syncState.action === "backfill-hash-only") {
-        const nowIso = new Date().toISOString();
         const feishuRowNumber = rowNumberMap.get(record.record_id || "");
         await db.collection("creator_publish_tasks").updateOne(
           { id: existingTask.id },
           {
             $set: {
               feishuContentHash: contentHash,
-              updatedAt: nowIso,
               ...(feishuRowNumber ? { feishuRowNumber } : {}),
             },
             ...(feishuRowNumber ? {} : { $unset: { feishuRowNumber: "" } }),
@@ -429,7 +439,6 @@ async function syncPublishTasks(options = {}) {
           ...existingTask,
           feishuContentHash: contentHash,
           feishuRowNumber,
-          updatedAt: nowIso,
         });
         backfilledHashCount++;
         unchangedCount++;
@@ -480,6 +489,7 @@ async function syncPublishTasks(options = {}) {
                 feishuRecordId: record.record_id || "",
                 feishuContentHash: contentHash,
                 updatedAt: nowIso,
+                displayUpdatedAt: nowIso,
                 ...(feishuRowNumber ? { feishuRowNumber } : {}),
               },
               $unset: {
@@ -499,6 +509,7 @@ async function syncPublishTasks(options = {}) {
             feishuContentHash: contentHash,
             feishuRowNumber,
             updatedAt: nowIso,
+            displayUpdatedAt: nowIso,
           });
           log(`    ✓ 已更新并重置为待执行: ${existingTask.id}`);
           updatedCount++;
@@ -507,6 +518,7 @@ async function syncPublishTasks(options = {}) {
             id: generateTaskId(),
             createdAt: nowIso,
             updatedAt: nowIso,
+            displayUpdatedAt: nowIso,
             accountName: snapshot.accountName,
             status: autoStart ? "queued" : "pending",
             feishuRecordId: record.record_id || "",

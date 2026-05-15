@@ -49,6 +49,25 @@ const STATUS_MAP: Record<TaskStatus, { color: string; text: string }> = {
   cancelled: { color: "warning", text: "已取消" },
 };
 
+type TaskStatusFilter = "all" | TaskStatus;
+
+/** 店铺即任务的 accountName（飞书列「所属店铺」写入该字段） */
+type TaskShopFilter = "all" | string;
+
+const TASK_STATUS_ORDER: TaskStatus[] = [
+  "pending",
+  "queued",
+  "running",
+  "success",
+  "failed",
+  "cancelled",
+];
+
+const TASK_STATUS_SELECT_OPTIONS: { label: string; value: TaskStatusFilter }[] = [
+  { label: "全部状态", value: "all" },
+  ...TASK_STATUS_ORDER.map((s) => ({ label: STATUS_MAP[s].text, value: s })),
+];
+
 const MULTILINE_TEXT_STYLE = {
   display: "-webkit-box",
   WebkitBoxOrient: "vertical",
@@ -161,6 +180,8 @@ type PublishTask = {
   id: string;
   createdAt: string;
   updatedAt: string;
+  /** 表格可见字段最后变更时间，见 lib/creatorPublishStore#patchTouchesTaskTable */
+  displayUpdatedAt?: string;
   accountName: string;
   status: TaskStatus;
   payload: TaskPayload;
@@ -213,6 +234,8 @@ export default function CreatorPublishPage() {
   const [scheduleColumnSortOrder, setScheduleColumnSortOrder] = useState<"ascend" | "descend" | null>(
     null
   );
+  const [taskStatusFilter, setTaskStatusFilter] = useState<TaskStatusFilter>("all");
+  const [taskShopFilter, setTaskShopFilter] = useState<TaskShopFilter>("all");
 
   const schedulePresets = useMemo(() => scheduleQuickPresets(), []);
 
@@ -222,6 +245,29 @@ export default function CreatorPublishPage() {
     if (!d.isValid()) return [];
     return buildScheduleTimeOptionsForDay(d);
   }, [editState?.scheduleAt]);
+
+  const taskShopSelectOptions = useMemo(() => {
+    const names = [...new Set(tasks.map((t) => t.accountName).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, "zh-CN")
+    );
+    return [
+      { label: "全部店铺", value: "all" as const },
+      ...names.map((n) => ({ label: n, value: n })),
+    ];
+  }, [tasks]);
+
+  const filteredTasks = useMemo(() => {
+    let list = tasks;
+    if (taskStatusFilter !== "all") list = list.filter((t) => t.status === taskStatusFilter);
+    if (taskShopFilter !== "all") list = list.filter((t) => t.accountName === taskShopFilter);
+    return list;
+  }, [taskShopFilter, taskStatusFilter, tasks]);
+
+  useEffect(() => {
+    if (taskShopFilter === "all") return;
+    const names = new Set(tasks.map((t) => t.accountName));
+    if (!names.has(taskShopFilter)) setTaskShopFilter("all");
+  }, [taskShopFilter, tasks]);
 
   const terminableSelectedRowKeys = useMemo(() => {
     const selected = new Set(selectedRowKeys);
@@ -860,10 +906,11 @@ export default function CreatorPublishPage() {
     },
     {
       title: "更新时间",
-      dataIndex: "updatedAt",
+      key: "taskDisplayTime",
       width: 100,
       align: "center" as const,
-      render: (v: string) => dayjs(v).format("MM-DD HH:mm"),
+      render: (_: unknown, r: PublishTask) =>
+        dayjs(r.displayUpdatedAt ?? r.updatedAt ?? r.createdAt).format("MM-DD HH:mm"),
     },
     {
       title: "操作",
@@ -1115,13 +1162,33 @@ export default function CreatorPublishPage() {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            gap: 6,
+            gap: 12,
             flexWrap: "wrap",
           }}
         >
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            标题、正文等可悬浮查看完整内容；广审批文号、错误最多显示两行
-          </Text>
+          <Space size={8} wrap>
+            <Select<TaskStatusFilter>
+              value={taskStatusFilter}
+              onChange={setTaskStatusFilter}
+              options={TASK_STATUS_SELECT_OPTIONS}
+              style={{ width: 128 }}
+              size="small"
+              popupMatchSelectWidth={false}
+              aria-label="按状态筛选任务"
+            />
+            <Select<TaskShopFilter>
+              value={taskShopFilter}
+              onChange={setTaskShopFilter}
+              options={taskShopSelectOptions}
+              style={{ minWidth: 160, maxWidth: 280 }}
+              size="small"
+              showSearch
+              optionFilterProp="label"
+              popupMatchSelectWidth={false}
+              placeholder="全部店铺"
+              aria-label="按店铺筛选任务"
+            />
+          </Space>
           <Space size={4} wrap>
           <Button
             type="primary"
@@ -1202,7 +1269,7 @@ export default function CreatorPublishPage() {
         size="small"
         bordered
         loading={loadingTasks}
-        dataSource={tasks}
+        dataSource={filteredTasks}
         columns={columns as any}
         tableLayout="fixed"
         pagination={{ pageSize: 20, showSizeChanger: false }}

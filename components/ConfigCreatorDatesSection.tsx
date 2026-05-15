@@ -16,14 +16,16 @@ export default function ConfigCreatorDatesSection({
   onChange,
 }: Props) {
   const columns = [
-    { title: "账号名称", dataIndex: "name", key: "name", width: 200 },
+    { title: "账号名称", dataIndex: "name", key: "name", width: 200, align: "center" as const },
     {
       title: "导出开始日期",
       dataIndex: "date",
       key: "date",
       width: 200,
+      align: "center" as const,
       render: (_: any, record: any) => (
         <Input
+          style={{ textAlign: "center" }}
           value={record.date || ""}
           placeholder='如 "3.1" 表示当年3月1日'
           onChange={(e) => {
@@ -67,6 +69,10 @@ export default function ConfigCreatorDatesSection({
         pagination={false}
         size="small"
         locale={{ emptyText: "暂无账号" }}
+        styles={{
+          header: { cell: { textAlign: "center" } },
+          body: { cell: { textAlign: "center" } },
+        }}
       />
     </div>
   );

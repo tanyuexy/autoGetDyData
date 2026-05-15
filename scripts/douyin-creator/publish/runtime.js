@@ -377,19 +377,17 @@ async function checkBodyFilled(page, expectedBody) {
   if (!expectedBody) return;
   const editor = page.locator('[contenteditable="true"]').first();
   const text = (await editor.textContent().catch(() => "")).trim();
-  // 编辑器内通过 Enter 换行会插入零宽空格，统一清理后再比较
+  // 编辑器内通过 Enter 换行会插入零宽空格，替换为空格后再比较（与 \n 行为一致）
   const clean = (s) =>
     s
-      .replace(/[​‌‍﻿]/g, "")
+      .replace(/[​‌‍﻿]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
   if (text && clean(text).includes(clean(expectedBody.slice(0, 20)))) {
     checkOk("正文校验通过");
     return;
   }
-  throw new Error(
-    `正文校验失败：编辑器内未找到期望正文 "${expectedBody.slice(0, 40)}"`
-  );
+  throw new Error(`正文校验失败：编辑器内未找到期望正文 "${expectedBody}"`);
 }
 
 async function checkHashtagsSet(page, expectedHashtags) {

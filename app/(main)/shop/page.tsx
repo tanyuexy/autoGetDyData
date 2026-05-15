@@ -135,17 +135,6 @@ export default function ShopPage() {
     [selectedShopNames, shopNames]
   );
 
-  const shopSelectValue = useMemo(() => {
-    if (shopNames.length === 0) return [];
-    if (
-      shopsSanitized.length === shopNames.length &&
-      shopNames.every((name) => shopsSanitized.includes(name))
-    ) {
-      return [MULTI_SELECT_ALL_SHOPS];
-    }
-    return shopsSanitized;
-  }, [shopNames, shopsSanitized]);
-
   const handleShopSelectChange = useCallback(
     (vals: string[]) => {
       const picked = [...new Set(vals)];
@@ -159,7 +148,7 @@ export default function ShopPage() {
   );
 
   async function handleAction(action: "export" | "feishu-sync" | "sync-feishu" | "retry-failed") {
-    if (action !== "retry-failed" && !selectedShopNames.length) {
+    if (action !== "retry-failed" && !shopsSanitized.length) {
       message.warning("请先选择店铺");
       return;
     }
@@ -172,7 +161,7 @@ export default function ShopPage() {
       try {
         window.localStorage.setItem(
           SHOP_SELECTION_CACHE_KEY,
-          JSON.stringify(selectedShopNames)
+          JSON.stringify(shopsSanitized)
         );
       } catch {}
     }
@@ -190,11 +179,11 @@ export default function ShopPage() {
           ? {}
           : action === "export"
             ? {
-                shopNames: selectedShopNames,
+                shopNames: shopsSanitized,
                 startDate: exportDateRange?.[0]?.format("YYYY-MM-DD"),
                 endDate: exportDateRange?.[1]?.format("YYYY-MM-DD"),
               }
-            : { shopNames: selectedShopNames },
+            : { shopNames: shopsSanitized },
         "shop-export"
       );
       message.info("任务已启动");
@@ -231,7 +220,7 @@ export default function ShopPage() {
             allowClear
             placeholder="请选择店铺（默认选中全部配置店铺）"
             style={{ minWidth: 360 }}
-            value={shopSelectValue}
+            value={shopsSanitized}
             onChange={(v) => handleShopSelectChange(v as string[])}
             options={shopSelectOptions}
           />
