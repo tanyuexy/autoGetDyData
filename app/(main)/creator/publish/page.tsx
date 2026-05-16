@@ -49,11 +49,6 @@ const STATUS_MAP: Record<TaskStatus, { color: string; text: string }> = {
   cancelled: { color: "warning", text: "已取消" },
 };
 
-type TaskStatusFilter = "all" | TaskStatus;
-
-/** 店铺即任务的 accountName（飞书列「所属店铺」写入该字段） */
-type TaskShopFilter = "all" | string;
-
 const TASK_STATUS_ORDER: TaskStatus[] = [
   "pending",
   "queued",
@@ -63,10 +58,8 @@ const TASK_STATUS_ORDER: TaskStatus[] = [
   "cancelled",
 ];
 
-const TASK_STATUS_SELECT_OPTIONS: { label: string; value: TaskStatusFilter }[] = [
-  { label: "全部状态", value: "all" },
-  ...TASK_STATUS_ORDER.map((s) => ({ label: STATUS_MAP[s].text, value: s })),
-];
+const TASK_STATUS_SELECT_OPTIONS: { label: string; value: TaskStatus }[] =
+  TASK_STATUS_ORDER.map((s) => ({ label: STATUS_MAP[s].text, value: s }));
 
 const MULTILINE_TEXT_STYLE = {
   display: "-webkit-box",
@@ -234,8 +227,9 @@ export default function CreatorPublishPage() {
   const [scheduleColumnSortOrder, setScheduleColumnSortOrder] = useState<"ascend" | "descend" | null>(
     null
   );
-  const [taskStatusFilter, setTaskStatusFilter] = useState<TaskStatusFilter>("all");
-  const [taskShopFilter, setTaskShopFilter] = useState<TaskShopFilter>("all");
+  /** 任务列表筛选：空数组=不过滤。店铺值为 accountName（飞书「所属店铺」） */
+  const [taskStatusFilters, setTaskStatusFilters] = useState<TaskStatus[]>([]);
+  const [taskShopFilters, setTaskShopFilters] = useState<string[]>([]);
 
   const schedulePresets = useMemo(() => scheduleQuickPresets(), []);
 
@@ -250,24 +244,29 @@ export default function CreatorPublishPage() {
     const names = [...new Set(tasks.map((t) => t.accountName).filter(Boolean))].sort((a, b) =>
       a.localeCompare(b, "zh-CN")
     );
-    return [
-      { label: "全部店铺", value: "all" as const },
-      ...names.map((n) => ({ label: n, value: n })),
-    ];
+    return names.map((n) => ({ label: n, value: n }));
   }, [tasks]);
 
   const filteredTasks = useMemo(() => {
     let list = tasks;
-    if (taskStatusFilter !== "all") list = list.filter((t) => t.status === taskStatusFilter);
-    if (taskShopFilter !== "all") list = list.filter((t) => t.accountName === taskShopFilter);
+    if (taskStatusFilters.length > 0) {
+      const set = new Set(taskStatusFilters);
+      list = list.filter((t) => set.has(t.status));
+    }
+    if (taskShopFilters.length > 0) {
+      const set = new Set(taskShopFilters);
+      list = list.filter((t) => set.has(t.accountName));
+    }
     return list;
-  }, [taskShopFilter, taskStatusFilter, tasks]);
+  }, [taskShopFilters, taskStatusFilters, tasks]);
 
   useEffect(() => {
-    if (taskShopFilter === "all") return;
     const names = new Set(tasks.map((t) => t.accountName));
-    if (!names.has(taskShopFilter)) setTaskShopFilter("all");
-  }, [taskShopFilter, tasks]);
+    setTaskShopFilters((prev) => {
+      const next = prev.filter((n) => names.has(n));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [tasks]);
 
   const terminableSelectedRowKeys = useMemo(() => {
     const selected = new Set(selectedRowKeys);
@@ -1167,20 +1166,27 @@ export default function CreatorPublishPage() {
           }}
         >
           <Space size={8} wrap>
-            <Select<TaskStatusFilter>
-              value={taskStatusFilter}
-              onChange={setTaskStatusFilter}
+            <Select
+              mode="multiple"
+              allowClear
+              maxTagCount="responsive"
+              value={taskStatusFilters}
+              onChange={setTaskStatusFilters}
               options={TASK_STATUS_SELECT_OPTIONS}
-              style={{ width: 128 }}
+              style={{ minWidth: 160, maxWidth: 320 }}
               size="small"
               popupMatchSelectWidth={false}
+              placeholder="全部状态"
               aria-label="按状态筛选任务"
             />
-            <Select<TaskShopFilter>
-              value={taskShopFilter}
-              onChange={setTaskShopFilter}
+            <Select
+              mode="multiple"
+              allowClear
+              maxTagCount="responsive"
+              value={taskShopFilters}
+              onChange={setTaskShopFilters}
               options={taskShopSelectOptions}
-              style={{ minWidth: 160, maxWidth: 280 }}
+              style={{ minWidth: 180, maxWidth: 320 }}
               size="small"
               showSearch
               optionFilterProp="label"
@@ -1504,7 +1510,7 @@ export default function CreatorPublishPage() {
 
     return (
       <Tabs
-        defaultActiveKey="create"
+        defaultActiveKey="tasks"
         items={tabItems}
         size="small"
         style={{ width: "100%" }}

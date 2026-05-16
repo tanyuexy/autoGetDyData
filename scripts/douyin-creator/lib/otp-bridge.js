@@ -5,7 +5,7 @@ function getOtpBridgeConfig() {
   const accessToken = String(process.env.OTP_BRIDGE_ACCESS_TOKEN || "").trim();
   const timeoutMs = Math.max(
     1000,
-    Number.parseInt(process.env.OTP_BRIDGE_TIMEOUT_MS || "5000", 10) || 5000
+    (Number.parseInt(process.env.OTP_BRIDGE_TIMEOUT_MS || "3600", 10) || 3600) * 1000
   );
   return {
     baseUrl,

@@ -38,13 +38,12 @@ WECOM_MENTION_USERS=userid1,userid2
 WECOM_MENTION_MOBILES=13800000000
 
 OTP_REPLY_TO=your-otp-inbox@example.com
-OTP_REPLY_SUBJECT_PREFIX=[抖音验证码回复]
 OTP_IMAP_HOST=imap.example.com
 OTP_IMAP_USER=your-otp-inbox@example.com
 OTP_IMAP_PASS=xxxx
 OTP_BRIDGE_BASE_URL=https://your-otp-bridge.example.com
 OTP_BRIDGE_ACCESS_TOKEN=optional-token
-OTP_BRIDGE_TIMEOUT_MS=5000
+OTP_BRIDGE_TIMEOUT_MS=3600
 ```
 
 说明：

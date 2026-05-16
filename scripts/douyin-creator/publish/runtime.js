@@ -5,8 +5,20 @@ const {
   waitForManualLoginFlow
 } = require("../lib/login");
 const { saveAuth } = require("../lib/exporter");
-const { TARGET_URL, PUBLISH_WAIT_MULTIPLIER } = require("../lib/env");
+const { TARGET_URL, PUBLISH_WAIT_MULTIPLIER, LOGIN_WAIT_TIMEOUT_MS } = require("../lib/env");
 const { step, checkOk } = require("./logger");
+const {
+  createOtpBridgeSession,
+  fetchOtpCodeFromBridge,
+  isOtpBridgeLinkEnabled
+} = require("../lib/otp-bridge");
+const { fetchOtpCodeFromEmail, sendReceiveOtpEmail } = require("../lib/mail");
+const {
+  otpRequestIdByAccount,
+  otpRequestSinceByAccount,
+  otpLastAppliedByAccount,
+  otpLastStatusLogAtByAccount
+} = require("../lib/state");
 
 // ---- 自动慢网识别 ----
 
@@ -236,7 +248,167 @@ async function optimizePublishPageForViewing(page) {
   await page.waitForTimeout(300);
 }
 
-async function clickPublishButton(page) {
+/** 获取验证码按钮重试间隔：55 秒后开始检测（倒计时通常 60s，提前 5s 检测防止错过） */
+const PUBLISH_SMS_RESEND_INTERVAL_MS = 55_000;
+
+/** 读取页面上的 SMS 验证码弹窗信息（全文搜索手机号模式） */
+async function readPublishSmsDialogInfo(page) {
+  const panel = page.locator("text=接收短信验证码").first();
+  if (!(await panel.isVisible({ timeout: 800 }).catch(() => false))) {
+    return null;
+  }
+  // 全文搜索掩码手机号（如 139******71）
+  const bodyText = await page.textContent("*").catch(() => "") || "";
+  const phoneMatch = bodyText.match(/\d{3}\*{3,6}\d{2,3}/);
+  const maskedPhone = phoneMatch ? phoneMatch[0] : "";
+  return { maskedPhone };
+}
+
+/** 点击 SMS 验证码弹窗中的发送/重发按钮（精确匹配，避免误匹配正文） */
+async function clickGetSmsCodeIfVisible(page) {
+  const getCodeBtn = page
+    .locator('p:has-text("获取验证码"), p:has-text("重新发送"), p:has-text("重新获取")')
+    .filter({ hasText: /^(获取验证码|重新发送|重新获取)$/ })
+    .first();
+  if (await getCodeBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+    await getCodeBtn.click().catch(() => {});
+    return true;
+  }
+  return false;
+}
+
+/** 处理发布时的短信验证码弹窗：触发发送、轮询 OTP、自动回填 */
+async function handlePublishSmsVerification(page, accountName) {
+  console.log("  ⚠️ 检测到短信验证码弹窗，开始自动处理...");
+
+  const smsInfo = await readPublishSmsDialogInfo(page);
+  const maskedPhone = smsInfo?.maskedPhone || "";
+  if (maskedPhone) {
+    console.log(`  识别到手机号: ${maskedPhone}`);
+  } else {
+    console.log("  未识别到手机号，继续处理");
+  }
+
+  // 1. 立即点击"获取验证码"触发 Douyin 发送短信
+  const clicked = await clickGetSmsCodeIfVisible(page);
+  if (clicked) {
+    console.log("  ✓ 已触发获取验证码");
+  }
+
+  // 2. 创建 OTP bridge 会话 + 通知用户
+  const now = Date.now();
+  let requestId = "";
+  if (isOtpBridgeLinkEnabled()) {
+    try {
+      const session = await createOtpBridgeSession({
+        accountName,
+        maskedPhone,
+        reason: "发布时需短信验证码"
+      });
+      requestId = String(session.requestId || "");
+    } catch (e) {
+      console.error("  创建 OTP 中转会话失败:", e?.message || e);
+    }
+  }
+  if (requestId) {
+    otpRequestIdByAccount.set(accountName, requestId);
+  } else {
+    otpRequestIdByAccount.delete(accountName);
+  }
+  otpRequestSinceByAccount.set(accountName, now);
+  otpLastAppliedByAccount.delete(accountName);
+  otpLastStatusLogAtByAccount.delete(accountName);
+
+  // 3. 发送企业微信通知
+  await sendReceiveOtpEmail({
+    accountName,
+    maskedPhone,
+    reason: "发布时需短信验证码"
+  }).catch((e) => {
+    console.error("  发送验证码通知失败:", e?.message || e);
+  });
+
+  // 4. 轮询 OTP 中转页 + IMAP
+  const pollIntervalMs = 3000;
+  const deadline = Date.now() + LOGIN_WAIT_TIMEOUT_MS;
+  let otpCode = "";
+  let lastResendAt = Date.now();
+
+  console.log(`  开始轮询验证码（超时 ${Math.round(LOGIN_WAIT_TIMEOUT_MS / 1000)}s）...`);
+  while (Date.now() < deadline) {
+    // 检查 SMS 面板是否已消失（可能用户手动完成或页面已跳转）
+    const stillSmsPanel = await page
+      .locator("text=接收短信验证码")
+      .first()
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+    if (!stillSmsPanel) {
+      console.log("  SMS 面板已消失，检查发布结果...");
+      break;
+    }
+
+    // 如果"获取验证码"按钮重新可用（验证码已过期），重新点击
+    if (Date.now() - lastResendAt > PUBLISH_SMS_RESEND_INTERVAL_MS) {
+      const reclicked = await clickGetSmsCodeIfVisible(page);
+      if (reclicked) {
+        console.log("  🔄 验证码已过期，已重新点击获取验证码");
+        lastResendAt = Date.now();
+      }
+    }
+
+    // 从 OTP 中转页获取验证码
+    if (requestId) {
+      const bridgeResult = await fetchOtpCodeFromBridge({ requestId }).catch(
+        () => ({ otpCode: "" })
+      );
+      if (bridgeResult.otpCode) {
+        otpCode = bridgeResult.otpCode;
+        console.log(`  ✓ 已从 OTP 中转页获取验证码: ${otpCode}`);
+        break;
+      }
+    }
+
+    // 从 IMAP 邮件获取验证码
+    const emailResult = await fetchOtpCodeFromEmail({
+      accountName,
+      sinceMs: now
+    }).catch(() => ({ otpCode: "" }));
+    if (emailResult.otpCode) {
+      otpCode = emailResult.otpCode;
+      console.log(`  ✓ 已从邮件获取验证码: ${otpCode}`);
+      break;
+    }
+
+    await new Promise((r) => setTimeout(r, pollIntervalMs));
+  }
+
+  if (!otpCode) {
+    console.log("  ⚠️ 等待验证码超时，发布可能未完成");
+    return false;
+  }
+
+  // 5. 回填验证码到输入框
+  const codeInput = page.locator('input[type="text"], [role="spinbutton"]').first();
+  await codeInput.click().catch(() => {});
+  await codeInput.fill("").catch(() => {});
+  await codeInput.type(otpCode, { delay: 100 });
+  console.log(`  ✓ 已回填验证码: ${otpCode}`);
+  otpLastAppliedByAccount.set(accountName, otpCode);
+
+  // 6. 点击"验证"按钮
+  const verifyBtn = page
+    .locator('button:has-text("验证"), text=验证')
+    .filter({ hasText: /^验证$/ })
+    .first();
+  if (await verifyBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await verifyBtn.click().catch(() => {});
+    console.log("  ✓ 已点击验证按钮");
+  }
+
+  return true;
+}
+
+async function clickPublishButton(page, accountName) {
   console.log("点击发布按钮...");
   await scrollPublishFormToBottom(page);
 
@@ -269,8 +441,44 @@ async function clickPublishButton(page) {
   await publishBtn.click();
   console.log("  ✓ 已点击发布按钮");
 
-  await page.waitForTimeout(scaledMs(3000));
+  await page.waitForTimeout(scaledMs(1000));
 
+  // 处理"未添加自主声明"确认对话框
+  const declarationDialogTitle = page.locator("text=未添加自主声明").first();
+  if (
+    await declarationDialogTitle
+      .isVisible({ timeout: scaledMs(2000) })
+      .catch(() => false)
+  ) {
+    console.log("  检测到自主声明确认对话框，点击「直接发布」");
+    const directPublishBtn = page
+      .locator('button:has-text("直接发布")')
+      .first();
+    if (
+      await directPublishBtn
+        .isVisible({ timeout: scaledMs(2000) })
+        .catch(() => false)
+    ) {
+      await directPublishBtn.click();
+      console.log("  ✓ 已点击「直接发布」");
+      await page.waitForTimeout(scaledMs(1000));
+    }
+  }
+
+  // 处理 SMS 验证码弹窗
+  const smsPanel = page.locator("text=接收短信验证码").first();
+  if (
+    await smsPanel.isVisible({ timeout: scaledMs(2000) }).catch(() => false)
+  ) {
+    const smsHandled = await handlePublishSmsVerification(page, accountName);
+    if (!smsHandled) {
+      return false;
+    }
+    // 点击验证后等待结果
+    await page.waitForTimeout(scaledMs(5000));
+  }
+
+  // 等待最终 toast 结果
   const toastSelector =
     '.semi-toast-content, .semi-message, [class*="toast"], [class*="message"]';
   try {
@@ -290,6 +498,33 @@ async function clickPublishButton(page) {
         toastText.includes("违规")
       ) {
         throw new Error(`发布失败: ${toastText.slice(0, 200)}`);
+      }
+      // "正在发布" 等中间状态：继续等待更长时间
+      if (toastText.includes("正在发布")) {
+        console.log("  检测到「正在发布」状态，继续等待...");
+        await page.waitForTimeout(scaledMs(10000));
+        // 再次检查 toast
+        const finalToast = await page
+          .waitForSelector(toastSelector, { timeout: scaledMs(30000) })
+          .catch(() => null);
+        if (finalToast) {
+          const finalText = await finalToast.textContent().catch(() => "");
+          console.log(`  最终提示: ${finalText.slice(0, 100)}`);
+          if (
+            finalText.includes("发布成功") ||
+            finalText.includes("success")
+          ) {
+            console.log("  ✅ 发布成功");
+            return true;
+          }
+          if (
+            finalText.includes("失败") ||
+            finalText.includes("错误") ||
+            finalText.includes("违规")
+          ) {
+            throw new Error(`发布失败: ${finalText.slice(0, 200)}`);
+          }
+        }
       }
     }
   } catch (e) {

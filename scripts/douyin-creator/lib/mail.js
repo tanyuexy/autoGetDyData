@@ -2,11 +2,15 @@ const path = require("path");
 const nodemailer = require("nodemailer");
 const { ImapFlow } = require("imapflow");
 const { simpleParser } = require("mailparser");
-const { DEFAULT_ALERT_TO, OTP_EMAIL_MAX_AGE_MS } = require("./env");
+const {
+  DEFAULT_ALERT_TO,
+  OTP_EMAIL_MAX_AGE_MS,
+  OTP_REPLY_SUBJECT_PREFIX
+} = require("./env");
 const {
   sendWeComMarkdown,
   sendWeComImageFromFile,
-  sendWeComText,
+  sendWeComText
 } = require("./wecom");
 const {
   createOtpBridgeSession,
@@ -18,7 +22,7 @@ const {
   otpRequestIdByAccount,
   otpRequestSinceByAccount,
   otpLastAppliedByAccount,
-  otpLastStatusLogAtByAccount,
+  otpLastStatusLogAtByAccount
 } = require("./state");
 
 function getMailConfig() {
@@ -63,8 +67,7 @@ function getOtpInboxConfig() {
     process.env.SMTP_PASS ||
     "";
   const mailbox = process.env.OTP_IMAP_MAILBOX || "INBOX";
-  const subjectPrefix =
-    process.env.OTP_REPLY_SUBJECT_PREFIX || "[抖音验证码回复]";
+  const subjectPrefix = OTP_REPLY_SUBJECT_PREFIX;
   const fromIncludes = process.env.OTP_REPLY_FROM_INCLUDES || "";
   return {
     host,
@@ -102,7 +105,10 @@ function encodeMailtoAddress(address) {
 
 /** 可选：设置后才在 mailto 中带 body；默认不带正文占位 */
 function resolveOtpMailtoBody(options = {}) {
-  if (options.bodyPlaceholder !== undefined && options.bodyPlaceholder !== null) {
+  if (
+    options.bodyPlaceholder !== undefined &&
+    options.bodyPlaceholder !== null
+  ) {
     return String(options.bodyPlaceholder);
   }
   return String(process.env.OTP_MAILTO_BODY_HINT || "").trim();
@@ -247,11 +253,11 @@ async function sendAlertEmail({ accountName, screenshotPath, reason }) {
       `说明：${reason || "需要重新扫码登录"}`,
       `时间：${formatNow()}`,
       "",
-      "请使用抖音 App 扫描二维码完成登录。",
+      "请使用抖音 App 扫描二维码完成登录。"
     ].join("\n");
     // 企微 webhook 仅 text 类型支持手机号 @；与说明正文合在一条里，不再发额外 text，也不再在 markdown 里拼「提醒手机号」
     const sent = await sendWeComText(body, {
-      mentionMobiles: dynamicMentionMobiles,
+      mentionMobiles: dynamicMentionMobiles
     });
     if (screenshotPath) {
       await sendWeComImageFromFile(screenshotPath);
@@ -384,20 +390,35 @@ async function sendReceiveOtpEmail({ accountName, maskedPhone, reason }) {
   otpLastAppliedByAccount.delete(accountName);
   otpLastStatusLogAtByAccount.delete(accountName);
 
-  const wecomSent = await sendWeComSafely("接收验证码", accountName, async () => {
-    return sendWeComMarkdown(
-      [
-        "### 抖音验证码",
-        `账号：\`${accountName}\``,
-        `手机号：\`${maskedPhone || "未识别"}\``,
+  const wecomSent = await sendWeComSafely(
+    "接收验证码",
+    accountName,
+    async () => {
+      const contact = await resolveShopInfoContactByName(accountName);
+      const dynamicMentionMobiles = contact?.phone ? [contact.phone] : [];
+      const body = [
+        "抖音验证码",
+        `账号：${accountName}`,
+        `手机号：${maskedPhone || "未识别"}`,
         `说明：${reasonText}`,
         `时间：${formatNow()}`,
-        otpBridgeUrl ? `[打开验证码填写页](${otpBridgeUrl})` : "验证码填写页创建失败，请检查 OTP bridge 服务是否可用。",
+        otpBridgeUrl
+          ? `验证码填写页：[打开验证码填写页](${otpBridgeUrl})`
+          : "验证码填写页创建失败，请检查 OTP bridge 服务是否可用。"
       ]
         .filter(Boolean)
-        .join("\n")
-    );
-  });
+        .join("\n");
+      const markdownSent = await sendWeComMarkdown(body);
+      if (!markdownSent) return false;
+      // webhook 仅 text 支持手机号 @；锚文字链接用上一条 markdown。
+      if (dynamicMentionMobiles.length > 0) {
+        await sendWeComText(`请处理账号 ${accountName} 的抖音验证码`, {
+          mentionMobiles: dynamicMentionMobiles
+        });
+      }
+      return true;
+    }
+  );
   if (wecomSent) return;
 
   const cfg = getMailConfig();
@@ -434,7 +455,7 @@ async function sendReceiveOtpEmail({ accountName, maskedPhone, reason }) {
   console.log(`账号 [${accountName}] 已发送接收验证码提醒邮件到: ${cfg.to}`);
   return {
     requestId,
-    otpBridgeUrl,
+    otpBridgeUrl
   };
 }
 

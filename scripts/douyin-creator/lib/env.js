@@ -32,6 +32,9 @@ const ACCOUNTS_DIR = (() => {
 })();
 
 const DEFAULT_ALERT_TO = "2895845213@qq.com";
+
+/** 邮件回复验证码：主题前缀，系统会在其后拼接账号名 */
+const OTP_REPLY_SUBJECT_PREFIX = "[抖音验证码回复]";
 const BROWSER_VIEWPORT = { width: 1600, height: 1200 };
 const PUBLISH_BROWSER_VIEWPORT = {
   width: Number(process.env.PUBLISH_BROWSER_WIDTH) || 1800,
@@ -227,6 +230,7 @@ module.exports = {
   TARGET_URL,
   ACCOUNTS_DIR,
   DEFAULT_ALERT_TO,
+  OTP_REPLY_SUBJECT_PREFIX,
   BROWSER_VIEWPORT,
   PUBLISH_BROWSER_VIEWPORT,
   LOGIN_WAIT_TIMEOUT_MS,

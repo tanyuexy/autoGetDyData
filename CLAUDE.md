@@ -118,9 +118,8 @@ To add a new page:
 - `WECOM_MENTION_USERS` / `WECOM_MENTION_MOBILES` 可选，用于提醒指定成员
 - `OTP_BRIDGE_BASE_URL`：验证码填写页公网地址；配置后企微优先发这个链接
 - `OTP_BRIDGE_ACCESS_TOKEN`：公网 OTP 中转服务的可选访问令牌
-- `OTP_BRIDGE_TIMEOUT_MS`：当前项目轮询公网 OTP 中转服务的超时时间
+- `OTP_BRIDGE_TIMEOUT_MS`：当前项目轮询公网 OTP 中转服务的单次 HTTP 请求超时（单位：秒），默认 3600（1 小时）
 - `OTP_REPLY_TO`：`mailto:` 链接中的验证码收件邮箱，默认回退到 `OTP_IMAP_USER`
-- `OTP_REPLY_SUBJECT_PREFIX`：验证码回复邮件主题前缀，默认 `[抖音验证码回复]`
 - `OTP_IMAP_HOST` / `OTP_IMAP_USER` / `OTP_IMAP_PASS`：验证码收件箱 IMAP 轮询配置
 
 不要把 `WECOM_WEBHOOK_URL`、`OTP_IMAP_PASS`、`SMTP_PASS` 等敏感信息提交到仓库。
