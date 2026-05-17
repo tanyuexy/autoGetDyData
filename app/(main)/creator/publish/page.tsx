@@ -20,6 +20,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Upload,
   Typography,
 } from "antd";
@@ -31,11 +32,16 @@ const { Text } = Typography;
 
 type TaskType = "video" | "article";
 
+const TASK_TYPE_OPTIONS: { label: string; value: TaskType }[] = [
+  { label: "视频", value: "video" },
+  { label: "图文", value: "article" },
+];
+
 type TaskStatus = "pending" | "queued" | "running" | "success" | "failed" | "cancelled";
 
 type FeishuAiProvider = "siliconflow" | "deepseek";
 
-const TERMINABLE_TASK_STATUSES = new Set<TaskStatus>(["pending", "running"]);
+const TERMINABLE_TASK_STATUSES = new Set<TaskStatus>(["queued", "running"]);
 
 /** 表格「操作」列：link 按钮默认 padding 较大，收一点横向间距 */
 const TASK_TABLE_OP_LINK_STYLE = { paddingInline: 1 } as const;
@@ -185,6 +191,8 @@ type PublishTask = {
 
 type EditTaskState = {
   id: string;
+  /** 店铺/抖创账号，与 task.accountName 一致 */
+  accountName: string;
   title: string;
   description: string;
   productLink: string;
@@ -230,6 +238,7 @@ export default function CreatorPublishPage() {
   /** 任务列表筛选：空数组=不过滤。店铺值为 accountName（飞书「所属店铺」） */
   const [taskStatusFilters, setTaskStatusFilters] = useState<TaskStatus[]>([]);
   const [taskShopFilters, setTaskShopFilters] = useState<string[]>([]);
+  const [taskTypeFilters, setTaskTypeFilters] = useState<TaskType[]>([]);
 
   const schedulePresets = useMemo(() => scheduleQuickPresets(), []);
 
@@ -249,6 +258,10 @@ export default function CreatorPublishPage() {
 
   const filteredTasks = useMemo(() => {
     let list = tasks;
+    if (taskTypeFilters.length > 0) {
+      const set = new Set(taskTypeFilters);
+      list = list.filter((t) => set.has(t.payload.type));
+    }
     if (taskStatusFilters.length > 0) {
       const set = new Set(taskStatusFilters);
       list = list.filter((t) => set.has(t.status));
@@ -258,7 +271,7 @@ export default function CreatorPublishPage() {
       list = list.filter((t) => set.has(t.accountName));
     }
     return list;
-  }, [taskShopFilters, taskStatusFilters, tasks]);
+  }, [taskTypeFilters, taskShopFilters, taskStatusFilters, tasks]);
 
   useEffect(() => {
     const names = new Set(tasks.map((t) => t.accountName));
@@ -277,6 +290,16 @@ export default function CreatorPublishPage() {
     () => accounts.map((a) => ({ label: a.name, value: a.name })),
     [accounts]
   );
+
+  /** 编辑弹窗：配置内账号 + 当前任务账号（若不在配置中则顶部展示，避免无法保存） */
+  const editAccountSelectOptions = useMemo(() => {
+    const opts = accounts.map((a) => ({ label: a.name, value: a.name }));
+    const cur = editState?.accountName?.trim();
+    if (cur && !opts.some((o) => o.value === cur)) {
+      return [{ label: `${cur}（当前）`, value: cur }, ...opts];
+    }
+    return opts;
+  }, [accounts, editState?.accountName]);
 
   const handleRow = useCallback(() => ({ style: ON_ROW_STYLE }), []);
 
@@ -613,7 +636,7 @@ export default function CreatorPublishPage() {
 
   async function handleKillSelected() {
     if (!terminableSelectedRowKeys.length) {
-      message.warning("仅待执行/执行中的任务可终止");
+      message.warning("仅队列中/执行中的任务可终止");
       return;
     }
     try {
@@ -671,6 +694,7 @@ export default function CreatorPublishPage() {
     setEditingTask(task);
     setEditState({
       id: task.id,
+      accountName: String(task.accountName || "").trim(),
       title: String(task.payload.title || ""),
       description: String(task.payload.description || ""),
       productLink: String(task.payload.productLink || ""),
@@ -689,6 +713,11 @@ export default function CreatorPublishPage() {
 
   async function handleSaveEditTask() {
     if (!editingTask || !editState) return;
+    const nextAccount = editState.accountName.trim();
+    if (!nextAccount) {
+      message.warning("请选择店铺/账号");
+      return;
+    }
     setSavingEdit(true);
     try {
       const res = await fetch("/api/creator/publish/tasks", {
@@ -697,6 +726,7 @@ export default function CreatorPublishPage() {
         body: JSON.stringify({
           action: "update",
           id: editingTask.id,
+          accountName: nextAccount,
           payload: {
             title: editState.title.trim(),
             description: editState.description.trim(),
@@ -719,11 +749,12 @@ export default function CreatorPublishPage() {
     setSavingEdit(false);
   }
 
-  function renderMultilineText(value?: string, lines = 2) {
+  function renderMultilineText(value?: string, lines = 2, opts?: { showNativeTitle?: boolean }) {
     if (!value) return "-";
+    const showNativeTitle = opts?.showNativeTitle !== false;
     return (
       <div
-        title={value}
+        title={showNativeTitle ? value : undefined}
         style={lines === 2 ? MULTILINE_TEXT_STYLE : { ...MULTILINE_TEXT_STYLE, WebkitLineClamp: lines }}
       >
         {value}
@@ -898,9 +929,30 @@ export default function CreatorPublishPage() {
       }),
       render: (_: any, r: PublishTask) =>
         r.lastError ? (
-          <Typography.Text type="danger">
-            {renderMultilineText(r.lastError, 2)}
-          </Typography.Text>
+          <Tooltip
+            title={
+              <div
+                style={{
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  maxWidth: 480,
+                  maxHeight: "min(60vh, 360px)",
+                  overflowY: "auto",
+                  lineHeight: 1.5,
+                }}
+              >
+                {r.lastError}
+              </div>
+            }
+            placement="topLeft"
+            mouseEnterDelay={0.15}
+          >
+            <span style={{ display: "block", width: "100%", cursor: "default" }}>
+              <Typography.Text type="danger">
+                {renderMultilineText(r.lastError, 2, { showNativeTitle: false })}
+              </Typography.Text>
+            </span>
+          </Tooltip>
         ) : null,
     },
     {
@@ -1170,6 +1222,19 @@ export default function CreatorPublishPage() {
               mode="multiple"
               allowClear
               maxTagCount="responsive"
+              value={taskTypeFilters}
+              onChange={setTaskTypeFilters}
+              options={TASK_TYPE_OPTIONS}
+              style={{ minWidth: 120, maxWidth: 200 }}
+              size="small"
+              popupMatchSelectWidth={false}
+              placeholder="全部类型"
+              aria-label="按类型筛选任务"
+            />
+            <Select
+              mode="multiple"
+              allowClear
+              maxTagCount="responsive"
               value={taskStatusFilters}
               onChange={setTaskStatusFilters}
               options={TASK_STATUS_SELECT_OPTIONS}
@@ -1206,7 +1271,7 @@ export default function CreatorPublishPage() {
           </Button>
           <Popconfirm
             title="确认终止选中任务？"
-            description={`将终止 ${terminableSelectedRowKeys.length} 个选中的待执行/执行中任务，其他状态会被忽略`}
+            description={`将终止 ${terminableSelectedRowKeys.length} 个选中的队列中/执行中任务，其他状态会被忽略`}
             okText="终止"
             cancelText="取消"
             okButtonProps={{ danger: true }}
@@ -1318,8 +1383,27 @@ export default function CreatorPublishPage() {
             requiredMark={false}
             style={{ marginBottom: 0 }}
           >
-            <Form.Item label="账号" style={{ marginBottom: 10 }}>
-              <Input value={editingTask.accountName} disabled />
+            <Form.Item
+              label="店铺/账号"
+              style={{ marginBottom: 10 }}
+              help={
+                <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>
+                  切换到其它账号后，任务将以新账号的登录态执行（须已在全局配置中添加该抖创账号）
+                </span>
+              }
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                value={editState.accountName || undefined}
+                onChange={(v) =>
+                  setEditState((prev) => (prev ? { ...prev, accountName: v } : prev))
+                }
+                options={editAccountSelectOptions}
+                loading={loadingAccounts}
+                placeholder="选择店铺/抖创账号"
+                popupMatchSelectWidth={false}
+              />
             </Form.Item>
             <Form.Item label="类型" style={{ marginBottom: 10 }}>
               <Input value={editingTask.payload.type === "video" ? "视频" : "图文"} disabled />

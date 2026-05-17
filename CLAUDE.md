@@ -37,6 +37,10 @@ Both layers share the same `scripts/run.js` routing table and namespace concurre
 
 `scripts/run.js` maps route names (e.g. `creator:export`) to entry scripts + CLI arguments. It loads `PROJECT_CONFIG_JSON` from MongoDB `app_config` and passes it as an env var to every child process. All Playwright scripts read this env var for runtime configuration instead of hitting MongoDB directly.
 
+### 浏览器测试（playwright-cli）
+
+需要用真实浏览器做页面验证、DOM 调试或复现 Playwright 自动化流程时：**先读取并遵循本仓库的 playwright-cli skill**（`.claude/skills/playwright-cli/SKILL.md`），按其中的 `playwright-cli` 命令与 snapshot / refs 交互；不要凭空写选择器或臆测页面结构。
+
 ### Frontend → API → Script → internal API callback
 
 Pages call API routes → API enqueues a task → the Playwright script scrapes data → script calls back to an internal API (e.g. `/api/review/save`, `/api/feishu/sync`) via `scripts/common/internal-api-client.js` to persist results. The internal API base URL defaults to `http://127.0.0.1:3000` (overridable via `INTERNAL_API_BASE_URL`).
@@ -47,7 +51,11 @@ Pages call API routes → API enqueues a task → the Playwright script scrapes 
 
 ### Creator account automation
 
-All Douyin Creator Playwright scripts reuse `scripts/douyin-creator/lib/login.js` (`openTargetAndEnsureLogin`). Accounts are stored as directories under `storage/creator-accounts/<name>/` containing `storageState.json`, `cookies.json`, and exported data. The login flow detects the current stage (QR code, SMS, face verification) via DOM inspection and sends email alerts (`lib/mail.js`) when manual intervention is needed.
+All Douyin Creator Playwright scripts reuse `scripts/douyin-creator/lib/login.js` (`openTargetAndEnsureLogin`).
+
+**抖创 Cookie / 登录态目录（仓库根下）：** `storage/creator-accounts/<name>/`。每个账号子目录含 Playwright **`storageState.json`**、**`cookies.json`** 及导出数据；脚本复用这些文件以减少重复登录。勿将含真实会话的内容提交到公开远程。
+
+The login flow detects the current stage (QR code, SMS, face verification) via DOM inspection and sends email alerts (`lib/mail.js`) when manual intervention is needed.
 
 ### Shop account automation
 
@@ -85,6 +93,60 @@ Both use `scripts/douyin-shop/cli.js` with different command branches. Accounts 
 - `creator_publish_tasks` — publish task queue with Feishu record linking
 - `creator_review_items` — scraped review/audit status of published posts
 - `shop_export_items` — shop data export records
+
+### 飞书发布任务同步与 Hash 判断
+
+实现位于 `lib/feishu/sync-publish-tasks.ts`。飞书发布任务导入/刷新本地任务时的规则如下。
+
+**1. 前置同步条件**
+
+每次导入或刷新先读飞书任务表。仅当记录同时满足以下条件才进入后续同步判断；否则直接跳过：
+
+```text
+审批 = 通过
+备注 != 示例
+所属店铺 有值
+视频/图文内容 有附件
+```
+
+日志会输出同步规则与跳过统计（例如满足条数、各类跳过原因计数）。
+
+**2. 候选记录的短路跳过**
+
+通过前置条件后，先做不依赖 hash 的短路判断：
+
+```text
+本地任务 status = running -> 跳过，不更新
+
+飞书「已创建任务」= 是 -> 跳过，不更新
+
+本地不存在该任务，且飞书「已创建任务」不是空/否 -> 跳过，不新建
+```
+
+上述通过后才计算 hash。
+
+**3. 两种 Hash**
+
+| 名称 | 函数 | 来源 | 包含字段概要 | 用途 |
+| --- | --- | --- | --- | --- |
+| **飞书完整 Hash** | `buildFeishuContentHash(snapshot)` | 飞书当前行快照 | 所属店铺；任务类型 video/article；标题；正文；AI内容；计划发布时间 `scheduleAt`；挂车链接；挂车产品名；附件信息（file_token / 文件名 / 类型 / 大小） | 判断飞书行是否变化，尤其附件是否变化。本地 Mongo 的 `feishuContentHash` 存此值。 |
+| **本地核心 Payload Hash** | `buildCoreContentHash(buildTaskComparableInput(existingTask))` | 本地 Mongo 已保存任务 payload | 同上核心字段，但**不含**附件 file_token/size/type（本地仅存下载后的 `videoFileKey` / `imagesFileKeys`，无法与飞书原始附件一一等价比较） | 判断本地 payload 与飞书当前核心内容是否一致。 |
+
+**4. 判断分支（已存在本地任务）**
+
+```text
+飞书核心 hash = 本地核心 payload hash 且 飞书完整 hash = 本地 feishuContentHash -> 无变化，跳过
+
+飞书核心 hash = 本地核心 payload hash 但 飞书完整 hash != 本地 feishuContentHash -> 只补/更新 feishuContentHash，不重置任务内容
+
+飞书核心 hash != 本地核心 payload hash -> 本地 payload 与飞书不一致，更新本地任务并重置为 pending
+```
+
+**本地不存在任务时：** `allowCreate = true` 且飞书「已创建任务」为空或否 → 新建本地任务。
+
+**5. 为何两边都重新算**
+
+旧逻辑只把飞书完整 hash 与本地 `feishuContentHash` 比较；若曾导入时本地 payload 不完整但 `feishuContentHash` 已是正确飞书内容的 hash，只要飞书不变会一直跳过，脏 payload 无法修复。双 hash 后可识别「飞书未变但本地核心与飞书不一致」并更新本地任务；审批不通过、示例、缺店铺、缺素材、已创建任务=是、`running` 等仍按前置规则直接跳过，不算 hash。
 
 ### New page checklist
 

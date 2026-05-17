@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import { getConfig } from "@/lib/configService";
 import {
   patchCreatorPublishTask,
   readCreatorPublishTasks,
@@ -77,7 +78,7 @@ export async function PATCH(req: NextRequest) {
       const tasks = await readCreatorPublishTasks();
       let killed = 0;
       for (const task of tasks) {
-        if (task.status !== "running") continue;
+        if (task.status !== "queued" && task.status !== "running") continue;
         if (task.taskId) {
           const { killTask } = require("@/lib/taskManager");
           await killTask(task.taskId);
@@ -103,7 +104,7 @@ export async function PATCH(req: NextRequest) {
       const tasks = await readCreatorPublishTasks();
       for (const task of tasks) {
         if (!ids.includes(task.id)) continue;
-        if (task.status !== "pending" && task.status !== "running") continue;
+        if (task.status !== "queued" && task.status !== "running") continue;
         if (task.status === "running" && task.taskId) {
           const { killTask } = require("@/lib/taskManager");
           await killTask(task.taskId);
@@ -175,6 +176,29 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: "执行中的任务不能编辑" }, { status: 400 });
       }
 
+      const requestedAccountRaw =
+        body.accountName !== undefined && body.accountName !== null
+          ? String(body.accountName).trim()
+          : existing.accountName;
+      if (!requestedAccountRaw) {
+        return NextResponse.json({ error: "missing accountName" }, { status: 400 });
+      }
+      if (requestedAccountRaw !== existing.accountName) {
+        const cfg = await getConfig();
+        const allowed = new Set(
+          (cfg.accounts || []).map((n) => String(n || "").trim()).filter(Boolean)
+        );
+        if (!allowed.has(requestedAccountRaw)) {
+          return NextResponse.json(
+            {
+              error:
+                "所选店铺/账号不在系统已配置的抖创账号列表中，请先在设置里添加该账号后再切换",
+            },
+            { status: 400 }
+          );
+        }
+      }
+
       const payloadPatch = body.payload || {};
       if (payloadPatch.type && payloadPatch.type !== existing.payload.type) {
         return NextResponse.json({ error: "不允许修改任务类型" }, { status: 400 });
@@ -192,6 +216,7 @@ export async function PATCH(req: NextRequest) {
       };
 
       const next = await patchCreatorPublishTask(id, {
+        accountName: requestedAccountRaw,
         payload: nextPayload as CreatorPublishTask["payload"],
       });
       return NextResponse.json({ ok: true, task: next });

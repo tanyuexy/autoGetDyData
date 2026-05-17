@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Button, Space, Typography } from "antd";
+import { App, Button, Modal, Space, Typography } from "antd";
 import { ClearOutlined, CopyOutlined } from "@ant-design/icons";
 import type { LogEntry } from "@/types";
 
@@ -20,7 +20,43 @@ const levelColors: Record<string, string> = {
   error: "#ff6b68",
 };
 
+/** 剪贴板 API 不可用或写入失败时（如非安全上下文），弹出可选中区域由用户 ⌘C/Ctrl+C 复制 */
+function openManualCopyModal(text: string) {
+  Modal.info({
+    title: "请手动复制日志（框内已全选，⌘C / Ctrl+C）",
+    width: 720,
+    icon: null,
+    destroyOnHidden: true,
+    content: (
+      <textarea
+        readOnly
+        rows={16}
+        defaultValue={text}
+        style={{
+          width: "100%",
+          boxSizing: "border-box",
+          marginTop: 8,
+          fontFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
+          fontSize: 12,
+          lineHeight: 1.4,
+        }}
+        onFocus={(e) => e.currentTarget.select()}
+        ref={(el) => {
+          if (el) {
+            queueMicrotask(() => {
+              el.focus();
+              el.select();
+            });
+          }
+        }}
+      />
+    ),
+    okText: "关闭",
+  });
+}
+
 export default function LogTerminal({ logs, onClear, height }: Props) {
+  const { message } = App.useApp();
   const containerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
 
@@ -37,11 +73,24 @@ export default function LogTerminal({ logs, onClear, height }: Props) {
     shouldAutoScrollRef.current = distanceToBottom <= AUTO_SCROLL_THRESHOLD;
   }
 
-  function handleCopy() {
+  async function handleCopy() {
     const text = logs.map((l) => `[${l.level.toUpperCase()}] ${l.text}`).join("\n");
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(text).catch(() => {});
+    if (!text.trim()) {
+      message.warning("暂无日志可复制");
+      return;
     }
+
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        message.success("已复制到剪贴板");
+        return;
+      } catch {
+        /* 无权限等：走手动复制 */
+      }
+    }
+
+    openManualCopyModal(text);
   }
 
   const isEmpty = logs.length === 0;
