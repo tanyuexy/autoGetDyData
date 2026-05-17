@@ -15,6 +15,7 @@ const {
   optimizePublishPageForViewing,
   clickPublishButton,
   checkVideoUploaded,
+  checkCoverSelected,
   checkTitleFilled,
   checkBodyFilled,
   checkHashtagsSet,
@@ -105,40 +106,123 @@ async function uploadVideo(page, videoKey, accountName) {
   await page.waitForTimeout(scaledMs(2000));
 }
 
-async function selectFirstAiCover(page) {
-  const aiContainer = await page.waitForSelector('[class*="recommendCoverContainer"]', { timeout: 30000 }).catch(() => null);
-  if (!aiContainer) {
-    console.log("AI封面容器未出现，使用默认第一帧封面");
-    return;
+async function selectFirstFrameAsCover(page) {
+  // 等待 AI 推荐封面容器出现（视频上传后封面缩略图是异步生成的）
+  const container = await page
+    .waitForSelector('[class*="recommendCoverContainer"]', {
+      timeout: scaledMs(60000)
+    })
+    .catch(() => null);
+  if (!container) {
+    throw new Error("封面容器未出现，无法选择封面");
   }
 
-  await page.waitForTimeout(3000);
-  const aiCoverItems = page.locator('[class*="recommendCoverContainer"] > [class*="recommendCover"]');
-  const aiCount = await aiCoverItems.count().catch(() => 0);
-  console.log(`AI推荐封面数: ${aiCount}`);
+  const coverItems = page.locator(
+    '[class*="recommendCoverContainer"] > [class*="recommendCover"]'
+  );
 
-  for (let i = 0; i < aiCount; i += 1) {
-    const item = aiCoverItems.nth(i);
+  // 轮询等待至少一个推荐封面渲染完毕（AI 封面 CDN 快，视频首帧 blob URL 慢）
+  let foundAny = false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const count = await coverItems.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      const item = coverItems.nth(i);
+      const imgs = await item.locator("img").count().catch(() => 0);
+      const visible = await item.isVisible().catch(() => false);
+      const classAttr = await item.getAttribute("class").catch(() => "");
+      if (imgs > 0 && visible && !/isSetting/i.test(classAttr)) {
+        foundAny = true;
+        break;
+      }
+    }
+    if (foundAny) break;
+    await page.waitForTimeout(2000);
+  }
+
+  const coverCount = await coverItems.count().catch(() => 0);
+  console.log(`可选封面数: ${coverCount}`);
+
+  if (!foundAny) {
+    throw new Error("推荐封面未生成，无法选择封面");
+  }
+
+  // 选择封面：优先视频首帧（非 AI 标记），降级为 AI 封面
+  let clicked = false;
+  // 第一轮：找非 AI 封面（视频首帧）
+  for (let i = 0; i < coverCount; i += 1) {
+    const item = coverItems.nth(i);
     if (!(await item.isVisible().catch(() => false))) continue;
     const classAttr = await item.getAttribute("class").catch(() => "");
-    if (/isSetting/i.test(classAttr)) continue;
+    if (/selected/i.test(classAttr) || /isSetting/i.test(classAttr)) continue;
+    const hasAi =
+      (await item.locator('[class*="ai-"]').count().catch(() => 0)) > 0;
+    if (hasAi) continue;
     const imgs = await item.locator("img").count().catch(() => 0);
     if (imgs === 0) continue;
 
-    await item.evaluate((el) => el.click()).catch(() => item.click().catch(() => {}));
-    await page.waitForTimeout(1000);
-    console.log(`已点击第 ${i + 1} 个AI推荐封面`);
+    await item.click().catch(() => {});
+    console.log("已选择视频首帧作为封面");
+    clicked = true;
     break;
   }
+  // 第二轮：降级为 AI 封面
+  if (!clicked) {
+    for (let i = 0; i < coverCount; i += 1) {
+      const item = coverItems.nth(i);
+      if (!(await item.isVisible().catch(() => false))) continue;
+      const classAttr = await item.getAttribute("class").catch(() => "");
+      if (/selected/i.test(classAttr) || /isSetting/i.test(classAttr)) continue;
+      const imgs = await item.locator("img").count().catch(() => 0);
+      if (imgs === 0) continue;
 
-  const modalConfirm = page.locator('.semi-modal-content button:has-text("确定"), .semi-modal-wrap button:has-text("确定")').first();
-  if (await modalConfirm.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await modalConfirm.click();
-    await page.waitForTimeout(1000);
+      await item.click().catch(() => {});
+      console.log("视频首帧不可用，已降级选择 AI 推荐封面");
+      clicked = true;
+      break;
+    }
+  }
+  if (!clicked) {
+    throw new Error("无可点击的推荐封面");
+  }
+
+  // 等待封面确认弹窗出现，再点击确定（限定在封面确认模态框内）
+  await page.waitForTimeout(1000);
+  const dialog = page
+    .locator('[role="modal"], [role="dialog"]')
+    .filter({ hasText: "是否确认应用此封面？" });
+  const confirmBtn = dialog.getByRole("button", { name: "确定" });
+  if (
+    await confirmBtn.isVisible({ timeout: scaledMs(5000) }).catch(() => false)
+  ) {
+    await confirmBtn.click();
+    console.log("已确认应用封面");
+    // 等待弹窗关闭
+    await confirmBtn
+      .waitFor({ state: "hidden", timeout: scaledMs(15000) })
+      .catch(() => {});
   } else {
+    // 兜底：可能点击后无需确认就已应用（封面停留够久时会出现）
+    console.log("封面确认弹窗未出现，尝试按 Escape 关闭残留弹窗");
     await page.keyboard.press("Escape").catch(() => {});
     await page.waitForTimeout(500);
   }
+
+  // 轮询等待封面 selected 标记生效（isSetting 过渡态结束后才会出现）
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const selectedItem = page
+      .locator(
+        '[class*="recommendCoverContainer"] > [class*="recommendCover"][class*="selected"]'
+      )
+      .first();
+    if (
+      await selectedItem.isVisible({ timeout: 1000 }).catch(() => false)
+    ) {
+      console.log("封面 selected 标记已生效");
+      return;
+    }
+    await page.waitForTimeout(1000);
+  }
+  throw new Error("封面选择超时：确认后未检测到 selected 标记");
 }
 
 async function runPublishVideo(options) {
@@ -193,19 +277,16 @@ async function runPublishVideo(options) {
     await uploadVideo(page, videoKey, accountName);
     await checkVideoUploaded(page);
 
-    stage(4, "选择推荐封面");
-    await selectFirstAiCover(page);
-
     if (String(options.scheduleAt || "")) {
-      stage(5, "校验并设置定时发布");
+      stage(4, "校验并设置定时发布");
       await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
       await checkScheduleSet(page);
     } else {
-      stage(5, "定时发布（跳过，未配置）");
+      stage(4, "定时发布（跳过，未配置）");
     }
 
     if (String(options.productLink || "")) {
-      stage(6, "设置购物车商品链接");
+      stage(5, "设置购物车商品链接");
       await selectCartAndLinkForVideo(
         page,
         String(options.productLink || ""),
@@ -214,10 +295,10 @@ async function runPublishVideo(options) {
       );
       await checkProductLinkSet(page);
     } else {
-      stage(6, "购物车商品链接（跳过，未配置）");
+      stage(5, "购物车商品链接（跳过，未配置）");
     }
 
-    stage(7, "填写标题、正文与话题");
+    stage(6, "填写标题、正文与话题");
     await fillTitleAndDescription(
       page,
       String(options.title || ""),
@@ -226,6 +307,10 @@ async function runPublishVideo(options) {
     await checkTitleFilled(page, String(options.title || ""));
     await checkBodyFilled(page, expectedBody);
     await checkHashtagsSet(page, limitedHashtags);
+
+    stage(7, "选择视频首帧封面");
+    await selectFirstFrameAsCover(page);
+    await checkCoverSelected(page);
 
     stage(8, "设置自主声明");
     const isAi = options.isAiContent === true || options.isAiContent === "true";

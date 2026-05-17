@@ -5,7 +5,11 @@ const {
   waitForManualLoginFlow
 } = require("../lib/login");
 const { saveAuth } = require("../lib/exporter");
-const { TARGET_URL, PUBLISH_WAIT_MULTIPLIER, LOGIN_WAIT_TIMEOUT_MS } = require("../lib/env");
+const {
+  TARGET_URL,
+  PUBLISH_WAIT_MULTIPLIER,
+  LOGIN_WAIT_TIMEOUT_MS
+} = require("../lib/env");
 const { step, checkOk } = require("./logger");
 const {
   createOtpBridgeSession,
@@ -258,7 +262,7 @@ async function readPublishSmsDialogInfo(page) {
     return null;
   }
   // 全文搜索掩码手机号（如 139******71）
-  const bodyText = await page.textContent("*").catch(() => "") || "";
+  const bodyText = (await page.textContent("*").catch(() => "")) || "";
   const phoneMatch = bodyText.match(/\d{3}\*{3,6}\d{2,3}/);
   const maskedPhone = phoneMatch ? phoneMatch[0] : "";
   return { maskedPhone };
@@ -267,7 +271,9 @@ async function readPublishSmsDialogInfo(page) {
 /** 点击 SMS 验证码弹窗中的发送/重发按钮（精确匹配，避免误匹配正文） */
 async function clickGetSmsCodeIfVisible(page) {
   const getCodeBtn = page
-    .locator('p:has-text("获取验证码"), p:has-text("重新发送"), p:has-text("重新获取")')
+    .locator(
+      'p:has-text("获取验证码"), p:has-text("重新发送"), p:has-text("重新获取")'
+    )
     .filter({ hasText: /^(获取验证码|重新发送|重新获取)$/ })
     .first();
   if (await getCodeBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
@@ -334,7 +340,9 @@ async function handlePublishSmsVerification(page, accountName) {
   let otpCode = "";
   let lastResendAt = Date.now();
 
-  console.log(`  开始轮询验证码（超时 ${Math.round(LOGIN_WAIT_TIMEOUT_MS / 1000)}s）...`);
+  console.log(
+    `  开始轮询验证码（超时 ${Math.round(LOGIN_WAIT_TIMEOUT_MS / 1000)}s）...`
+  );
   while (Date.now() < deadline) {
     // 检查 SMS 面板是否已消失（可能用户手动完成或页面已跳转）
     const stillSmsPanel = await page
@@ -388,7 +396,9 @@ async function handlePublishSmsVerification(page, accountName) {
   }
 
   // 5. 回填验证码到输入框
-  const codeInput = page.locator('input[type="text"], [role="spinbutton"]').first();
+  const codeInput = page
+    .locator('input[type="text"], [role="spinbutton"]')
+    .first();
   await codeInput.click().catch(() => {});
   await codeInput.fill("").catch(() => {});
   await codeInput.type(otpCode, { delay: 100 });
@@ -510,10 +520,7 @@ async function clickPublishButton(page, accountName) {
         if (finalToast) {
           const finalText = await finalToast.textContent().catch(() => "");
           console.log(`  最终提示: ${finalText.slice(0, 100)}`);
-          if (
-            finalText.includes("发布成功") ||
-            finalText.includes("success")
-          ) {
+          if (finalText.includes("发布成功") || finalText.includes("success")) {
             console.log("  ✅ 发布成功");
             return true;
           }
@@ -593,6 +600,41 @@ async function checkImagesUploaded(page, expectedCount) {
   throw new Error(
     `图文素材校验失败：期望 ${expectedCount} 张，未匹配到足够图片`
   );
+}
+
+async function checkCoverSelected(page) {
+  // 封面被选中后，槽位文案从"选择封面"变为"编辑封面"（文本在 hover-show 层中，display:none 但仍可读）
+  const titleEls = page.locator('[class*="coverControl"] [class*="title"]');
+  const count = await titleEls.count().catch(() => 0);
+  for (let i = 0; i < count; i++) {
+    const text = await titleEls
+      .nth(i)
+      .innerText()
+      .catch(() => "");
+    if (text.includes("编辑封面")) {
+      checkOk("封面选择校验通过");
+      return;
+    }
+  }
+  // 兜底：检查推荐封面项是否有 selected 标记
+  const selectedItem = page
+    .locator(
+      '[class*="recommendCoverContainer"] > [class*="recommendCover"][class*="selected"]'
+    )
+    .first();
+  if (await selectedItem.isVisible({ timeout: 2000 }).catch(() => false)) {
+    checkOk("封面选择校验通过 (selected class)");
+    return;
+  }
+  // 再兜底：coverControl 内 filter 元素有 hover-show 类 → 封面已应用
+  const filterEls = page.locator(
+    '[class*="coverControl"] [class*="filter"][class*="hover-show"]'
+  );
+  if ((await filterEls.count().catch(() => 0)) > 0) {
+    checkOk("封面选择校验通过 (hover-show class)");
+    return;
+  }
+  throw new Error("封面选择校验失败：未检测到封面已应用的标记");
 }
 
 async function checkTitleFilled(page, expectedTitle) {
@@ -818,6 +860,7 @@ module.exports = {
   clickPublishButton,
   checkVideoUploaded,
   checkImagesUploaded,
+  checkCoverSelected,
   checkTitleFilled,
   checkBodyFilled,
   checkHashtagsSet,
