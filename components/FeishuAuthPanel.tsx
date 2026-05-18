@@ -8,6 +8,7 @@ import {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
 } from "@ant-design/icons";
+import { semanticTagStyle } from "@/lib/semanticTagStyles";
 
 const { Text } = Typography;
 
@@ -69,19 +70,19 @@ export default function FeishuAuthPanel() {
           <Space>
             <Text strong>Token 状态：</Text>
             {statusLoading ? (
-              <Tag>查询中...</Tag>
+              <Tag style={semanticTagStyle("default")}>查询中...</Tag>
             ) : tokenStatus?.hasToken ? (
               tokenStatus.valid ? (
-                <Tag icon={<CheckCircleOutlined />} color="success">
+                <Tag icon={<CheckCircleOutlined />} style={semanticTagStyle("success")}>
                   有效
                 </Tag>
               ) : (
-                <Tag icon={<ExclamationCircleOutlined />} color="warning">
+                <Tag icon={<ExclamationCircleOutlined />} style={semanticTagStyle("warning")}>
                   已过期
                 </Tag>
               )
             ) : (
-              <Tag icon={<ExclamationCircleOutlined />} color="default">
+              <Tag icon={<ExclamationCircleOutlined />} style={semanticTagStyle("default")}>
                 未授权
               </Tag>
             )}

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { App, Button, Divider, Space, Typography, Table, Tag } from "antd";
 import FeishuAuthPanel from "@/components/FeishuAuthPanel";
 import { useTaskContext } from "@/contexts/TaskContext";
+import { semanticTagStyle } from "@/lib/semanticTagStyles";
 
 const { Text } = Typography;
 
@@ -79,7 +80,11 @@ export default function FeishuPage() {
         key: "exists",
         width: 90,
         render: (exists: boolean) =>
-          exists ? <Tag color="success">已生成</Tag> : <Tag>不存在</Tag>,
+          exists ? (
+            <Tag style={semanticTagStyle("success")}>已生成</Tag>
+          ) : (
+            <Tag style={semanticTagStyle("default")}>不存在</Tag>
+          ),
       },
       {
         title: "更新时间",

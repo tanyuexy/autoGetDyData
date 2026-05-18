@@ -168,7 +168,7 @@ export default function CreatorPage() {
     <Space orientation="vertical" size="small" style={{ width: "100%" }}>
       <div>
         <h3 style={{ marginTop: 0, fontSize: 15 }}>执行任务</h3>
-        <div style={{ color: "rgba(15,23,42,.55)", marginBottom: 8, fontSize: 12 }}>
+        <div style={{ color: "var(--vol-mute)", marginBottom: 8, fontSize: 12 }}>
           已登录 {loggedInCount}/{accounts.length} 个账号
         </div>
 

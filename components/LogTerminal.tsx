@@ -8,17 +8,31 @@ import type { LogEntry } from "@/types";
 const { Text } = Typography;
 const AUTO_SCROLL_THRESHOLD = 24;
 
+/**
+ * 日志区内置暗色终端配色（与应用「奶油 / 电绿」皮肤解耦），保证正文与链接级可读性。
+ */
+const T = {
+  bg: "#141414",
+  headerBg: "#1a1a1c",
+  border: "#3f3f46",
+  text: "#e4e4e7",
+  info: "#b8c0cc",
+  warn: "#e3b341",
+  error: "#f87171",
+  muted: "#71767a",
+} as const;
+
+function levelColor(level: LogEntry["level"]): string {
+  if (level === "warn") return T.warn;
+  if (level === "error") return T.error;
+  return T.info;
+}
+
 interface Props {
   logs: LogEntry[];
   onClear?: () => void;
   height?: number | string;
 }
-
-const levelColors: Record<string, string> = {
-  info: "#a9b7c6",
-  warn: "#f0c674",
-  error: "#ff6b68",
-};
 
 /** 剪贴板 API 不可用或写入失败时（如非安全上下文），弹出可选中区域由用户 ⌘C/Ctrl+C 复制 */
 function openManualCopyModal(text: string) {
@@ -36,9 +50,10 @@ function openManualCopyModal(text: string) {
           width: "100%",
           boxSizing: "border-box",
           marginTop: 8,
-          fontFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
+          fontFamily: "'JetBrains Mono', ui-monospace, Consolas, 'Liberation Mono', Menlo, monospace",
           fontSize: 12,
           lineHeight: 1.4,
+          color: "#111111",
         }}
         onFocus={(e) => e.currentTarget.select()}
         ref={(el) => {
@@ -97,12 +112,14 @@ export default function LogTerminal({ logs, onClear, height }: Props) {
 
   return (
     <div
+      className="log-terminal-surface"
       style={{
-        background: "#2b2b2b",
+        background: T.bg,
         borderRadius: 6,
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
+        border: `1px solid ${T.border}`,
         height: typeof height === "number" ? height : height ?? 240,
       }}
     >
@@ -112,18 +129,18 @@ export default function LogTerminal({ logs, onClear, height }: Props) {
           justifyContent: "space-between",
           alignItems: "center",
           padding: "4px 12px",
-          background: "#3c3f41",
-          borderBottom: "1px solid #555",
+          background: T.headerBg,
+          borderBottom: `1px solid ${T.border}`,
         }}
       >
-        <Text style={{ color: "#bbb", fontSize: 12 }}>执行日志</Text>
+        <Text style={{ color: T.text, fontSize: 12 }}>执行日志</Text>
         <Space size="small">
           <Button
             size="small"
             type="text"
             icon={<CopyOutlined />}
             onClick={handleCopy}
-            style={{ color: "#bbb", fontSize: 12 }}
+            style={{ color: T.text, fontSize: 12 }}
           >
             复制
           </Button>
@@ -133,7 +150,7 @@ export default function LogTerminal({ logs, onClear, height }: Props) {
               type="text"
               icon={<ClearOutlined />}
               onClick={onClear}
-              style={{ color: "#bbb", fontSize: 12 }}
+              style={{ color: T.text, fontSize: 12 }}
             >
               清空
             </Button>
@@ -149,22 +166,21 @@ export default function LogTerminal({ logs, onClear, height }: Props) {
           overflowY: "auto",
           overflowX: "hidden",
           padding: "8px 12px",
-          fontFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
-          fontSize: 12,
-          lineHeight: "1.4",
-          color: "#a9b7c6",
+          fontFamily:
+            "'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace",
+          fontSize: 13,
+          lineHeight: 1.55,
+          color: T.text,
           whiteSpace: "pre-wrap",
           wordBreak: "break-all",
           overflowWrap: "anywhere",
         }}
       >
         {isEmpty ? (
-          <div style={{ color: "#666", fontStyle: "italic" }}>
-            等待任务执行...
-          </div>
+          <div style={{ color: T.muted, fontStyle: "italic" }}>等待任务执行...</div>
         ) : (
           logs.map((log, i) => (
-            <div key={i} style={{ color: levelColors[log.level] || "#a9b7c6" }}>
+            <div key={i} style={{ color: levelColor(log.level) }}>
               {log.text}
             </div>
           ))

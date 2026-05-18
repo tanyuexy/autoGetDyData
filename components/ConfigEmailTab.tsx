@@ -4,6 +4,7 @@ import { Table, Button, Space, Modal, Form, Input, Popconfirm, App, Tag, Tooltip
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SafetyCertificateOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 import type { ShopAccount } from "@/types";
+import { semanticTagStyle } from "@/lib/semanticTagStyles";
 
 interface EmailEntry {
   email: string;
@@ -169,7 +170,7 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin, ref
     const acc = accountMap.get(entry.email);
     if (!acc || !acc.hasStorageState) {
       return (
-        <Tag icon={<CloseCircleOutlined />} color="default">
+        <Tag icon={<CloseCircleOutlined />} style={semanticTagStyle("default")}>
           未登录
         </Tag>
       );
@@ -180,7 +181,7 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin, ref
     if (status === "valid") {
       return (
         <Tooltip title={acc.cookieDetail || "登录态有效"}>
-          <Tag icon={<CheckCircleOutlined />} color="success">
+          <Tag icon={<CheckCircleOutlined />} style={semanticTagStyle("success")}>
             有效
           </Tag>
         </Tooltip>
@@ -190,7 +191,7 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin, ref
     if (status === "warning") {
       return (
         <Tooltip title={acc.cookieDetail || "登录态可能过期"}>
-          <Tag icon={<ExclamationCircleOutlined />} color="warning">
+          <Tag icon={<ExclamationCircleOutlined />} style={semanticTagStyle("warning")}>
             可能过期
           </Tag>
         </Tooltip>
@@ -200,7 +201,7 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin, ref
     if (status === "expired") {
       return (
         <Tooltip title={acc.cookieDetail || "登录态已过期"}>
-          <Tag icon={<CloseCircleOutlined />} color="error">
+          <Tag icon={<CloseCircleOutlined />} style={semanticTagStyle("error")}>
             已过期
           </Tag>
         </Tooltip>
@@ -209,7 +210,7 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin, ref
 
     return (
       <Tooltip title={acc.cookieDetail || "未知状态"}>
-        <Tag icon={<QuestionCircleOutlined />} color="default">
+        <Tag icon={<QuestionCircleOutlined />} style={semanticTagStyle("default")}>
           未知
         </Tag>
       </Tooltip>

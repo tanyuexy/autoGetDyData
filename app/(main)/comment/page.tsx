@@ -18,6 +18,7 @@ import {
 } from "antd";
 import { ReloadOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useTaskContext } from "@/contexts/TaskContext";
+import { semanticTagStyle } from "@/lib/semanticTagStyles";
 import type { CommentItem } from "@/types";
 
 const { Text } = Typography;
@@ -383,9 +384,9 @@ export default function CommentPage() {
       align: "center" as const,
       width: 60,
       render: (s: number) => {
-        if (s === 1) return <Tag color="success">正常</Tag>;
-        if (s === 3) return <Tag color="warning">屏蔽</Tag>;
-        return <Tag>{s}</Tag>;
+        if (s === 1) return <Tag style={semanticTagStyle("success")}>正常</Tag>;
+        if (s === 3) return <Tag style={semanticTagStyle("warning")}>屏蔽</Tag>;
+        return <Tag style={semanticTagStyle("default")}>{s}</Tag>;
       },
     },
     {
@@ -496,7 +497,7 @@ export default function CommentPage() {
             共 {totalComments} 条评论
           </Text>
           {Array.from(accountStats.entries()).map(([name, count]) => (
-            <Tag key={name} style={{ margin: 0, fontSize: 11 }}>
+            <Tag key={name} style={{ margin: 0, fontSize: 11, ...semanticTagStyle("default") }}>
               {name.length > 20 ? name.slice(0, 8) + "..." : name}: {count}
             </Tag>
           ))}

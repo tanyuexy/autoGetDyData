@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Layout, Menu, theme, Button } from "antd";
+import { useRef, useState } from "react";
+import { Layout, Menu, Button, Segmented, Tooltip } from "antd";
 import {
   VideoCameraOutlined,
   ShoppingOutlined,
@@ -14,10 +14,14 @@ import {
   MenuUnfoldOutlined,
   AuditOutlined,
   MessageOutlined,
+  ThunderboltOutlined,
+  CoffeeOutlined,
 } from "@ant-design/icons";
 import { useRouter, usePathname } from "next/navigation";
 import TaskPanel from "@/components/TaskPanel";
 import { useTaskContext } from "@/contexts/TaskContext";
+import { useAppUiTheme } from "@/contexts/UIThemeContext";
+import type { AppUiTheme } from "@/lib/appUiTheme";
 
 const { Sider, Content } = Layout;
 const menuItems = [
@@ -72,7 +76,7 @@ const TERMINAL_SIZE = { w: 720, h: 460 };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [todayText, setTodayText] = useState("");
+  const { theme: uiTheme, setTheme, toggleTheme } = useAppUiTheme();
 
   const {
     terminalOpen,
@@ -91,22 +95,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const router = useRouter();
   const pathname = usePathname();
-  const {
-    token: { borderRadiusLG },
-  } = theme.useToken();
 
   const selectedKey = pathname || "/creator";
-
-  useEffect(() => {
-    setTodayText(
-      new Intl.DateTimeFormat("zh-CN", {
-        timeZone: "Asia/Shanghai",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).format(new Date())
-    );
-  }, []);
 
   function onMouseDownDrag(e: React.MouseEvent) {
     if (terminalMinimized) return;
@@ -142,7 +132,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         collapsible
         collapsed={collapsed}
         onCollapse={setCollapsed}
-        theme="light"
+        theme={uiTheme === "voltagent" ? "dark" : "light"}
         width={180}
         trigger={
           <div className="sider-trigger">
@@ -151,8 +141,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         }
         style={{
           margin: 12,
-          borderRadius: 14,
+          borderRadius: 12,
           overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
         <div
@@ -165,21 +157,48 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         >
           <div style={{ display: "flex", alignItems: "center" }}>
             <div
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 10,
-                flexShrink: 0,
-                background:
-                  "linear-gradient(135deg, rgba(59,130,246,.92), rgba(99,102,241,.75))",
-                boxShadow: "0 10px 22px rgba(15, 23, 42, .10)",
-              }}
-            />
+              style={
+                uiTheme === "intercom"
+                  ? {
+                      width: 28,
+                      height: 28,
+                      borderRadius: 8,
+                      flexShrink: 0,
+                      background: "#111111",
+                      border: "1px solid #111111",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#ffffff",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      lineHeight: 1,
+                    }
+                  : {
+                      width: 28,
+                      height: 28,
+                      borderRadius: 8,
+                      flexShrink: 0,
+                      background: "var(--ic-canvas)",
+                      border: "1px solid var(--ic-hairline)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "var(--vol-primary)",
+                      fontSize: 15,
+                      fontWeight: 700,
+                      lineHeight: 1,
+                    }
+              }
+              aria-hidden
+            >
+              {uiTheme === "intercom" ? "数" : "⚡"}
+            </div>
             <div
               className={`sider-header-text ${collapsed ? "collapsed" : ""}`}
               style={{ lineHeight: 1.1 }}
             >
-              <div style={{ color: "rgba(15,23,42,.92)", fontSize: 13, fontWeight: 650, whiteSpace: "nowrap" }}>
+              <div style={{ color: "var(--vol-ink)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
                 抖店/抖创
               </div>
               <div className="panel-title" style={{ marginTop: 2, whiteSpace: "nowrap" }}>
@@ -193,14 +212,58 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
 
         <Menu
-          theme="light"
+          theme={uiTheme === "voltagent" ? "dark" : "light"}
           mode="inline"
           selectedKeys={[selectedKey]}
           items={menuItems}
           onClick={({ key }) => router.push(key)}
-          style={{ padding: 6, borderInlineEnd: 0 }}
+          style={{
+            padding: 6,
+            borderInlineEnd: 0,
+            background: "transparent",
+            flex: 1,
+            border: "none",
+            minHeight: 0,
+          }}
         />
 
+        <div
+          style={{
+            padding: "10px 12px",
+            borderTop: "1px solid var(--ic-hairline)",
+            flexShrink: 0,
+          }}
+        >
+          {!collapsed ? (
+            <Segmented<AppUiTheme>
+              block
+              size="small"
+              value={uiTheme}
+              onChange={(v) => setTheme(v)}
+              options={[
+                { label: "奶油", value: "intercom" },
+                { label: "电绿", value: "voltagent" },
+              ]}
+            />
+          ) : (
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <Tooltip
+                title={
+                  uiTheme === "intercom"
+                    ? "当前：Intercom 奶油风 · 点击切换 Voltagent 电绿"
+                    : "当前：Voltagent 电绿风 · 点击切换 Intercom 奶油"
+                }
+              >
+                <Button
+                  type="text"
+                  icon={uiTheme === "intercom" ? <CoffeeOutlined /> : <ThunderboltOutlined />}
+                  onClick={() => toggleTheme()}
+                  aria-label="切换界面风格"
+                />
+              </Tooltip>
+            </div>
+          )}
+        </div>
       </Sider>
 
       <Layout style={{ background: "transparent" }}>
@@ -209,8 +272,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           style={{
             margin: 12,
             marginLeft: 0,
-            padding: 16,
-            borderRadius: borderRadiusLG,
+            padding: 20,
+            borderRadius: 12,
             minHeight: 200,
             overflow: "auto",
           }}
@@ -265,12 +328,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             >
               <div className="terminal-float-header" onMouseDown={onMouseDownDrag}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <ConsoleSqlOutlined />
-                  <span style={{ fontSize: 12, color: "rgba(15,23,42,.82)", fontWeight: 650 }}>
+                  <ConsoleSqlOutlined style={{ color: "var(--vol-primary)" }} />
+                  <span style={{ fontSize: 12, color: "var(--vol-ink)", fontWeight: 600 }}>
                     命令行 / 任务日志
                   </span>
                   {activeViewId ? (
-                    <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>ID: {activeViewId}</span>
+                    <span style={{ fontSize: 11, color: "var(--vol-mute)" }}>ID: {activeViewId}</span>
                   ) : null}
                 </div>
 

@@ -18,6 +18,7 @@ import { ReloadOutlined, DeleteOutlined, LinkOutlined } from "@ant-design/icons"
 import dayjs, { type Dayjs } from "dayjs";
 import { useTaskContext } from "@/contexts/TaskContext";
 import type { ReviewItem, ReviewStatus } from "@/types";
+import { antdTagPresetStyle, semanticTagStyle } from "@/lib/semanticTagStyles";
 
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -421,7 +422,7 @@ export default function ReviewPage() {
       width: 70,
       render: (s: ReviewStatus) => {
         const v = REVIEW_STATUS_MAP[s] || { color: "default", text: "未知" };
-        return <Tag color={v.color}>{v.text}</Tag>;
+        return <Tag style={antdTagPresetStyle(v.color)}>{v.text}</Tag>;
       },
     },
     {
@@ -550,22 +551,22 @@ export default function ReviewPage() {
             共 {filteredItems.length} 条
           </Text>
           {approvedCount > 0 && (
-            <Tag color="success" style={{ margin: 0 }}>
+            <Tag style={{ ...semanticTagStyle("success"), margin: 0 }}>
               发布 {approvedCount}
             </Tag>
           )}
           {needsOptimizationCount > 0 && (
-            <Tag color="warning" style={{ margin: 0 }}>
+            <Tag style={{ ...semanticTagStyle("warning"), margin: 0 }}>
               需优化 {needsOptimizationCount}
             </Tag>
           )}
           {underReviewCount > 0 && (
-            <Tag color="processing" style={{ margin: 0 }}>
+            <Tag style={{ ...semanticTagStyle("processing"), margin: 0 }}>
               审核 {underReviewCount}
             </Tag>
           )}
           {rejectedCount > 0 && (
-            <Tag color="error" style={{ margin: 0 }}>
+            <Tag style={{ ...semanticTagStyle("error"), margin: 0 }}>
               拒绝 {rejectedCount}
             </Tag>
           )}

@@ -92,9 +92,9 @@ function getAutomationSelectedDays(config: CreatorPublishConfig): number[] {
 }
 
 const sectionStyle: React.CSSProperties = {
-  border: "1px solid rgba(15,23,42,0.08)",
+  border: "1px solid var(--vol-hairline)",
   borderRadius: 8,
-  background: "rgba(255,255,255,0.72)",
+  background: "var(--vol-canvas-soft)",
   padding: 16,
 };
 
@@ -670,9 +670,9 @@ export default function ConfigPage() {
         items={tabItems}
         size="small"
         style={{
-          background: "rgba(255,255,255,0.58)",
-          border: "1px solid rgba(15,23,42,0.06)",
-          borderRadius: 10,
+          background: "var(--vol-canvas-soft)",
+          border: "1px solid var(--vol-hairline)",
+          borderRadius: 8,
           padding: "4px 14px 16px",
         }}
       />

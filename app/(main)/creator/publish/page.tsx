@@ -27,6 +27,7 @@ import {
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { useTaskContext } from "@/contexts/TaskContext";
+import { antdTagPresetStyle } from "@/lib/semanticTagStyles";
 
 const { Text } = Typography;
 
@@ -76,7 +77,7 @@ const MULTILINE_TEXT_STYLE = {
   wordBreak: "break-word",
   lineHeight: 1.5,
   textAlign: "left",
-  color: "rgba(15,23,42,.88)",
+  color: "var(--vol-ink)",
 } as const;
 
 const ON_ROW_STYLE = { verticalAlign: "top" } as const;
@@ -892,7 +893,23 @@ export default function CreatorPublishPage() {
       width: 70,
       align: "center" as const,
       render: (_: any, r: PublishTask) => (
-        <Tag color={r.payload.isAiContent ? "processing" : "default"}>
+        <Tag
+          style={
+            r.payload.isAiContent
+              ? {
+                  marginInlineEnd: 0,
+                  background: "#111111",
+                  color: "#ffffff",
+                  borderColor: "#111111",
+                }
+              : {
+                  marginInlineEnd: 0,
+                  background: "#ebe7e1",
+                  color: "#626260",
+                  borderColor: "#d3cec6",
+                }
+          }
+        >
           {r.payload.isAiContent ? "是" : "否"}
         </Tag>
       ),
@@ -909,7 +926,7 @@ export default function CreatorPublishPage() {
       align: "center" as const,
       render: (s: TaskStatus) => {
         const v = STATUS_MAP[s];
-        return <Tag color={v.color}>{v.text}</Tag>;
+        return <Tag style={antdTagPresetStyle(v.color)}>{v.text}</Tag>;
       },
     },
     {
@@ -1014,7 +1031,7 @@ export default function CreatorPublishPage() {
           <Popconfirm
             title="确认删除任务？"
             description={
-              <div style={{ color: "rgba(15,23,42,.72)" }}>
+              <div style={{ color: "var(--vol-body)" }}>
                 将删除任务：<Text code>{r.id}</Text>
                 <br />
                 <Text type="secondary">账号：{r.accountName}</Text>
@@ -1060,7 +1077,7 @@ export default function CreatorPublishPage() {
               label="选择账号"
               style={{ marginBottom: 8 }}
               help={
-                <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>
+                <span style={{ fontSize: 11, color: "var(--vol-mute)" }}>
                   {loadingAccounts ? "加载中..." : "多选会为每个账号创建一条任务"}
                 </span>
               }
@@ -1157,7 +1174,7 @@ export default function CreatorPublishPage() {
               label="AI内容"
               style={{ marginBottom: 8 }}
               help={
-                <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>
+                <span style={{ fontSize: 11, color: "var(--vol-mute)" }}>
                   开启后自主声明选"内容由AI生成"，关闭则选"无需添加自主声明"
                 </span>
               }
@@ -1174,7 +1191,7 @@ export default function CreatorPublishPage() {
               label="定时发布时间（可选）"
               style={{ marginBottom: 8 }}
               help={
-                <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>
+                <span style={{ fontSize: 11, color: "var(--vol-mute)" }}>
                   不填则立即发布 | 不可选择过去时间
                 </span>
               }
@@ -1387,7 +1404,7 @@ export default function CreatorPublishPage() {
               label="店铺/账号"
               style={{ marginBottom: 10 }}
               help={
-                <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>
+                <span style={{ fontSize: 11, color: "var(--vol-mute)" }}>
                   切换到其它账号后，任务将以新账号的登录态执行（须已在全局配置中添加该抖创账号）
                 </span>
               }
@@ -1451,7 +1468,7 @@ export default function CreatorPublishPage() {
               label="定时发布时间"
               style={{ marginBottom: 0 }}
               help={
-                <span style={{ fontSize: 11, color: "rgba(15,23,42,.45)" }}>
+                <span style={{ fontSize: 11, color: "var(--vol-mute)" }}>
                   选「立即执行」尽快跑任务；定时时先选日期，时间用下拉（可搜索、无滚轮跳动）；亦可点下方快捷时间
                 </span>
               }

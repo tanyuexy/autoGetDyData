@@ -27,6 +27,7 @@ import type { CreatorAccount, ShopAccount } from "@/types";
 import type { CSSProperties } from "react";
 import { useState, useMemo, useEffect } from "react";
 import { useTaskContext } from "@/contexts/TaskContext";
+import { semanticTagStyle } from "@/lib/semanticTagStyles";
 
 interface CreatorProps {
   type: "creator";
@@ -54,11 +55,11 @@ type Props = CreatorProps | ShopProps;
 /** 抖创数据 / 配置里账号区块的版面与外层表格容器 */
 function accountTableShellSx(): CSSProperties {
   return {
-    border: "1px solid rgba(15, 23, 42, 0.08)",
+    border: "1px solid var(--vol-hairline)",
     borderRadius: 12,
     overflow: "hidden",
-    background: "rgba(255, 255, 255, 0.72)",
-    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+    background: "var(--vol-canvas-soft)",
+    boxShadow: "none",
   };
 }
 
@@ -123,7 +124,10 @@ function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | n
 
   if (!status || status === "missing") {
     return (
-      <Tag icon={<CloseCircleOutlined />} color="default" variant="filled" style={{ borderRadius: 6 }}>
+      <Tag
+        icon={<CloseCircleOutlined />}
+        style={{ ...semanticTagStyle("default"), borderRadius: 6 }}
+      >
         未登录
       </Tag>
     );
@@ -132,7 +136,10 @@ function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | n
   if (status === "valid") {
     return (
       <Tooltip title={acc.cookieDetail || "登录态有效"}>
-        <Tag icon={<CheckCircleOutlined />} color="success" variant="filled" style={{ borderRadius: 6 }}>
+        <Tag
+          icon={<CheckCircleOutlined />}
+          style={{ ...semanticTagStyle("success"), borderRadius: 6 }}
+        >
           有效
         </Tag>
       </Tooltip>
@@ -142,7 +149,10 @@ function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | n
   if (status === "warning") {
     return (
       <Tooltip title={acc.cookieDetail || "登录态可能过期"}>
-        <Tag icon={<ExclamationCircleOutlined />} color="warning" variant="filled" style={{ borderRadius: 6 }}>
+        <Tag
+          icon={<ExclamationCircleOutlined />}
+          style={{ ...semanticTagStyle("warning"), borderRadius: 6 }}
+        >
           可能过期
         </Tag>
       </Tooltip>
@@ -152,7 +162,7 @@ function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | n
   if (status === "expired") {
     return (
       <Tooltip title={acc.cookieDetail || "登录态已过期"}>
-        <Tag icon={<CloseCircleOutlined />} color="error" variant="filled" style={{ borderRadius: 6 }}>
+        <Tag icon={<CloseCircleOutlined />} style={{ ...semanticTagStyle("error"), borderRadius: 6 }}>
           已过期
         </Tag>
       </Tooltip>
@@ -161,7 +171,10 @@ function renderCookieTag(acc: { cookieStatus?: string; cookieDetail?: string | n
 
   return (
     <Tooltip title={acc.cookieDetail || "未知状态"}>
-      <Tag icon={<QuestionCircleOutlined />} color="default" variant="filled" style={{ borderRadius: 6 }}>
+      <Tag
+        icon={<QuestionCircleOutlined />}
+        style={{ ...semanticTagStyle("default"), borderRadius: 6 }}
+      >
         未知
       </Tag>
     </Tooltip>
@@ -304,7 +317,7 @@ export default function AccountTable(props: Props) {
             <span
               style={{
                 fontWeight: 500,
-                color: "rgba(15, 23, 42, 0.9)",
+                color: "var(--vol-ink)",
               }}
             >
               {row.name}
@@ -331,7 +344,7 @@ export default function AccountTable(props: Props) {
             style={{
               fontSize: 13,
               fontVariantNumeric: "tabular-nums",
-              color: "rgba(15, 23, 42, 0.58)",
+              color: "var(--vol-mute)",
             }}
           >
             {formatShortDateTime(row.lastLoginAt)}
@@ -342,7 +355,7 @@ export default function AccountTable(props: Props) {
         title: "操作",
         key: "actions",
         align: centerHeader ? "center" : "right",
-        width: onLogin ? 280 : 200,
+        width: onLogin ? 340 : 200,
         render: (_: unknown, row: CreatorAccount) => {
           const hasReusableLoginState =
             row.hasStorageState &&
@@ -368,7 +381,13 @@ export default function AccountTable(props: Props) {
             ] as const);
 
           return (
-            <Flex wrap="wrap" gap={6} justify={centerHeader ? "center" : "flex-end"} align="center">
+            <Flex
+              wrap="nowrap"
+              gap={4}
+              justify={centerHeader ? "center" : "flex-end"}
+              align="center"
+              style={{ minWidth: 0 }}
+            >
               {onLogin && loginMenuItems && (
                 <Dropdown
                   trigger={["hover"]}
@@ -433,7 +452,7 @@ export default function AccountTable(props: Props) {
                   size="small"
                   type="link"
                   danger
-                  style={{ paddingInline: 4 }}
+                  style={{ paddingInline: 2, flexShrink: 0 }}
                   onClick={() => onDeleteAccount(row.name)}
                 >
                   删除
@@ -505,8 +524,8 @@ export default function AccountTable(props: Props) {
             styles={{
               header: {
                 cell: {
-                  background: "rgba(248, 250, 252, 0.95)",
-                  color: "rgba(15,23,42,0.65)",
+                  background: "var(--ic-surface-2)",
+                  color: "var(--ic-ink-muted)",
                   fontWeight: 500,
                   fontSize: 12,
                   letterSpacing: "0.02em",
@@ -548,7 +567,7 @@ export default function AccountTable(props: Props) {
       ...(centerHeader ? { align: "center" as const } : {}),
       render: (_: unknown, row: ShopAccount) => (
         <Tooltip title={row.email} placement={centerHeader ? "top" : "topLeft"}>
-          <span style={{ fontWeight: 500, color: "rgba(15, 23, 42, 0.88)" }}>{row.email}</span>
+          <span style={{ fontWeight: 500, color: "var(--vol-ink)" }}>{row.email}</span>
         </Tooltip>
       ),
     },
@@ -571,7 +590,7 @@ export default function AccountTable(props: Props) {
           style={{
             fontSize: 13,
             fontVariantNumeric: "tabular-nums",
-            color: "rgba(15, 23, 42, 0.58)",
+            color: "var(--vol-mute)",
           }}
         >
           {formatShortDateTime(row.lastLoginAt)}
@@ -620,8 +639,8 @@ export default function AccountTable(props: Props) {
           styles={{
             header: {
               cell: {
-                background: "rgba(248, 250, 252, 0.95)",
-                color: "rgba(15,23,42,0.65)",
+                background: "var(--ic-surface-2)",
+                color: "var(--ic-ink-muted)",
                 fontWeight: 500,
                 fontSize: 12,
                 letterSpacing: "0.02em",

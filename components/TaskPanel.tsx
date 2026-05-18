@@ -10,6 +10,7 @@ import {
 } from "@ant-design/icons";
 import LogTerminal from "./LogTerminal";
 import { useTaskContext } from "@/contexts/TaskContext";
+import { semanticTagStyle } from "@/lib/semanticTagStyles";
 
 const { Text } = Typography;
 
@@ -137,7 +138,7 @@ export default function TaskPanel({ taskButtons, terminalHeight }: Props) {
             </Button>
           ))}
           {isRunning && (
-            <Tag color="processing" icon={<ReloadOutlined spin />}>
+            <Tag icon={<ReloadOutlined spin />} style={semanticTagStyle("processing")}>
               任务运行中
             </Tag>
           )}
@@ -193,8 +194,8 @@ export default function TaskPanel({ taskButtons, terminalHeight }: Props) {
             <Space>
               {exitCode === 0 ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
               <Text>{summary || `任务完成，退出码: ${exitCode}`}</Text>
-              {exitCode === 0 && <Tag color="success">成功</Tag>}
-              {exitCode !== 0 && exitCode !== null && <Tag color="error">失败</Tag>}
+              {exitCode === 0 && <Tag style={semanticTagStyle("success")}>成功</Tag>}
+              {exitCode !== 0 && exitCode !== null && <Tag style={semanticTagStyle("error")}>失败</Tag>}
             </Space>
           }
           showIcon={false}
@@ -204,12 +205,10 @@ export default function TaskPanel({ taskButtons, terminalHeight }: Props) {
 
       {isRunning && !done && activeViewId && (
         <div style={{ marginBottom: 8, flexShrink: 0 }}>
-          <Text type="secondary" style={{ marginRight: 8 }}>
+          <Text strong style={{ marginRight: 8, color: "var(--ic-ink)" }}>
             任务运行中...
           </Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            ID: {activeViewId}
-          </Text>
+          <Text style={{ fontSize: 12, color: "var(--ic-ink-muted)" }}>ID: {activeViewId}</Text>
         </div>
       )}
 
