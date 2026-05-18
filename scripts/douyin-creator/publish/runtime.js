@@ -9,12 +9,7 @@ const {
   LOGIN_WAIT_TIMEOUT_MS
 } = require("../lib/env");
 const { step, checkOk } = require("./logger");
-const {
-  createOtpBridgeSession,
-  fetchOtpCodeFromBridge,
-  isOtpBridgeLinkEnabled
-} = require("../lib/otp-bridge");
-const { fetchOtpCodeFromEmail, sendReceiveOtpEmail } = require("../lib/mail");
+const { fetchOtpCode, sendReceiveOtpEmail } = require("../lib/mail");
 const {
   otpRequestIdByAccount,
   otpRequestSinceByAccount,
@@ -304,31 +299,14 @@ async function handlePublishSmsVerification(page, accountName) {
     console.log("  ✓ 已触发获取验证码");
   }
 
-  // 2. 创建 OTP bridge 会话 + 通知用户
+  // 2. 通知用户填写验证码（内部会创建 OTP bridge 会话）
   const now = Date.now();
-  let requestId = "";
-  if (isOtpBridgeLinkEnabled()) {
-    try {
-      const session = await createOtpBridgeSession({
-        accountName,
-        maskedPhone,
-        reason: "发布作品时需短信验证码"
-      });
-      requestId = String(session.requestId || "");
-    } catch (e) {
-      console.error("  创建 OTP 中转会话失败:", e?.message || e);
-    }
-  }
-  if (requestId) {
-    otpRequestIdByAccount.set(accountName, requestId);
-  } else {
-    otpRequestIdByAccount.delete(accountName);
-  }
+  let requestId = otpRequestIdByAccount.get(accountName) || "";
   otpRequestSinceByAccount.set(accountName, now);
   otpLastAppliedByAccount.delete(accountName);
   otpLastStatusLogAtByAccount.delete(accountName);
 
-  // 3. 发送企业微信通知
+  // 3. 发送企业微信通知（内部会重新创建 session 并覆盖 otpRequestIdByAccount）
   await sendReceiveOtpEmail({
     accountName,
     maskedPhone,
@@ -336,6 +314,9 @@ async function handlePublishSmsVerification(page, accountName) {
   }).catch((e) => {
     console.error("  发送验证码通知失败:", e?.message || e);
   });
+
+  // sendReceiveOtpEmail 内部可能重建了 session，以最新的 requestId 为准
+  requestId = otpRequestIdByAccount.get(accountName) || requestId;
 
   // 4. 轮询 OTP 中转页 + IMAP
   const pollIntervalMs = 3000;
@@ -367,26 +348,15 @@ async function handlePublishSmsVerification(page, accountName) {
       }
     }
 
-    // 从 OTP 中转页获取验证码
-    if (requestId) {
-      const bridgeResult = await fetchOtpCodeFromBridge({ requestId }).catch(
-        () => ({ otpCode: "" })
-      );
-      if (bridgeResult.otpCode) {
-        otpCode = bridgeResult.otpCode;
-        console.log(`  ✓ 已从 OTP 中转页获取验证码: ${otpCode}`);
-        break;
-      }
-    }
-
-    // 从 IMAP 邮件获取验证码
-    const emailResult = await fetchOtpCodeFromEmail({
+    // 从 OTP 中转页 / IMAP 获取验证码
+    const pollResult = await fetchOtpCode({
       accountName,
+      requestId,
       sinceMs: now
     }).catch(() => ({ otpCode: "" }));
-    if (emailResult.otpCode) {
-      otpCode = emailResult.otpCode;
-      console.log(`  ✓ 已从邮件获取验证码: ${otpCode}`);
+    if (pollResult.otpCode) {
+      otpCode = pollResult.otpCode;
+      console.log(`  ✓ 已获取验证码: ${otpCode}`);
       break;
     }
 

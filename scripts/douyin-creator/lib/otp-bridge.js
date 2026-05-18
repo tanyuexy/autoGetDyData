@@ -97,6 +97,7 @@ async function fetchOtpCodeFromBridge(
     url.searchParams.set("token", cfg.accessToken);
   }
 
+  console.log(`[otp-bridge] 轮询验证码: GET ${url.toString()}`);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
   try {
