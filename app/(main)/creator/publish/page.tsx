@@ -982,10 +982,18 @@ export default function CreatorPublishPage() {
     },
     {
       title: "操作",
-      width: 180,
+      width: 132,
       align: "center" as const,
       render: (_: any, r: PublishTask) => (
-        <Space size={0} wrap>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            columnGap: 2,
+            rowGap: 2,
+            justifyItems: "center",
+          }}
+        >
           <Button
             size="small"
             type="link"
@@ -1047,7 +1055,7 @@ export default function CreatorPublishPage() {
               删除
             </Button>
           </Popconfirm>
-        </Space>
+        </div>
       ),
     },
   ];

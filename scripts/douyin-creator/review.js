@@ -75,13 +75,19 @@ function normalizeItem(item) {
   const postId = String(item?.id || "").trim();
   if (!postId) return null;
 
+  const reviewStatus = inferReviewStatus(item);
+  // 只有已发布和需优化状态的作品才有公开链接，其他状态链接无效
+  const workLink = (reviewStatus === "approved" || reviewStatus === "needs_optimization")
+    ? buildWorkLink(postId)
+    : "";
+
   return {
     postId,
     userId: String(item?.user_id || ""),
     title: String(item?.description || "").trim(),
     publishDate: formatUnixSeconds(item?.create_time) || new Date().toISOString(),
-    reviewStatus: inferReviewStatus(item),
-    workLink: buildWorkLink(postId),
+    reviewStatus,
+    workLink,
     workType: item?.type === 2 ? "视频" : item?.type === 1 ? "图文" : "",
     coverUrl: (item?.cover?.url_list && item.cover.url_list[0]) || undefined,
   };
@@ -198,11 +204,14 @@ async function fetchRejectionReasons(page, items) {
           const corrected = inferReviewStatus(apiItem);
           if (corrected !== "under_review") {
             local.reviewStatus = corrected;
+            // 修正为未通过时清除无效的作品链接
+            if (corrected === "rejected") local.workLink = "";
           }
         }
         // 如果状态仍为审核中，但拒绝原因文本明确表示审核失败，修正为未通过
         if (local.reviewStatus === "under_review" && textIndicatesRejection(local.rejectionReason)) {
           local.reviewStatus = "rejected";
+          local.workLink = "";
         }
       }
     } catch (e) {
@@ -226,6 +235,7 @@ async function fetchRejectionReasons(page, items) {
     // 完整审核详情也可能揭示真实审核状态
     if (item.reviewStatus === "under_review" && textIndicatesRejection(item.rejectionReason)) {
       item.reviewStatus = "rejected";
+      item.workLink = "";
     }
     // 避免请求过于频繁
     await page.waitForTimeout(500);
