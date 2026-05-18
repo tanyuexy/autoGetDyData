@@ -35,7 +35,36 @@ function inferReviewStatus(item) {
   if (status === 2) return "approved";
   if (status === 3) return "rejected";
   if (status === 5) return "needs_optimization";
+  if (status === 6) return "rejected"; // 限制传播/仅好友可见
   return "under_review";
+}
+
+/** 审核未通过的文本关键词，用于从拒绝原因文本反推状态 */
+const REJECTION_TEXT_PATTERNS = [
+  /审核有误/,
+  /审核不通过/,
+  /未通过审核/,
+  /审核未通过/,
+  /违规/,
+  /违规原因/,
+  /含有违规/,
+  /不可发布/,
+  /已被拒绝/,
+  /驳回/,
+  /不适宜/,
+  /禁止发布/,
+  /不予通过/,
+  /下架/,
+  /已被下架/,
+  /限制互关可见/,
+  /仅好友可见/,
+  /低俗/,
+  /色情/,
+];
+
+function textIndicatesRejection(reasonText) {
+  if (!reasonText) return false;
+  return REJECTION_TEXT_PATTERNS.some((p) => p.test(reasonText));
 }
 
 function buildWorkLink(postId) {
@@ -163,6 +192,18 @@ async function fetchRejectionReasons(page, items) {
           local.rejectionReason = detail.text;
           filled++;
         }
+
+        // 根据 mget 返回的更准确的 review.status 重新评估状态
+        if (apiItem?.review?.status != null) {
+          const corrected = inferReviewStatus(apiItem);
+          if (corrected !== "under_review") {
+            local.reviewStatus = corrected;
+          }
+        }
+        // 如果状态仍为审核中，但拒绝原因文本明确表示审核失败，修正为未通过
+        if (local.reviewStatus === "under_review" && textIndicatesRejection(local.rejectionReason)) {
+          local.reviewStatus = "rejected";
+        }
       }
     } catch (e) {
       console.warn(`[review] 获取拒绝原因批次失败 (${i}-${i + batch.length}): ${e.message}`);
@@ -181,6 +222,10 @@ async function fetchRejectionReasons(page, items) {
       enrichedCount++;
     } else {
       console.warn(`[review] 作品 ${item.postId} 未获取到完整审核详情，保留简要原因`);
+    }
+    // 完整审核详情也可能揭示真实审核状态
+    if (item.reviewStatus === "under_review" && textIndicatesRejection(item.rejectionReason)) {
+      item.reviewStatus = "rejected";
     }
     // 避免请求过于频繁
     await page.waitForTimeout(500);
