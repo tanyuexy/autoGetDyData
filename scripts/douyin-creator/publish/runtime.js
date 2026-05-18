@@ -365,15 +365,13 @@ async function handlePublishSmsVerification(page, accountName) {
   }
 
   if (!otpCode) {
-    console.log("  ⚠️ 等待验证码超时，发布可能未完成");
-    return false;
+    throw new Error("等待验证码超时");
   }
 
   // 5. 回填验证码并点击验证（复用 verification.js 的经过验证的选择器）
   const filled = await fillReceiveOtpCodeAndSubmit(page, otpCode);
   if (!filled) {
-    console.log("  ⚠️ 回填验证码失败：未找到验证码输入框");
-    return false;
+    throw new Error("回填验证码失败：未找到验证码输入框");
   }
   console.log(`  ✓ 已回填验证码: ${otpCode}`);
   otpLastAppliedByAccount.set(accountName, otpCode);
@@ -392,8 +390,7 @@ async function handlePublishSmsVerification(page, accountName) {
   }
 
   if (await smsPanel.isVisible({ timeout: 500 }).catch(() => false)) {
-    console.log("  ⚠️ SMS 弹窗未关闭，验证可能未通过");
-    return false;
+    throw new Error("SMS 验证弹窗未关闭，验证未通过");
   }
 
   return true;
@@ -418,14 +415,12 @@ async function clickPublishButton(page, accountName) {
       .isVisible({ timeout: scaledMs(5000) })
       .catch(() => false))
   ) {
-    console.log("  ⚠️ 未找到发布按钮，可能已自动发布或按钮被遮挡");
-    return false;
+    throw new Error("未找到发布按钮");
   }
 
   const isDisabled = await publishBtn.isDisabled().catch(() => false);
   if (isDisabled) {
-    console.log("  ⚠️ 发布按钮处于禁用状态，可能必填字段未填写完成");
-    return false;
+    throw new Error("发布按钮处于禁用状态，可能必填字段未填写完成");
   }
 
   await publishBtn.scrollIntoViewIfNeeded().catch(() => {});
@@ -461,10 +456,7 @@ async function clickPublishButton(page, accountName) {
   if (
     await smsPanel.isVisible({ timeout: scaledMs(2000) }).catch(() => false)
   ) {
-    const smsHandled = await handlePublishSmsVerification(page, accountName);
-    if (!smsHandled) {
-      return false;
-    }
+    await handlePublishSmsVerification(page, accountName);
     // 点击验证后等待结果
     await page.waitForTimeout(scaledMs(5000));
   }
@@ -521,8 +513,7 @@ async function clickPublishButton(page, accountName) {
 
   const stillVisible = await publishBtn.isVisible().catch(() => false);
   if (stillVisible) {
-    console.log("  ⚠️ 发布按钮仍在，可能发布未完成");
-    return false;
+    throw new Error("发布按钮仍在，发布未完成");
   }
 
   console.log("  ✅ 发布已提交（按钮已隐藏）");

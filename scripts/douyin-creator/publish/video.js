@@ -321,10 +321,7 @@ async function runPublishVideo(options) {
 
     if (publishEnabled) {
       stage(9, "点击发布按钮");
-      const published = await clickPublishButton(page, accountName);
-      if (!published) {
-        throw new Error("发布未完成：发布按钮点击后未确认发布成功");
-      }
+      await clickPublishButton(page, accountName);
     } else {
       stage(9, "跳过点击发布（publishEnabled=false）");
     }

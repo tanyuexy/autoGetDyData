@@ -9,8 +9,7 @@ async function selectSelfDeclaration(page, isAiContent) {
   const selectBox = section.locator('[class*="selectBox"]').first();
 
   if (!(await selectBox.isVisible().catch(() => false))) {
-    info("未找到自主声明下拉框，跳过");
-    return;
+    throw new Error("未找到自主声明下拉框");
   }
 
   const currentText = await selectBox.locator('[class*="selectText"]').first().textContent().catch(() => "");
@@ -28,7 +27,7 @@ async function selectSelfDeclaration(page, isAiContent) {
     await page.waitForTimeout(500);
     step(`已选择: ${targetLabel}`);
   } else {
-    info(`未找到选项: ${targetLabel}`);
+    throw new Error(`未找到自主声明选项: ${targetLabel}`);
   }
 
   const confirmBtn = page.locator('.semi-modal-content button:has-text("确定")').first();

@@ -87,7 +87,7 @@ async function fillProductEditModal(page, productTitle, approvalNumber) {
       return;
     }
 
-    info(`⚠️ 未找到${labelText}输入框`);
+    throw new Error(`未找到${labelText}输入框`);
   }
 
   await fillFieldByLabel("商品短标题", productTitle, 'input[placeholder="请输入商品短标题"], input[placeholder*="短标题"]');
@@ -99,21 +99,19 @@ async function fillProductEditModal(page, productTitle, approvalNumber) {
     await page.waitForTimeout(scaledMs(3000));
     step("已点击完成编辑");
   } else {
-    info("⚠️ 未找到完成编辑按钮，停留在弹窗供查看");
+    throw new Error("未找到完成编辑按钮");
   }
 }
 
 async function selectCartAndLinkForVideo(page, productLink, productTitle, approvalNumber) {
   if (!productLink) {
-    info("挂车链接为空，跳过");
-    return;
+    throw new Error("挂车链接为空，无法设置购物车");
   }
   step("设置购物车");
 
   const tagSelect = page.locator('section:has-text("添加标签") .semi-select, .select-lJTtRL, .anchor-container-hgj7gj .semi-select').first();
   if (!(await tagSelect.isVisible().catch(() => false))) {
-    info("未找到购物车下拉框，跳过");
-    return;
+    throw new Error("未找到购物车下拉框");
   }
   await dismissBlockingPortals(page);
   await clickEvenIfCovered(tagSelect, "购物车下拉框");
@@ -125,9 +123,7 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
     await page.waitForTimeout(scaledMs(2000));
     step("已选择购物车");
   } else {
-    await page.keyboard.press("Escape");
-    info("未找到购物车选项，跳过");
-    return;
+    throw new Error("未找到购物车选项");
   }
 
   const linkInput = page.locator('#douyin_creator_pc_anchor_jump input, section:has-text("添加标签") input, input[placeholder*="粘贴商品"], input[placeholder*="链接"]').first();
@@ -162,8 +158,7 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
 
 async function selectCartAndLinkForArticle(page, productLink, productTitle, approvalNumber) {
   if (!productLink) {
-    info("挂车链接为空，跳过");
-    return;
+    throw new Error("挂车链接为空，无法设置购物车");
   }
   step("设置购物车");
 
@@ -173,8 +168,7 @@ async function selectCartAndLinkForArticle(page, productLink, productTitle, appr
   const select = (await cartSelect.isVisible().catch(() => false)) ? cartSelect : tagSelect;
 
   if (!(await select.isVisible().catch(() => false))) {
-    info("未找到购物车下拉框，跳过");
-    return;
+    throw new Error("未找到购物车下拉框");
   }
 
   await dismissBlockingPortals(page);
@@ -186,9 +180,7 @@ async function selectCartAndLinkForArticle(page, productLink, productTitle, appr
     await page.waitForTimeout(scaledMs(2000));
     step("已选择购物车");
   } else {
-    await page.keyboard.press("Escape");
-    console.log("  未找到购物车选项，跳过");
-    return;
+    throw new Error("未找到购物车选项");
   }
 
   const anchorInput = anchor.locator('input').first();
@@ -199,16 +191,14 @@ async function selectCartAndLinkForArticle(page, productLink, productTitle, appr
     await linkInput.fill(productLink);
     console.log("  链接已填入");
   } else {
-    console.log("  未找到链接输入框，跳过");
-    return;
+    throw new Error("未找到链接输入框");
   }
 
   const addBtn = anchor.locator('span:has-text("添加链接"), button:has-text("添加链接")').first();
   const globalAddBtn = page.locator('span:has-text("添加链接"), button:has-text("添加链接")').first();
   const targetAddBtn = (await addBtn.isVisible().catch(() => false)) ? addBtn : globalAddBtn;
   if (!(await targetAddBtn.isVisible().catch(() => false))) {
-    console.log("  未找到添加链接按钮，跳过");
-    return;
+    throw new Error("未找到添加链接按钮");
   }
 
   await clickEvenIfCovered(targetAddBtn, "添加链接按钮");

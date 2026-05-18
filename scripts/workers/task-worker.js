@@ -450,7 +450,7 @@ async function buildRunArgs(task) {
   return args;
 }
 
-async function markFeishuPublished(task) {
+async function markFeishuPublished(task, runtimeTaskId) {
   if (!task.feishuRecordId) return;
   try {
     await postInternalApi("/api/feishu/task-writeback", {
@@ -459,7 +459,7 @@ async function markFeishuPublished(task) {
     });
   } catch (error) {
     appendTaskLog(
-      task.taskId || task.id,
+      runtimeTaskId,
       "error",
       `[feishu-writeback] 发布成功回写失败 record ${task.feishuRecordId}: ${error.message || error}`
     );
@@ -501,11 +501,11 @@ function shouldWritebackFeishuFailure(errorText, task) {
   return false;
 }
 
-async function markFeishuFailed(task, errorText) {
+async function markFeishuFailed(task, errorText, runtimeTaskId) {
   if (!task.feishuRecordId) return;
   if (!shouldWritebackFeishuFailure(errorText, task)) {
     appendTaskLog(
-      task.taskId || task.id,
+      runtimeTaskId,
       "info",
       `[feishu-writeback] 跳过回写 record ${task.feishuRecordId} (${task.accountName}): 错误类型不需要回写飞书`
     );
@@ -519,7 +519,7 @@ async function markFeishuFailed(task, errorText) {
     });
   } catch (error) {
     appendTaskLog(
-      task.taskId || task.id,
+      runtimeTaskId,
       "error",
       `[feishu-writeback] 失败状态回写失败 record ${task.feishuRecordId}: ${error.message || error}`
     );
@@ -640,8 +640,8 @@ async function startTask(task) {
       });
     }
     await removeRuntimeProcess(runtimeTaskId);
-    if (ok && !wasCancelled) await markFeishuPublished(task);
-    if (!ok && !manualTerminated) await markFeishuFailed(task, normalizedLastError);
+    if (ok && !wasCancelled) await markFeishuPublished(task, runtimeTaskId);
+    if (!ok && !manualTerminated) await markFeishuFailed(task, normalizedLastError, runtimeTaskId);
   });
 
   child.on("error", async (error) => {
@@ -664,7 +664,7 @@ async function startTask(task) {
     }
     await removeRuntimeProcess(runtimeTaskId);
     if (latest?.status !== "cancelled" && !manualTerminated) {
-      await markFeishuFailed(task, normalizedLastError);
+      await markFeishuFailed(task, normalizedLastError, runtimeTaskId);
     }
   });
 
