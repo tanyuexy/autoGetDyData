@@ -21,10 +21,11 @@ type BackupFileInfo = {
 export default function FeishuPage() {
   const { message } = App.useApp();
 
-  const { startTask, done, isRunning } = useTaskContext();
+  const { startTask, done } = useTaskContext();
 
   const [files, setFiles] = useState<BackupFileInfo[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
+  const [backupLoading, setBackupLoading] = useState(false);
 
   async function refreshFiles() {
     setFilesLoading(true);
@@ -46,15 +47,20 @@ export default function FeishuPage() {
   }, []);
 
   useEffect(() => {
-    if (done) refreshFiles();
+    if (done) {
+      setBackupLoading(false);
+      refreshFiles();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [done]);
 
   async function handleBackupBoth() {
+    setBackupLoading(true);
     try {
       await startTask("/api/feishu/backup", { profiles: "creator,shop" }, "feishu");
       message.info("备份任务已启动");
     } catch (e: any) {
+      setBackupLoading(false);
       message.error(e.message || "启动失败");
     }
   }
@@ -133,7 +139,7 @@ export default function FeishuPage() {
         <h3 style={{ marginTop: 0, fontSize: 15 }}>数据操作</h3>
 
         <Space style={{ marginBottom: 8 }} wrap>
-          <Button type="primary" onClick={handleBackupBoth} loading={isRunning}>
+          <Button type="primary" onClick={handleBackupBoth} loading={backupLoading}>
             备份多维表格文件（抖创 + 抖店）
           </Button>
           <Button onClick={refreshFiles} loading={filesLoading}>

@@ -20,7 +20,7 @@ import { useTaskContext } from "@/contexts/TaskContext";
 import type { ReviewItem, ReviewStatus } from "@/types";
 import { antdTagPresetStyle, semanticTagStyle } from "@/lib/semanticTagStyles";
 
-const { Text } = Typography;
+const { Text, Link: TextLink } = Typography;
 const { RangePicker } = DatePicker;
 
 const REVIEW_STATUS_MAP: Record<ReviewStatus, { color: string; text: string }> = {
@@ -450,9 +450,9 @@ export default function ReviewPage() {
       render: (v: string | undefined) => {
         if (!v) return "-";
         return (
-          <a href={v} target="_blank" rel="noopener noreferrer">
+          <TextLink href={v} target="_blank" rel="noopener noreferrer">
             查看
-          </a>
+          </TextLink>
         );
       },
     },
@@ -466,11 +466,12 @@ export default function ReviewPage() {
           <Space size={0}>
             <Tooltip title={canOpenDetail ? "用该店铺登录态打开作品详情" : "只有已发布/需优化作品可以打开详情"}>
               <Button
-                type="text"
+                type="link"
                 size="small"
                 icon={<LinkOutlined />}
                 disabled={!canOpenDetail}
                 onClick={() => handleOpenWorkDetail(r)}
+                style={{ paddingInline: 4 }}
               />
             </Tooltip>
             <Button

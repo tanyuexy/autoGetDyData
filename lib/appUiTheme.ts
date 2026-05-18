@@ -18,8 +18,10 @@ export function buildIntercomAntdTheme(): ThemeConfig {
     token: {
       colorPrimary: "#111111",
       colorInfo: "#111111",
-      colorLink: "#111111",
-      colorLinkHover: "#454542",
+      /** 与炭灰主按钮区分：正文内可点击外链使用经典超链接蓝 */
+      colorLink: "#1677ff",
+      colorLinkHover: "#4096ff",
+      colorLinkActive: "#0958d9",
       colorTextLightSolid: "#ffffff",
       colorText: "#111111",
       colorTextSecondary: "#454542",
