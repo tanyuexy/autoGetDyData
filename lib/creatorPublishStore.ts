@@ -175,48 +175,36 @@ function isCartLimitErrorText(text: string | undefined): boolean {
   return /购物车限额/.test(String(text || "").trim());
 }
 
-function getDatePartsInChina(input: string | Date): { year: number; month: number; day: number } | null {
-  const date = input instanceof Date ? input : new Date(input);
-  if (Number.isNaN(date.getTime())) return null;
+function isScheduleTimeErrorText(text: string | undefined): boolean {
+  return /定时时间不满足平台要求/.test(String(text || "").trim());
+}
 
-  const parts = new Intl.DateTimeFormat("zh-CN", {
+function isScheduleToday(scheduleAt: string | null | undefined): boolean {
+  if (!scheduleAt) return true;
+  const fmt = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(date);
+  });
+  return fmt.format(new Date()) === fmt.format(new Date(scheduleAt));
+}
 
-  const year = Number(parts.find((part) => part.type === "year")?.value || NaN);
-  const month = Number(parts.find((part) => part.type === "month")?.value || NaN);
-  const day = Number(parts.find((part) => part.type === "day")?.value || NaN);
-
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
-    return null;
+/** 只有购物车限额（且定时为今天）、定时时间不满足平台要求这两种错误才需要回写飞书 */
+function shouldWritebackFeishuFailure(errorText: string | undefined, task?: CreatorPublishTask): boolean {
+  const text = String(errorText || "").trim();
+  if (isScheduleTimeErrorText(text)) return true;
+  if (isCartLimitErrorText(text)) {
+    return task ? isScheduleToday(task.payload?.scheduleAt) : true;
   }
-  return { year, month, day };
-}
-
-function diffScheduleDaysFromTodayInChina(scheduleAt: string | null | undefined): number | null {
-  if (!scheduleAt) return null;
-  const scheduleParts = getDatePartsInChina(scheduleAt);
-  const todayParts = getDatePartsInChina(new Date());
-  if (!scheduleParts || !todayParts) return null;
-
-  const scheduleDayUtc = Date.UTC(scheduleParts.year, scheduleParts.month - 1, scheduleParts.day);
-  const todayDayUtc = Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day);
-  return Math.round((scheduleDayUtc - todayDayUtc) / 86400000);
-}
-
-function shouldSkipFeishuFailureWriteback(task: CreatorPublishTask, errorText: string | undefined): boolean {
-  if (!isCartLimitErrorText(errorText)) return false;
-  return diffScheduleDaysFromTodayInChina(task.payload?.scheduleAt) === 1;
+  return false;
 }
 
 function writeBackFeishuFailure(task: CreatorPublishTask, errorText: string | undefined) {
   if (!task.feishuRecordId) return;
-  if (shouldSkipFeishuFailureWriteback(task, errorText)) {
+  if (!shouldWritebackFeishuFailure(errorText, task)) {
     console.log(
-      `[feishu-writeback] 跳过回写 record ${task.feishuRecordId} (${task.accountName}): 购物车限额且计划发布时间为次日`
+      `[feishu-writeback] 跳过回写 record ${task.feishuRecordId} (${task.accountName}): 错误类型不需要回写飞书`
     );
     return;
   }
