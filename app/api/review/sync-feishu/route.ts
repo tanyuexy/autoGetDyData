@@ -28,6 +28,13 @@ function isCreatedTask(fields: Record<string, unknown> | undefined): boolean {
   return String((fields || {})["已创建任务"] ?? "").trim() === "是";
 }
 
+/** 与发布任务导入规则一致：仅「审批」或「审核」列为「通过」才参与回填链接 */
+function isApprovalPassed(fields: Record<string, unknown> | undefined): boolean {
+  const f = fields || {};
+  const approval = String(f["审批"] ?? f["审核"] ?? "").trim();
+  return approval === "通过";
+}
+
 /** 去除所有符号、空格，只保留中文汉字和字母数字 */
 function clean(s: string): string {
   return s.replace(/[^\w一-鿿]/g, "").toLowerCase();
@@ -55,72 +62,16 @@ function longestCommonSubstring(a: string, b: string): number {
   return maxLen;
 }
 
-// ---- 以下复刻发布时的正文处理流水线 ----
-
-const MAX_HASHTAGS = 5;
-const MAX_RECOGNIZED_HASHTAG_LENGTH = 10;
-
-function getHashtagLength(tag: string): number {
-  return Array.from(tag).length;
-}
-
 /**
- * 复刻 editor.js 的 splitDescription：
- * - ≤10 字的标签从正文移除，录入 hashtags 数组
- * - >10 字的标签保留在正文中
- */
-function splitDescription(text: string) {
-  const hashtags: string[] = [];
-
-  let body = text
-    .replace(/#([^\s#]+)/g, (_m: string, rawTag: string) => {
-      const tag = rawTag.replace(/\s+/g, "").trim();
-      if (!tag) return "";
-
-      if (getHashtagLength(tag) > MAX_RECOGNIZED_HASHTAG_LENGTH) {
-        return rawTag.trim();
-      }
-
-      if (!hashtags.includes(tag)) {
-        hashtags.push(tag);
-      }
-      return "";
-    })
-    .replace(/(^|\s)#(?=\s|$)/g, " ")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
-
-  if (!body && hashtags.length === 0) {
-    body = text.trim();
-  }
-
-  return { body, hashtags };
-}
-
-/** 复刻 editor.js 的 normalizeDescriptionForPublish */
-function normalizeDescriptionForPublish(text: string) {
-  const { body, hashtags } = splitDescription(text);
-  const limitedHashtags = hashtags.slice(0, MAX_HASHTAGS);
-  const topicText = limitedHashtags.map((tag) => `#${tag}`).join(" ");
-  return [body, topicText].filter(Boolean).join("\n\n");
-}
-
-/**
- * 将飞书正文转换为发布后的预期抖音描述，再与作品标题匹配
+ * 去除所有符号、空格，只保留中文汉字和字母数字，文本匹配
  */
 function titleMatchBody(title: string, feishuBody: string): boolean {
-  // 1. 对飞书正文做与发布时相同的标签处理
-  const expectedDesc = normalizeDescriptionForPublish(feishuBody);
-
-  // 2. 严格包含匹配
   const ct = clean(title);
-  const ce = clean(expectedDesc);
+  const ce = clean(feishuBody);
   if (!ct || !ce) return false;
   if (ce.includes(ct) || ct.includes(ce)) return true;
 
-  // 3. 最长公共子串 ≥ 较短文本的 50%
+  // 最长公共子串 ≥ 较短文本的 50%
   const lcs = longestCommonSubstring(ct, ce);
   const minLen = Math.min(ct.length, ce.length);
   if (minLen > 0 && lcs / minLen >= 0.5) return true;
@@ -156,12 +107,13 @@ export async function POST() {
     log(taskId, `飞书表格共 ${allRecords.length} 条记录`);
 
     const createdRecords = allRecords.filter((r: any) => {
+      if (!isApprovalPassed(r?.fields)) return false;
       if (!isCreatedTask(r?.fields)) return false;
       const existingLink = String((r?.fields || {})["视频链接"] ?? "").trim();
       if (existingLink) return false;
       return true;
     });
-    log(taskId, `已创建任务且无链接: ${createdRecords.length} 条`);
+    log(taskId, `审批/审核通过且已创建任务且无链接: ${createdRecords.length} 条`);
 
     if (createdRecords.length === 0) {
       log(taskId, "没有需要同步的记录，完成");

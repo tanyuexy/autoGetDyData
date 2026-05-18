@@ -80,18 +80,59 @@ async function loadExistingTasksByFeishuRecordId(db) {
   );
 }
 
-function parseBodyAndHashtags(raw) {
-  if (!raw) return { description: "", hashtags: "" };
-  const lines = String(raw).split("\n").map((s) => s.trim()).filter(Boolean);
-  const description = lines[0] || "";
-  const hashtagLine = lines.slice(1).join(" ");
-  const hashtags = hashtagLine
-    .split("#")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => "#" + s)
-    .join("");
-  return { description, hashtags };
+const MAX_RECOGNIZED_HASHTAG_LENGTH = 10;
+
+function cleanHashtag(tag) {
+  return String(tag || "").replace(/\s+/g, "").trim();
+}
+
+function getHashtagLength(tag) {
+  return Array.from(tag).length;
+}
+
+/**
+ * 与 scripts/douyin-creator/publish/editor.js 的 splitDescription 保持一致。
+ * 从正文中提取 #话题，短话题（≤10字）从正文移除，长话题保留在正文中。
+ */
+function splitDescription(text) {
+  const hashtags = [];
+  const plainHashtags = [];
+
+  let body = String(text || "")
+    .replace(/#([^\s#]+)/g, (_matched, rawTag) => {
+      const tag = cleanHashtag(rawTag);
+      if (!tag) return "";
+
+      if (getHashtagLength(tag) > MAX_RECOGNIZED_HASHTAG_LENGTH) {
+        if (!plainHashtags.includes(tag)) {
+          plainHashtags.push(tag);
+        }
+        return rawTag.trim();
+      }
+
+      if (!hashtags.includes(tag)) {
+        hashtags.push(tag);
+      }
+      return "";
+    })
+    .replace(/(^|\s)#(?=\s|$)/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+  if (!body && hashtags.length === 0 && plainHashtags.length === 0) {
+    body = String(text || "").trim();
+  }
+
+  return { body, hashtags, plainHashtags };
+}
+
+function normalizeDescriptionForPublish(text) {
+  const { body, hashtags } = splitDescription(text);
+  const topicText = hashtags.map((tag) => `#${tag}`).join(" ");
+  const normalizedText = [body, topicText].filter(Boolean).join("\n\n");
+  return { body, hashtags, normalizedText };
 }
 
 function inferType(attachments) {
@@ -143,8 +184,8 @@ function buildRecordSnapshot(record) {
     ? (productNameField[0]?.text || "")
     : "";
   const title = String(f["标题（可为空）"] || "").trim();
-  const { description, hashtags } = parseBodyAndHashtags(f["正文"]);
-  const fullDescription = [description, hashtags].filter(Boolean).join("\n\n");
+  const rawDescription = String(f["正文"] || "").trim();
+  const { normalizedText: fullDescription } = normalizeDescriptionForPublish(rawDescription);
   const isAiContent = String(f["ai内容"] || "").trim() === "是";
   const scheduleRaw = f["计划发布时间"];
   const scheduleAt = parseScheduleAt(scheduleRaw);
@@ -158,6 +199,7 @@ function buildRecordSnapshot(record) {
     productTitle,
     title,
     description: fullDescription,
+    rawDescription,
     isAiContent,
     scheduleRaw,
     scheduleAt,
@@ -532,6 +574,18 @@ async function syncPublishTasks(options = {}) {
           }
           log(`    ✓ 已创建任务: ${task.id}`);
           createdCount++;
+        }
+
+        // 如果正文被规范化了，同步回写到飞书表格
+        if (snapshot.rawDescription && snapshot.rawDescription !== snapshot.description) {
+          try {
+            await updateBitableRecord(feishuCfg, accessToken, record.record_id, {
+              正文: snapshot.description,
+            });
+            log(`    ↺ 已同步规范化正文到飞书`);
+          } catch (wbErr) {
+            log(`    ⚠️ 回写飞书正文失败: ${wbErr.message}`);
+          }
         }
       } catch (e) {
         log(`    ❌ 同步失败: ${e.message}`);
