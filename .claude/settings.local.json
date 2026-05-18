@@ -104,5 +104,7 @@
       "Bash(npx playwright-cli *)"
     ]
   },
-  "enabledPlugins": {}
+  "enabledPlugins": {
+    "ecc@ecc": true
+  }
 }
