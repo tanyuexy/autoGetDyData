@@ -16,7 +16,7 @@ try {
 } catch (_) {}
 const path = require("path");
 const { startAndWaitInternalApiTask } = require("../common/internal-api-client");
-const { chromium } = require("playwright");
+const { chromium } = require("../common/stealth-browser");
 
 const { ensureDir, fileExists } = require("../common/fs");
 const {

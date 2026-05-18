@@ -1,7 +1,7 @@
 require("dotenv").config();
 
 const fs = require("fs/promises");
-const { chromium } = require("playwright");
+const { chromium } = require("../common/stealth-browser");
 
 const { BROWSER_VIEWPORT, HEADLESS, getDefaultAccounts } = require("./lib/env");
 const { runShopLogin, getAccountPaths } = require("./lib/login");

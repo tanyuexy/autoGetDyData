@@ -1335,7 +1335,7 @@ export default function CreatorPublishPage() {
               loading={generatingFeishuAi}
               disabled={isNamespaceBusy("creator-publish")}
             >
-              AI正文到飞书
+              AI生成正文
             </Button>
           </Popover>
           <Button

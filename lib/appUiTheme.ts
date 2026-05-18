@@ -65,6 +65,9 @@ export function buildIntercomAntdTheme(): ThemeConfig {
         headerSplitColor: "#d3cec6",
         colorBgContainer: "#ffffff",
         rowHoverBg: "rgba(17, 17, 17, 0.04)",
+        /** 默认跟随 controlItemBgActive（炭灰主色下偏深），选中行文字/链接对比不足 */
+        rowSelectedBg: "rgba(17, 17, 17, 0.07)",
+        rowSelectedHoverBg: "rgba(17, 17, 17, 0.1)",
         cellFontSizeSM: 14,
         borderColor: "#d3cec6",
       },
@@ -195,6 +198,8 @@ export function buildVoltagentAntdTheme(): ThemeConfig {
         headerSplitColor: "#3d3a39",
         colorBgContainer: "#101010",
         rowHoverBg: "rgba(0, 217, 146, 0.06)",
+        rowSelectedBg: "rgba(0, 217, 146, 0.14)",
+        rowSelectedHoverBg: "rgba(0, 217, 146, 0.22)",
         cellFontSizeSM: 13,
         borderColor: "#3d3a39",
       },

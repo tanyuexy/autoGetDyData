@@ -47,6 +47,10 @@ const ROUTES = {
     script: "scripts/douyin-creator/reply-comment.js",
     argv: []
   },
+  "creator:verify": {
+    script: "scripts/douyin-creator/verify.js",
+    argv: []
+  },
 
   "shop:login": {
     script: "scripts/douyin-shop/cli.js",
@@ -63,6 +67,10 @@ const ROUTES = {
   "shop:retry-failed": {
     script: "scripts/douyin-shop/cli.js",
     argv: ["retry-failed"]
+  },
+  "shop:verify": {
+    script: "scripts/douyin-shop/verify.js",
+    argv: []
   },
 
 };

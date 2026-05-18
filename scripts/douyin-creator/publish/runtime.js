@@ -1,7 +1,7 @@
 const {
   isLoggedInAtTarget,
   isVerificationUiVisible,
-  openTargetAndEnsureLogin,
+  openTargetAndEnsureLogin
 } = require("../lib/login");
 const {
   TARGET_URL,
@@ -165,7 +165,7 @@ async function ensureLoggedIn(page, accountName, paths) {
     manualLoginReason: reason,
     sendLoginAlerts: true,
     context: page.context(),
-    skipInitialNavigation: true,
+    skipInitialNavigation: true
   });
 
   // 发布流程专属的额外验证重试
@@ -312,7 +312,7 @@ async function handlePublishSmsVerification(page, accountName) {
       const session = await createOtpBridgeSession({
         accountName,
         maskedPhone,
-        reason: "发布时需短信验证码"
+        reason: "发布作品时需短信验证码"
       });
       requestId = String(session.requestId || "");
     } catch (e) {
@@ -332,7 +332,7 @@ async function handlePublishSmsVerification(page, accountName) {
   await sendReceiveOtpEmail({
     accountName,
     maskedPhone,
-    reason: "发布时需短信验证码"
+    reason: "发布作品时需短信验证码"
   }).catch((e) => {
     console.error("  发送验证码通知失败:", e?.message || e);
   });

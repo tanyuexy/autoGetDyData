@@ -4,7 +4,7 @@ require("dotenv").config();
 
 const fs = require("fs/promises");
 const path = require("path");
-const { chromium } = require("playwright");
+const { chromium } = require("../../common/stealth-browser");
 
 const {
   ACCOUNTS_DIR,

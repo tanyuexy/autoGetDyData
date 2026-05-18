@@ -1,5 +1,5 @@
 const path = require("path");
-const { chromium } = require("playwright");
+const { chromium } = require("../../common/stealth-browser");
 const { ensureDir, fileExists } = require("../../common/fs");
 const { getAccountPaths } = require("../lib/accounts");
 const { PUBLISH_BROWSER_VIEWPORT, HEADLESS } = require("../lib/env");

@@ -4,7 +4,7 @@
  * 用法:
  *   node scripts/douyin-creator/open.js <accountName> [targetUrl]
  */
-const { chromium } = require("playwright");
+const { chromium } = require("../common/stealth-browser");
 const { getAccountPaths } = require("./lib/accounts");
 const { fileExists, ensureDir } = require("../common/fs");
 const { BROWSER_VIEWPORT, LOGIN_PAGE_GOTO_TIMEOUT_MS } = require("./lib/env");

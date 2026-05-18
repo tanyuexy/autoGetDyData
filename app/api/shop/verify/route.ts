@@ -1,7 +1,22 @@
 import { NextResponse } from "next/server";
+import { enqueueTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { getDb } from "@/lib/db/mongo";
+
+async function waitForTaskDone(taskId: string, timeoutMs: number) {
+  const db = await getDb();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const job = await db.collection("task_jobs").findOne({ taskId });
+    if (!job || job.status === "success") return;
+    if (job.status === "failed" || job.status === "cancelled") {
+      throw new Error(job.lastError || `任务${job.status}`);
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error("验证超时，请稍后重试");
+}
 
 export async function POST(request: Request) {
-  let browser;
   try {
     const { email } = await request.json();
     if (!email) {
@@ -10,18 +25,15 @@ export async function POST(request: Request) {
 
     const path = require("path");
     const fs = require("fs");
-    const { chromium } = require("playwright");
-    const {
-      ACCOUNTS_DIR,
-      BROWSER_VIEWPORT,
-      SHOP_HOME_URL,
-    } = require("@/scripts/douyin-shop/lib/env");
-    const {
-      STAGES,
-      isAuthenticatedStage,
-      retryableGoto,
-      waitForStage,
-    } = require("@/scripts/douyin-shop/lib/page-utils");
+
+    const ACCOUNTS_DIR = (() => {
+      const envVal = process.env.SHOP_ACCOUNTS_DIR;
+      if (envVal) return path.resolve(process.cwd(), envVal);
+      const newPath = path.resolve(process.cwd(), "storage/shop-accounts");
+      const oldPath = path.resolve(process.cwd(), "accounts-shop");
+      if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) return oldPath;
+      return newPath;
+    })();
 
     const dirName = String(email).trim().replace(/[\\/:*?"<>|]+/g, "_");
     const storagePath = path.join(ACCOUNTS_DIR, dirName, "storageState.json");
@@ -35,111 +47,27 @@ export async function POST(request: Request) {
       });
     }
 
-    browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({
-      storageState: storagePath,
-      viewport: BROWSER_VIEWPORT,
+    const taskId = generateTaskIdWithTime("shop-verify");
+    await enqueueTask(taskId, "node", ["scripts/run.js", "shop:verify", email], {
+      namespace: "verify",
+      timeoutMs: 2 * 60 * 1000,
     });
-    const page = await context.newPage();
 
-    let verified = false;
-    let detail = "";
-    let status: "valid" | "expired" | "warning" = "expired";
-    const start = Date.now();
+    await waitForTaskDone(taskId, 2 * 60 * 1000);
 
-    try {
-      await retryableGoto(page, SHOP_HOME_URL, {
-        waitUntil: "domcontentloaded",
-        timeout: 45000,
-        maxRetries: 2,
-        baseBackoff: 2500,
-        expectedUrlRe: /jinritemai\.com/,
-      });
-
-      const stage = await waitForStage(
-        page,
-        [
-          STAGES.LOGIN_FORM,
-          STAGES.SHOP_PICKER,
-          STAGES.COMPASS_VIDEO,
-          STAGES.COMPASS_GRAPHIC,
-          STAGES.COMPASS_OTHER,
-          STAGES.FXG_WORKSPACE,
-          STAGES.CAPTCHA,
-        ],
-        { timeoutMs: 90000, intervalMs: 350 }
-      );
-
-      let finalStage = stage;
-      if (stage.stage === STAGES.LOGIN_FORM) {
-        const authenticatedStage = await waitForStage(
-          page,
-          [
-            STAGES.SHOP_PICKER,
-            STAGES.COMPASS_VIDEO,
-            STAGES.COMPASS_GRAPHIC,
-            STAGES.COMPASS_OTHER,
-            STAGES.FXG_WORKSPACE,
-          ],
-          { timeoutMs: 8000, intervalMs: 250 }
-        );
-        if (isAuthenticatedStage(authenticatedStage.stage)) {
-          finalStage = authenticatedStage;
-        }
-      }
-
-      if (isAuthenticatedStage(finalStage.stage)) {
-        verified = true;
-        status = "valid";
-        detail = `验证通过 — 阶段=${finalStage.stage}`;
-      } else if (finalStage.stage === STAGES.LOGIN_FORM) {
-        status = "expired";
-        detail = `cookie 已失效 — 页面显示登录表单，url=${finalStage.url}`;
-      } else if (finalStage.stage === STAGES.CAPTCHA) {
-        status = "warning";
-        detail = `验证不确定 — 页面出现滑块验证，url=${finalStage.url}`;
-      } else {
-        status = "warning";
-        detail = `验证不确定 — 阶段=${finalStage.stage}，url=${finalStage.url}`;
-      }
-    } catch (e: any) {
-      status = "warning";
-      detail = `页面加载失败: ${e.message || e}`;
+    const vp = path.join(ACCOUNTS_DIR, dirName, "verified-at.json");
+    if (fs.existsSync(vp)) {
+      const result = JSON.parse(fs.readFileSync(vp, "utf-8"));
+      return NextResponse.json({ email, ...result });
     }
-
-    await context.close();
-    const elapsed = Date.now() - start;
-
-    // 写入本次浏览器验证结果，下次刷新页面时 list API 会读到。
-    try {
-      const vp = path.join(ACCOUNTS_DIR, dirName, "verified-at.json");
-      fs.writeFileSync(
-        vp,
-        JSON.stringify({
-          time: Date.now(),
-          detail,
-          verified,
-          status,
-        }),
-        "utf-8"
-      );
-    } catch {}
 
     return NextResponse.json({
       email,
-      verified,
-      status,
-      detail,
-      elapsed,
+      verified: false,
+      status: "error",
+      detail: "验证完成但未找到结果文件",
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e.message || "验证失败" },
-      { status: 500 }
-    );
-  } finally {
-    if (browser) {
-      await browser.close().catch(() => {});
-    }
+    return NextResponse.json({ error: e.message || "验证失败" }, { status: 500 });
   }
 }
