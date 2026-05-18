@@ -249,6 +249,9 @@ async function waitForManualLoginFlow(
         await page.waitForLoadState("networkidle").catch(() => {});
         await page.waitForTimeout(800);
         if (await isLoggedInAtTarget(page)) {
+          if (onLoggedIn) {
+            await onLoggedIn(page);
+          }
           return;
         }
       }
@@ -286,14 +289,46 @@ async function openTargetAndEnsureLogin(page, paths, accountName, options) {
     forceManualLogin,
     manualLoginReason,
     sendLoginAlerts = true,
-    onLoggedIn = null
+    context = null,
+    skipInitialNavigation = false,
   } = options;
-  await page.goto(TARGET_URL, {
-    waitUntil: "domcontentloaded",
-    timeout: LOGIN_PAGE_GOTO_TIMEOUT_MS
-  });
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await page.waitForTimeout(1200);
+
+  const trySaveAuth = async (reason) => {
+    if (!context) return;
+    if (trySaveAuth._done) return;
+    try {
+      const { saveAuth } = require("./exporter");
+      const cookies = await context.cookies();
+      if (!Array.isArray(cookies) || cookies.length === 0) return;
+      let loggedIn = false;
+      if (page && !page.isClosed()) {
+        loggedIn = await isLoggedInAtTarget(page).catch(() => false);
+      }
+      if (!loggedIn) {
+        console.log(
+          `账号 [${accountName}] ${reason}，有 ${cookies.length} 个 cookie 但未登录，跳过保存。`
+        );
+        return;
+      }
+      console.log(`账号 [${accountName}] ${reason}，立即保存登录态。`);
+      await saveAuth(context, paths, accountName);
+      trySaveAuth._done = true;
+    } catch (error) {
+      console.warn(
+        `账号 [${accountName}] ${reason} 保存登录态失败: ${error.message || error}`
+      );
+    }
+  };
+  trySaveAuth._done = false;
+
+  if (!skipInitialNavigation) {
+    await page.goto(TARGET_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: LOGIN_PAGE_GOTO_TIMEOUT_MS,
+    });
+    await page.waitForLoadState("networkidle").catch(() => {});
+    await page.waitForTimeout(1200);
+  }
 
   if (forceManualLogin) {
     console.log(`账号 [${accountName}] 当前无有效登录态，需手动扫码并完成验证。`);
@@ -302,24 +337,21 @@ async function openTargetAndEnsureLogin(page, paths, accountName, options) {
       await notifyLoginRequired(page, paths, accountName, reason);
     }
     await waitForManualLoginFlow(
-      page,
-      paths,
-      accountName,
-      reason,
-      LOGIN_WAIT_TIMEOUT_MS,
-      LOGIN_REMIND_INTERVAL_MS,
+      page, paths, accountName, reason,
+      LOGIN_WAIT_TIMEOUT_MS, LOGIN_REMIND_INTERVAL_MS,
       {
         enableReminders: sendLoginAlerts,
         sendNotifications: sendLoginAlerts,
-        onLoggedIn
+        onLoggedIn: async () => { await trySaveAuth("检测到登录成功"); },
       }
     );
     await page.goto(TARGET_URL, {
       waitUntil: "domcontentloaded",
-      timeout: LOGIN_PAGE_GOTO_TIMEOUT_MS
+      timeout: LOGIN_PAGE_GOTO_TIMEOUT_MS,
     });
     await page.waitForLoadState("networkidle").catch(() => {});
     await page.waitForTimeout(900);
+    await trySaveAuth("登录流程结束");
     return;
   }
 
@@ -335,24 +367,21 @@ async function openTargetAndEnsureLogin(page, paths, accountName, options) {
     await notifyLoginRequired(page, paths, accountName, reason);
   }
   await waitForManualLoginFlow(
-    page,
-    paths,
-    accountName,
-    reason,
-    LOGIN_WAIT_TIMEOUT_MS,
-    LOGIN_REMIND_INTERVAL_MS,
+    page, paths, accountName, reason,
+    LOGIN_WAIT_TIMEOUT_MS, LOGIN_REMIND_INTERVAL_MS,
     {
       enableReminders: sendLoginAlerts,
       sendNotifications: sendLoginAlerts,
-      onLoggedIn
+      onLoggedIn: async () => { await trySaveAuth("检测到登录成功"); },
     }
   );
   await page.goto(TARGET_URL, {
     waitUntil: "domcontentloaded",
-    timeout: LOGIN_PAGE_GOTO_TIMEOUT_MS
+    timeout: LOGIN_PAGE_GOTO_TIMEOUT_MS,
   });
   await page.waitForLoadState("networkidle").catch(() => {});
   await page.waitForTimeout(900);
+  await trySaveAuth("登录流程结束");
 }
 
 module.exports = {

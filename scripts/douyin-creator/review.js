@@ -14,7 +14,7 @@ const { ensureDir } = require("../common/fs");
 const { getAccountPaths } = require("./lib/accounts");
 const { BROWSER_VIEWPORT, HEADLESS } = require("./lib/env");
 const { openTargetAndEnsureLogin } = require("./lib/login");
-const { saveAuth, setPostListDateRange } = require("./lib/exporter");
+const { setPostListDateRange } = require("./lib/exporter");
 
 const CONTENT_PAGE_URL = "https://creator.douyin.com/creator-micro/data-center/content";
 
@@ -333,10 +333,8 @@ async function scrapeReviewForAccount(browser, accountName) {
     await openTargetAndEnsureLogin(page, paths, accountName, {
       hasStoredAuth: true,
       forceManualLogin: false,
-      sendLoginAlerts: false,
-      onLoggedIn: async () => {
-        await saveAuth(context, paths, accountName);
-      },
+      sendLoginAlerts: true,
+      context,
     });
 
     await page.goto(CONTENT_PAGE_URL, {

@@ -13,7 +13,6 @@ const { ensureDir } = require("../common/fs");
 const { getAccountPaths } = require("./lib/accounts");
 const { BROWSER_VIEWPORT, HEADLESS } = require("./lib/env");
 const { openTargetAndEnsureLogin } = require("./lib/login");
-const { saveAuth } = require("./lib/exporter");
 const { postInternalApi } = require("../common/internal-api-client");
 
 const COMMENT_TARGET_URL = "https://creator.douyin.com/creator-micro/interactive/comment";
@@ -36,10 +35,8 @@ async function fetchCommentsForAccount(browser, accountName, maxWorks) {
     await openTargetAndEnsureLogin(page, paths, accountName, {
       hasStoredAuth: true,
       forceManualLogin: false,
-      sendLoginAlerts: false,
-      onLoggedIn: async () => {
-        await saveAuth(context, paths, accountName);
-      },
+      sendLoginAlerts: true,
+      context,
     });
 
     // Navigate to comment page

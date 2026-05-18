@@ -103,5 +103,6 @@
       "Bash(uipro init *)",
       "Bash(npx playwright-cli *)"
     ]
-  }
+  },
+  "enabledPlugins": {}
 }

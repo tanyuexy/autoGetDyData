@@ -10,7 +10,6 @@ const { chromium } = require("playwright");
 const { getAccountPaths } = require("./lib/accounts");
 const { BROWSER_VIEWPORT, HEADLESS } = require("./lib/env");
 const { openTargetAndEnsureLogin } = require("./lib/login");
-const { saveAuth } = require("./lib/exporter");
 
 const COMMENT_PAGE_URL = "https://creator.douyin.com/creator-micro/interactive/comment";
 
@@ -80,10 +79,8 @@ async function replyCommentForAccount(browser, accountName, awemeId, text, reply
     await openTargetAndEnsureLogin(page, paths, accountName, {
       hasStoredAuth: true,
       forceManualLogin: false,
-      sendLoginAlerts: false,
-      onLoggedIn: async () => {
-        await saveAuth(context, paths, accountName);
-      },
+      sendLoginAlerts: true,
+      context,
     });
 
     // Navigate to comment page to get CSRF token

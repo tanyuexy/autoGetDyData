@@ -1,10 +1,8 @@
 const {
   isLoggedInAtTarget,
   isVerificationUiVisible,
-  notifyLoginRequired,
-  waitForManualLoginFlow
+  openTargetAndEnsureLogin,
 } = require("../lib/login");
-const { saveAuth } = require("../lib/exporter");
 const {
   TARGET_URL,
   PUBLISH_WAIT_MULTIPLIER,
@@ -160,13 +158,19 @@ async function ensureLoggedIn(page, accountName, paths) {
       `账号 [${accountName}] 未能确认登录态，${reason}，进入登录流程`
     );
   }
-  await notifyLoginRequired(page, paths, accountName, reason);
-  await waitForManualLoginFlow(page, paths, accountName, reason);
 
+  await openTargetAndEnsureLogin(page, paths, accountName, {
+    hasStoredAuth: true,
+    forceManualLogin: true,
+    manualLoginReason: reason,
+    sendLoginAlerts: true,
+    context: page.context(),
+    skipInitialNavigation: true,
+  });
+
+  // 发布流程专属的额外验证重试
   console.log(`账号 [${accountName}] 登录流程完成，验证状态...`);
-  await page.goto(TARGET_URL, { waitUntil: "networkidle" });
   await waitForPageSettled(page, { afterClick: false, minWaitMs: 3000 });
-
   for (let i = 0; i < 3; i += 1) {
     if (await isLoggedInAtTarget(page)) break;
     console.log(`  验证未通过，等待渲染... (${i + 1}/3)`);
@@ -177,8 +181,7 @@ async function ensureLoggedIn(page, accountName, paths) {
     throw new Error(`账号 ${accountName} 登录验证未通过`);
   }
 
-  await saveAuth(page.context(), paths, accountName);
-  console.log(`账号 [${accountName}] 登录态已保存`);
+  console.log(`账号 [${accountName}] 登录态已确认`);
 }
 
 async function closeCreatorGuides(page) {

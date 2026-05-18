@@ -30,8 +30,8 @@ const {
   HEADLESS
 } = require("./lib/env");
 const { attachQrDataUrlSniffer } = require("./lib/qr");
-const { openTargetAndEnsureLogin, isLoggedInAtTarget } = require("./lib/login");
-const { saveAuth, exportPostListData } = require("./lib/exporter");
+const { openTargetAndEnsureLogin } = require("./lib/login");
+const { exportPostListData } = require("./lib/exporter");
 const { mergeExportFiles } = require("./lib/merge-exports");
 const {
   printAccountExecutionSummary,
@@ -61,36 +61,6 @@ async function shutdown(signal) {
 process.once("SIGTERM", () => shutdown("SIGTERM"));
 process.once("SIGINT", () => shutdown("SIGINT"));
 
-async function saveAuthIfPossible(context, page, paths, accountName, reason) {
-  try {
-    const cookies = await context.cookies();
-    if (!Array.isArray(cookies) || cookies.length === 0) {
-      return false;
-    }
-
-    let loggedIn = false;
-    if (page && !page.isClosed()) {
-      loggedIn = await isLoggedInAtTarget(page).catch(() => false);
-    }
-
-    if (!loggedIn) {
-      console.log(
-        `账号 [${accountName}] ${reason}，检测到上下文内已有 ${cookies.length} 个 cookie，但未检测到已登录，跳过保存。`
-      );
-      return false;
-    }
-
-    console.log(`账号 [${accountName}] ${reason}，立即保存登录态。`);
-    await saveAuth(context, paths, accountName);
-    return true;
-  } catch (error) {
-    console.warn(
-      `账号 [${accountName}] ${reason} 时保存登录态失败: ${error.message || error}`
-    );
-    return false;
-  }
-}
-
 async function runOneAccount(browser, accountName, command, options = {}) {
   const paths = getAccountPaths(accountName);
   await ensureDir(paths.accountDir);
@@ -113,7 +83,6 @@ async function runOneAccount(browser, accountName, command, options = {}) {
     storageState: useStoredAuth ? paths.storageStatePath : undefined
   });
   let page = null;
-  let authSaved = false;
 
   try {
     page = await context.newPage();
@@ -127,26 +96,8 @@ async function runOneAccount(browser, accountName, command, options = {}) {
       forceManualLogin,
       manualLoginReason: options.manualLoginReason,
       sendLoginAlerts: options.sendLoginAlerts,
-      onLoggedIn: async () => {
-        authSaved =
-          (await saveAuthIfPossible(
-            context,
-            page,
-            paths,
-            accountName,
-            "检测到登录成功"
-          )) || authSaved;
-      }
+      context,
     });
-
-    authSaved =
-      (await saveAuthIfPossible(
-        context,
-        page,
-        paths,
-        accountName,
-        "登录流程结束"
-      )) || authSaved;
 
     if (command === "login") {
       console.log(`========== 登录完成: ${accountName} ==========\n`);
@@ -160,15 +111,6 @@ async function runOneAccount(browser, accountName, command, options = {}) {
     console.error(`账号 [${accountName}] 执行失败:`, error.message || error);
     return { accountName, ok: false, error: error.message || String(error) };
   } finally {
-    if (!authSaved) {
-      await saveAuthIfPossible(
-        context,
-        page,
-        paths,
-        accountName,
-        "关闭浏览器前兜底"
-      );
-    }
     await context.close();
   }
 }
