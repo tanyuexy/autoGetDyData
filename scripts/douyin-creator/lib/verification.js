@@ -165,34 +165,45 @@ async function fillReceiveOtpCodeAndSubmit(page, otpCode) {
       )
       .first()
   ];
-  let filled = false;
+  let filledInput = null;
   for (const input of inputCandidates) {
     const visible = await input.isVisible({ timeout: 250 }).catch(() => false);
     if (!visible) continue;
     await input.fill(otpCode).catch(() => {});
-    filled = true;
+    filledInput = input;
     break;
   }
-  if (!filled) return false;
+  if (!filledInput) return false;
 
-  const buttonCandidates = [
-    page
-      .locator("article:has-text('接收短信验证码') [class*='primary']")
-      .filter({ hasText: /(确认|提交|登录|验证|完成)/ })
-      .first(),
-    page
-      .locator("[role='dialog']:has-text('接收短信验证码') button")
-      .filter({ hasText: /(确认|提交|登录|验证|完成)/ })
-      .first(),
-    page.getByText(/确认|提交|登录|验证|完成/).first()
-  ];
-  for (const button of buttonCandidates) {
-    const visible = await button.isVisible({ timeout: 250 }).catch(() => false);
-    if (!visible) continue;
-    await button.click().catch(() => {});
-    await page.waitForTimeout(500);
-    return true;
+  // 等待验证按钮变为可用（输入足够位数后 disabled class 移除）
+  const verifyBtn = page
+    .locator("article:has-text('接收短信验证码') [class*='primary']")
+    .filter({ hasText: /(确认|提交|登录|验证|完成)/ })
+    .first();
+  let btnEnabled = false;
+  for (let i = 0; i < 10; i++) {
+    const cls = await verifyBtn
+      .evaluate((el) => el.className)
+      .catch(() => "");
+    if (cls && !cls.includes("disabled")) {
+      btnEnabled = true;
+      break;
+    }
+    await page.waitForTimeout(300);
   }
+
+  // 点击验证按钮
+  if (btnEnabled) {
+    await verifyBtn.click().catch(() => {});
+    await page.waitForTimeout(500);
+  }
+
+  // 兜底：如果按钮未启用，尝试在输入框上按 Enter
+  if (!btnEnabled) {
+    await filledInput.press("Enter").catch(() => {});
+    await page.waitForTimeout(500);
+  }
+
   return true;
 }
 
@@ -635,6 +646,7 @@ module.exports = {
   isReceiveOtpPanelVisible,
   readReceiveOtpInfoFromPage,
   readSmsVerifyInfoFromPage,
+  fillReceiveOtpCodeAndSubmit,
   handleFaceVerificationIfPresent,
   handleSmsVerificationIfPresent,
   handleReceiveSmsCodeIfPresent

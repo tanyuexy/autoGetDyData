@@ -10,6 +10,7 @@ const {
 } = require("../lib/env");
 const { step, checkOk } = require("./logger");
 const { fetchOtpCode, sendReceiveOtpEmail } = require("../lib/mail");
+const { fillReceiveOtpCodeAndSubmit } = require("../lib/verification");
 const {
   otpRequestIdByAccount,
   otpRequestSinceByAccount,
@@ -368,24 +369,31 @@ async function handlePublishSmsVerification(page, accountName) {
     return false;
   }
 
-  // 5. 回填验证码到输入框
-  const codeInput = page
-    .locator('input[type="text"], [role="spinbutton"]')
-    .first();
-  await codeInput.click().catch(() => {});
-  await codeInput.fill("").catch(() => {});
-  await codeInput.type(otpCode, { delay: 100 });
+  // 5. 回填验证码并点击验证（复用 verification.js 的经过验证的选择器）
+  const filled = await fillReceiveOtpCodeAndSubmit(page, otpCode);
+  if (!filled) {
+    console.log("  ⚠️ 回填验证码失败：未找到验证码输入框");
+    return false;
+  }
   console.log(`  ✓ 已回填验证码: ${otpCode}`);
   otpLastAppliedByAccount.set(accountName, otpCode);
 
-  // 6. 点击"验证"按钮
-  const verifyBtn = page
-    .locator('button:has-text("验证"), text=验证')
-    .filter({ hasText: /^验证$/ })
-    .first();
-  if (await verifyBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await verifyBtn.click().catch(() => {});
-    console.log("  ✓ 已点击验证按钮");
+  // 6. 等待 SMS 弹窗关闭（验证通过会消失，最长等 30s）
+  const smsPanel = page.locator("text=接收短信验证码").first();
+  for (let i = 0; i < 60; i++) {
+    const stillVisible = await smsPanel
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+    if (!stillVisible) {
+      console.log("  ✓ SMS 弹窗已关闭");
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  if (await smsPanel.isVisible({ timeout: 500 }).catch(() => false)) {
+    console.log("  ⚠️ SMS 弹窗未关闭，验证可能未通过");
+    return false;
   }
 
   return true;

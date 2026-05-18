@@ -39,7 +39,7 @@ Both layers share the same `scripts/run.js` routing table and namespace concurre
 
 ### 浏览器测试（playwright-cli）
 
-需要用真实浏览器做页面验证、DOM 调试或复现 Playwright 自动化流程时：**先读取并遵循本仓库的 playwright-cli skill**（`.claude/skills/playwright-cli/SKILL.md`），按其中的 `playwright-cli` 命令与 snapshot / refs 交互；不要凭空写选择器或臆测页面结构。
+需要用真实浏览器做页面验证、DOM 调试或复现 Playwright 自动化流程时：**先读取并遵循本仓库的 playwright-cli skill**（`.claude/skills/playwright-cli/SKILL.md`），按其中的 `playwright-cli` 命令与 snapshot / refs 交互；不要凭空写选择器或臆测页面结构，在操作的时候每一步操作告诉我你的思考与后续详细执行步骤。
 
 ### Frontend → API → Script → internal API callback
 
@@ -84,6 +84,20 @@ Both use `scripts/douyin-shop/cli.js` with different command branches. Accounts 
 - Falls back to full email+password login with captcha handling
 - Supports `loginOnly` option to skip `runPostLoginFlow()` (shop selection + data export)
 - `saveStorageState()` writes both `storageState.json` and `verified-at.json`
+
+### MongoDB 连接与本地查询
+
+应用通过 `lib/db/mongo.ts` 连接 MongoDB，环境变量（`.env`）通常为：
+
+- `MONGODB_URI` — 连接串，本地开发常见为 `mongodb://127.0.0.1:27017`
+- `MONGODB_DB` — 数据库名，未设置时默认 `autoGetDyData`（与代码中 `DEFAULT_DB_NAME` 一致）
+
+命令行直接查库（示例与当前 `.env` 对齐时）：
+
+```bash
+mongosh "mongodb://127.0.0.1:27017/autoGetDyData"
+# 或先连实例再切库：mongosh mongodb://127.0.0.1:27017 → use autoGetDyData
+```
 
 ### MongoDB collections
 
