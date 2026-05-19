@@ -21,12 +21,11 @@
 状态文件位置：
 
 ```text
-storage/creator-publish-debug/<店铺名>/<任务ID>/latest-publish-step-state.json
 storage/creator-publish-debug/<店铺名>/<任务ID>/<runId>/publish-step-state.json
 storage/creator-publish-debug/<店铺名>/<任务ID>/<runId>/<flow>-steps.jsonl
 ```
 
-每次运行会在任务目录下创建以本地时间命名的子文件夹（`runId`，例如 `2026-05-19_14-08-01-219`）。**每次运行的步骤快照**保存在 `<runId>/publish-step-state.json`，重试后不会被覆盖；任务根下的 `latest-publish-step-state.json` 仅指向**最近一次运行**的同一内容，供 worker 快速读取。
+每次运行会在任务目录下创建以本地时间命名的子文件夹（`runId`，例如 `2026-05-19_14-08-01-219`）。**每次运行的步骤快照**保存在 `<runId>/publish-step-state.json`，重试后不会被覆盖。需要该任务**最近一次运行**的最终状态时，按 `runId` 字典序取最新子目录下的 `publish-step-state.json`（见 `readLatestPublishStepStateFromTaskDir`）。
 
 手动运行且没有任务 ID 时：
 
@@ -167,8 +166,7 @@ storage/creator-publish-debug/<店铺名>/_manual/<runId>/
 
 | 文件 | 用途 |
 | --- | --- |
-| `<runId>/publish-step-state.json` | **本次运行**最后一步状态（重试后仍保留，查历史运行用） |
-| `latest-publish-step-state.json` | **最近一次运行**的步骤快照（任务目录根，供 worker 读取） |
+| `<runId>/publish-step-state.json` | **本次运行**最后一步状态（重试后仍保留；任务级「最近一次」= runId 最大的子目录下该文件） |
 | `<runId>/<flow>-steps.jsonl` | 本次运行完整步骤流水 |
 | `<runId>/<flow>-step-<tag>-failed.png/.yml` | 某一步失败时的截图与页面结构（主排查文件） |
 | `<runId>/run-failed.png/.yml` | 仅当失败发生在步骤外且步骤未存快照时的兜底 |

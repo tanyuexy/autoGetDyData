@@ -75,6 +75,43 @@ function getPublishDebugSessionDir(accountName, options = {}) {
   return path.join(getPublishDebugTaskDir(accountName, options), runId);
 }
 
+const PUBLISH_DEBUG_RUN_ID_RE = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}$/;
+
+function isPublishDebugRunId(name) {
+  return PUBLISH_DEBUG_RUN_ID_RE.test(String(name || ""));
+}
+
+/** 任务目录下最近一次运行的 publish-step-state.json（按 runId 字典序取最新） */
+function readLatestPublishStepStateFromTaskDir(taskDir, { accountName } = {}) {
+  if (!taskDir || !fs.existsSync(taskDir)) return null;
+
+  let latestRunId = "";
+  let latestStatePath = "";
+
+  for (const name of fs.readdirSync(taskDir)) {
+    if (!isPublishDebugRunId(name) || name <= latestRunId) continue;
+    const statePath = path.join(taskDir, name, "publish-step-state.json");
+    try {
+      if (!fs.statSync(statePath).isFile()) continue;
+    } catch {
+      continue;
+    }
+    latestRunId = name;
+    latestStatePath = statePath;
+  }
+
+  if (!latestStatePath) return null;
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(latestStatePath, "utf8"));
+    if (!parsed || typeof parsed !== "object") return null;
+    if (accountName && parsed.accountName && parsed.accountName !== accountName) return null;
+    return { ...parsed, filePath: latestStatePath };
+  } catch {
+    return null;
+  }
+}
+
 function resolvePublishDebugArtifactDir(accountName, options = {}) {
   if (options.runDir) return options.runDir;
   if (options.runId) return getPublishDebugSessionDir(accountName, options);
@@ -170,6 +207,8 @@ module.exports = {
   createPublishDebugRunId,
   getPublishDebugTaskDir,
   getPublishDebugSessionDir,
+  isPublishDebugRunId,
+  readLatestPublishStepStateFromTaskDir,
   markStepDebugSaved,
   saveRunFailedArtifacts,
   saveDebugArtifacts,

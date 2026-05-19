@@ -17,7 +17,10 @@ const {
   classifyCreatorPublishFailure,
   formatFailureForOperator,
 } = require("../douyin-creator/publish/failure-classifier");
-const { getPublishDebugTaskDir } = require("../douyin-creator/publish/debug");
+const {
+  getPublishDebugTaskDir,
+  readLatestPublishStepStateFromTaskDir,
+} = require("../douyin-creator/publish/debug");
 
 const projectRoot = path.resolve(__dirname, "../..");
 const WORKER_ID = process.env.WORKER_ID || `task-worker-${process.pid}`;
@@ -445,24 +448,9 @@ function safeFileName(value) {
 }
 
 function readCreatorPublishStepState(task) {
-  if (!task) return null;
-  const taskDir = task.id
-    ? getPublishDebugTaskDir(task.accountName, { task: task.id })
-    : "";
-  const candidates = [
-    taskDir ? path.join(taskDir, "latest-publish-step-state.json") : "",
-  ].filter(Boolean);
-  for (const filePath of candidates) {
-    try {
-      const stat = fs.statSync(filePath);
-      if (!stat.isFile()) continue;
-      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
-      if (parsed && (!parsed.accountName || parsed.accountName === task.accountName)) {
-        return { ...parsed, filePath };
-      }
-    } catch {}
-  }
-  return null;
+  if (!task?.id) return null;
+  const taskDir = getPublishDebugTaskDir(task.accountName, { task: task.id });
+  return readLatestPublishStepStateFromTaskDir(taskDir, { accountName: task.accountName });
 }
 
 function buildFailurePatch(task, errorText) {

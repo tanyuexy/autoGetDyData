@@ -34,7 +34,6 @@ function createStepStateStore({ accountName, flow, taskId }) {
   const runId = createPublishDebugRunId();
   const taskDir = getPublishDebugTaskDir(accountName, { task: taskId });
   const sessionDir = getPublishDebugSessionDir(accountName, { task: taskId, runId });
-  const latestPath = path.join(taskDir, "latest-publish-step-state.json");
   const sessionStatePath = path.join(sessionDir, "publish-step-state.json");
   const historyPath = path.join(sessionDir, `${safeName(flow)}-steps.jsonl`);
 
@@ -51,7 +50,6 @@ function createStepStateStore({ accountName, flow, taskId }) {
     const line = `${JSON.stringify(payload)}\n`;
     const serialized = JSON.stringify(payload, null, 2);
     const writes = [
-      fs.writeFile(latestPath, serialized, "utf8"),
       fs.writeFile(sessionStatePath, serialized, "utf8"),
       fs.appendFile(historyPath, line, "utf8"),
     ];
@@ -59,7 +57,7 @@ function createStepStateStore({ accountName, flow, taskId }) {
     console.log(`[publish-step] ${JSON.stringify(payload)}`);
   }
 
-  return { write, latestPath, sessionStatePath, historyPath, runId, taskDir, sessionDir };
+  return { write, sessionStatePath, historyPath, runId, taskDir, sessionDir };
 }
 
 async function closePageForTimeout(page) {
