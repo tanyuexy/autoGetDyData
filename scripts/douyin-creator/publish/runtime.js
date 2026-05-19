@@ -282,6 +282,14 @@ async function clickGetSmsCodeIfVisible(page) {
   return false;
 }
 
+async function isPublishSmsVerificationVisible(page, timeoutMs = 800) {
+  return page
+    .locator("text=接收短信验证码")
+    .first()
+    .isVisible({ timeout: scaledMs(timeoutMs) })
+    .catch(() => false);
+}
+
 /** 处理发布时的短信验证码弹窗：触发发送、轮询 OTP、自动回填 */
 async function handlePublishSmsVerification(page, accountName) {
   console.log("  ⚠️ 检测到短信验证码弹窗，开始自动处理...");
@@ -396,15 +404,22 @@ async function handlePublishSmsVerification(page, accountName) {
   return true;
 }
 
-async function clickPublishButton(page, accountName) {
+async function checkPublishSmsVerificationCompleted(page) {
+  const stillVisible = await isPublishSmsVerificationVisible(page, 1000);
+  if (stillVisible) {
+    throw new Error("短信验证码校验失败：验证码弹窗仍未关闭");
+  }
+  checkOk("短信验证码校验通过");
+}
+
+async function clickPublishButton(page, accountName, options = {}) {
+  const { handleSms = true } = options;
   console.log("点击发布按钮...");
   await scrollPublishFormToBottom(page);
 
   const publishBtn = page
     .locator(
       [
-        'button.primary-cECiOJ:has-text("发布")',
-        'button.fixed-J9O8Yw:has-text("发布")',
         'button:has-text("发布"):not(:has-text("定时")):not(:has-text("高清"))'
       ].join(", ")
     )
@@ -454,8 +469,14 @@ async function clickPublishButton(page, accountName) {
   // 处理 SMS 验证码弹窗
   const smsPanel = page.locator("text=接收短信验证码").first();
   if (
-    await smsPanel.isVisible({ timeout: scaledMs(2000) }).catch(() => false)
+    await smsPanel
+      .isVisible({ timeout: scaledMs(handleSms ? 2000 : 8000) })
+      .catch(() => false)
   ) {
+    if (!handleSms) {
+      console.log("  检测到短信验证码弹窗，交给独立短信验证步骤处理");
+      return true;
+    }
     await handlePublishSmsVerification(page, accountName);
     // 点击验证后等待结果
     await page.waitForTimeout(scaledMs(5000));
@@ -511,6 +532,11 @@ async function clickPublishButton(page, accountName) {
     if (e.message.startsWith("发布失败")) throw e;
   }
 
+  if (!handleSms && (await isPublishSmsVerificationVisible(page, 1000))) {
+    console.log("  检测到短信验证码弹窗，交给独立短信验证步骤处理");
+    return true;
+  }
+
   const stillVisible = await publishBtn.isVisible().catch(() => false);
   if (stillVisible) {
     throw new Error("发布按钮仍在，发布未完成");
@@ -518,6 +544,82 @@ async function clickPublishButton(page, accountName) {
 
   console.log("  ✅ 发布已提交（按钮已隐藏）");
   return true;
+}
+
+async function checkPublishSubmitted(page) {
+  const deadline = Date.now() + scaledMs(35000);
+  let lastReason = "等待发布提交结果";
+
+  const publishBtn = page
+    .locator(
+      [
+        'button:has-text("发布"):not(:has-text("定时")):not(:has-text("高清"))'
+      ].join(", ")
+    )
+    .first();
+
+  while (Date.now() < deadline) {
+    const url = page.url();
+    if (/\/content\/manage\b/.test(url)) {
+      checkOk("发布提交校验通过 (已进入作品管理页)");
+      return;
+    }
+
+    const bodyText = await page
+      .locator("body")
+      .innerText({ timeout: scaledMs(1000) })
+      .catch(() => "");
+    const compactText = bodyText.replace(/\s+/g, " ").trim();
+
+    const failureMatch = compactText.match(
+      /(发布失败|发布错误|提交失败|提交错误|系统异常|网络异常|内容违规|操作失败)[^。！？\n]{0,80}/
+    );
+    if (failureMatch) {
+      throw new Error(`发布提交校验失败：${failureMatch[0]}`);
+    }
+
+    if (/发布成功|提交成功|发布已提交/.test(compactText)) {
+      checkOk("发布提交校验通过 (检测到成功提示)");
+      return;
+    }
+
+    const smsVisible = await page
+      .locator("text=接收短信验证码")
+      .first()
+      .isVisible({ timeout: 300 })
+      .catch(() => false);
+    if (smsVisible) {
+      throw new Error("发布提交校验失败：仍停留在短信验证码弹窗");
+    }
+
+    const buttonVisible = await publishBtn
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+    const buttonDisabled = buttonVisible
+      ? await publishBtn.isDisabled().catch(() => false)
+      : false;
+    const onPostPage = /\/content\/post\/(video|image)\b/.test(url);
+    const formVisible = await page
+      .locator("text=作品描述")
+      .first()
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+
+    if (buttonVisible) {
+      lastReason = buttonDisabled
+        ? "发布按钮仍在但已禁用"
+        : "发布按钮仍可见，发布未完成";
+    } else if (!onPostPage || !formVisible) {
+      checkOk("发布提交校验通过 (发布表单已离开或按钮已隐藏)");
+      return;
+    } else {
+      lastReason = "仍停留在发布表单，等待跳转或成功提示";
+    }
+
+    await page.waitForTimeout(scaledMs(1000));
+  }
+
+  throw new Error(`发布提交校验超时：${lastReason}`);
 }
 
 // ===== 单步校验函数：每个填写步骤完成后立即调用，失败则抛错 =====
@@ -697,19 +799,27 @@ async function checkScheduleSet(page) {
   throw new Error("定时发布校验失败：日期选择器为空");
 }
 
-async function checkProductLinkSet(page) {
+async function checkProductLinkSet(page, expectedProductTitle = "") {
   const issues = [];
+
+  const anchor = page.locator('#douyin_creator_pc_anchor_jump').first();
+  const anchorOrPage = (await anchor.isVisible({ timeout: 500 }).catch(() => false))
+    ? anchor
+    : page;
 
   // 1. 检查购物车下拉框是否已选中（通过 .semi-select-selection-text 内文本或 select-dropdown-option-img）
   const cartSelectors = [
     '.semi-select-selection-text:has-text("购物车")',
     '[class*="select-dropdown-option"]:has-text("购物车")',
-    '[class*="selectText"]:has-text("购物车")'
+    '[class*="selectText"]:has-text("购物车")',
+    '[class*="cart-part"]',
+    '[class*="cart-goodlist"]',
+    '.cart-container'
   ];
   let cartSelected = false;
   for (const sel of cartSelectors) {
     if (
-      await page
+      await anchorOrPage
         .locator(sel)
         .first()
         .isVisible({ timeout: 1000 })
@@ -724,60 +834,129 @@ async function checkProductLinkSet(page) {
   // 2. 检查是否已添加商品（完成后输入框会被清空，商品出现在 cart-container 中）
   const productAddedSelectors = [
     '[class*="cart-item"]',
-    '[class*="cart-container"]',
+    '[class*="cart-container"] [class*="item"]',
+    '[class*="anchor"] [class*="card"]',
     "text=已添加商品"
   ];
   let productAdded = false;
+  let productText = "";
   for (const sel of productAddedSelectors) {
-    if (
-      await page
-        .locator(sel)
-        .first()
-        .isVisible({ timeout: 1000 })
-        .catch(() => false)
-    ) {
+    const product = anchorOrPage.locator(sel).first();
+    if (await product.isVisible({ timeout: 1000 }).catch(() => false)) {
       productAdded = true;
+      productText = (await product.textContent().catch(() => "")).trim();
       break;
     }
   }
-  // 备用：如果商品卡片没出现，检查链接输入框是否还有值（弹窗未关闭的中间状态）
   if (!productAdded) {
-    const linkInput = page.locator('input[placeholder*="粘贴商品"]').first();
+    issues.push("未检测到已添加的商品");
+  }
+
+  const expectedTitle = String(expectedProductTitle || "").trim();
+  if (productAdded && expectedTitle && productText && !/^已添加商品$/.test(productText)) {
+    const normalizedActual = productText.replace(/\s+/g, "");
+    const normalizedExpected = expectedTitle.replace(/\s+/g, "");
+    if (
+      normalizedExpected &&
+      !normalizedActual.includes(normalizedExpected) &&
+      !normalizedExpected.includes(normalizedActual)
+    ) {
+      issues.push(`商品标题未匹配：期望包含 "${expectedTitle}"，实际 "${productText.slice(0, 80)}"`);
+    }
+  }
+
+  const linkInput = anchorOrPage.locator('input[placeholder*="粘贴商品"], input[placeholder*="链接"]').first();
+  if (await linkInput.isVisible({ timeout: 500 }).catch(() => false)) {
     const linkValue = (await linkInput.inputValue().catch(() => "")).trim();
     if (linkValue) {
-      step("商品链接已填入但弹窗可能未关闭");
-    } else {
-      issues.push("未检测到已添加的商品");
+      issues.push("商品链接仍停留在输入框，商品尚未确认添加");
     }
+  }
+
+  // 3. 检查编辑弹窗是否已关闭
+  const finishBtn = page.locator('.semi-modal-content button:has-text("完成编辑")').first();
+  if (await finishBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+    issues.push("商品编辑弹窗未关闭（完成编辑按钮仍可见）");
   }
 
   if (issues.length === 0) {
     checkOk("购物车链接校验通过");
+    checkOk("商品编辑校验通过");
   } else {
     throw new Error(`购物车链接校验失败：${issues.join("; ")}`);
   }
+}
 
-  // 3. 检查编辑弹窗是否已关闭
-  const finishBtn = page.locator('button:has-text("完成编辑")').first();
-  if (!(await finishBtn.isVisible({ timeout: 2000 }).catch(() => false))) {
-    checkOk("商品编辑校验通过");
-  } else {
-    throw new Error("商品编辑校验失败：编辑弹窗未关闭（完成编辑按钮仍可见）");
+async function checkProductLinkAbsent(page) {
+  const issues = [];
+  const cartSelected = await page
+    .locator(
+      [
+        '.semi-select-selection-text:has-text("购物车")',
+        '[class*="selectText"]:has-text("购物车")'
+      ].join(", ")
+    )
+    .first()
+    .isVisible({ timeout: 500 })
+    .catch(() => false);
+  if (cartSelected) issues.push("页面仍选中购物车");
+
+  const productAddedSelectors = [
+    '[class*="cart-item"]',
+    '[class*="cart-container"] [class*="item"]',
+    '[class*="anchor"] [class*="card"]',
+    "text=已添加商品"
+  ];
+  for (const selector of productAddedSelectors) {
+    if (await page.locator(selector).first().isVisible({ timeout: 300 }).catch(() => false)) {
+      issues.push(`页面仍存在商品挂载标记 (${selector})`);
+      break;
+    }
   }
+
+  const linkInputs = page.locator('input[placeholder*="粘贴商品"], input[placeholder*="商品链接"]');
+  const inputCount = await linkInputs.count().catch(() => 0);
+  for (let i = 0; i < inputCount; i += 1) {
+    const input = linkInputs.nth(i);
+    if (!(await input.isVisible().catch(() => false))) continue;
+    const value = (await input.inputValue().catch(() => "")).trim();
+    if (value) {
+      issues.push("商品链接输入框存在残留值");
+      break;
+    }
+  }
+
+  const finishBtn = page.locator('.semi-modal-content button:has-text("完成编辑")').first();
+  if (await finishBtn.isVisible({ timeout: 500 }).catch(() => false)) {
+    issues.push("商品编辑弹窗仍打开");
+  }
+
+  if (issues.length > 0) {
+    throw new Error(`未配置购物车校验失败：${issues.join("; ")}`);
+  }
+  checkOk("未配置购物车校验通过");
+}
+
+async function getFormSectionByTitle(page, title) {
+  const section = page
+    .locator(`xpath=//*[normalize-space()="${title}"]/ancestor::*[.//*[contains(@class,"selectBox")] or .//*[contains(@class,"semi-select")] or .//input or .//label][1]`)
+    .first();
+  if (await section.isVisible({ timeout: 1000 }).catch(() => false)) {
+    return section;
+  }
+  return page.locator(`section:has-text("${title}"), div:has-text("${title}")`).first();
 }
 
 async function checkSelfDeclarationSet(page, isAiContent) {
   const targetLabel = isAiContent ? "内容由AI生成" : "无需添加自主声明";
-  const section = page
-    .locator('section:has(.title-cnbkZe:has-text("自主声明"))')
-    .first();
+  const section = await getFormSectionByTitle(page, "自主声明");
   if (!(await section.isVisible({ timeout: 2000 }).catch(() => false))) {
     checkOk("自主声明校验通过 (未找到声明区域)");
     return;
   }
   const currentText = (
     await section
-      .locator('[class*="selectText"]')
+      .locator('[class*="selectText"], .semi-select-selection-text')
       .first()
       .textContent()
       .catch(() => "")
@@ -830,6 +1009,10 @@ module.exports = {
   scrollPublishFormToBottom,
   optimizePublishPageForViewing,
   clickPublishButton,
+  isPublishSmsVerificationVisible,
+  handlePublishSmsVerification,
+  checkPublishSmsVerificationCompleted,
+  checkPublishSubmitted,
   checkVideoUploaded,
   checkImagesUploaded,
   checkCoverSelected,
@@ -838,6 +1021,7 @@ module.exports = {
   checkHashtagsSet,
   checkScheduleSet,
   checkProductLinkSet,
+  checkProductLinkAbsent,
   checkSelfDeclarationSet,
   checkMusicSelected
 };

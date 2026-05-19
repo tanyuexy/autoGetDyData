@@ -65,6 +65,15 @@ export interface CreatorPublishTask {
   status: CreatorPublishTaskStatus;
   payload: CreatorPublishPayload;
   lastError?: string;
+  failureCategory?: string;
+  failureRetryable?: boolean;
+  failureSeverity?: string;
+  failureReason?: string;
+  failedStepIndex?: number;
+  failedStepTitle?: string;
+  failedStepTag?: string;
+  failedStepPhase?: string;
+  failedStepStatePath?: string;
   taskId?: string; // runtime task id for SSE
   pid?: number; // 子进程 PID，用于崩溃恢复时检测进程是否仍存活
   feishuRecordId?: string; // 飞书行 record_id，用于发布成功后回写状态

@@ -4,16 +4,20 @@ const { ensureDir, fileExists } = require("../../common/fs");
 const { getAccountPaths } = require("../lib/accounts");
 const { PUBLISH_BROWSER_VIEWPORT, HEADLESS } = require("../lib/env");
 const { attachQrDataUrlSniffer } = require("../lib/qr");
-const { stage, step } = require("./logger");
 const {
   MATERIALS_DIR,
   saveDebugArtifacts,
+  saveRunFailedArtifacts,
   fillTitleAndDescription,
   selectSelfDeclaration,
   setScheduleIfNeeded,
   ensureLoggedIn,
   optimizePublishPageForViewing,
   clickPublishButton,
+  isPublishSmsVerificationVisible,
+  handlePublishSmsVerification,
+  checkPublishSmsVerificationCompleted,
+  checkPublishSubmitted,
   checkVideoUploaded,
   checkCoverSelected,
   checkTitleFilled,
@@ -21,12 +25,15 @@ const {
   checkHashtagsSet,
   checkScheduleSet,
   checkProductLinkSet,
+  checkProductLinkAbsent,
   checkSelfDeclarationSet,
   normalizeDescriptionForPublish,
   MAX_HASHTAGS,
   scaledMs,
   waitForPageSettled,
   VIDEO_POST_URL,
+  createPublishStepRunner,
+  shouldSaveStepDebug,
 } = require("./utils");
 const { selectCartAndLinkForVideo } = require("./product-link");
 
@@ -35,6 +42,11 @@ function logVideoPublishStart(accountName, options) {
   console.log(
     `  [选项] productLink=${JSON.stringify(String(options.productLink || ""))} isAiContent=${JSON.stringify(options.isAiContent)} title=${JSON.stringify(options.title)}`
   );
+}
+
+async function saveStepDebug(page, accountName, tag, options) {
+  if (!shouldSaveStepDebug(options)) return;
+  await saveDebugArtifacts(page, accountName, `video-step-${tag}`, options).catch(() => {});
 }
 
 async function gotoVideoPublishPage(page) {
@@ -78,7 +90,7 @@ async function shutdown(signal) {
 process.once("SIGTERM", () => shutdown("SIGTERM"));
 process.once("SIGINT", () => shutdown("SIGINT"));
 
-async function uploadVideo(page, videoKey, accountName) {
+async function uploadVideo(page, videoKey, accountName, options = {}) {
   const filePath = path.join(MATERIALS_DIR, videoKey);
   if (!(await fileExists(filePath))) {
     throw new Error(`视频文件不存在: ${filePath}`);
@@ -91,7 +103,7 @@ async function uploadVideo(page, videoKey, accountName) {
     await videoInput.setInputFiles(filePath);
     console.log(`已选择视频文件: ${videoKey}`);
   } else {
-    await saveDebugArtifacts(page, accountName, "video-upload-not-found");
+    await saveDebugArtifacts(page, accountName, "video-upload-not-found", options);
     throw new Error("无法触发视频上传");
   }
 
@@ -258,78 +270,133 @@ async function runPublishVideo(options) {
   activeContext = context;
 
   let page;
+  let runStep;
+  let debugOptions = options;
   try {
     page = await context.newPage();
     attachQrDataUrlSniffer(page);
     logVideoPublishStart(accountName, options);
+    ({ runStep, debugOptions } = createPublishStepRunner({
+      page,
+      accountName,
+      flow: "video",
+      options,
+      saveStepDebug,
+    }));
 
-    stage(1, "检查登录状态");
-    await ensureLoggedIn(page, accountName, paths);
+    await runStep(1, "检查登录状态", "01-login", async () => {
+      await ensureLoggedIn(page, accountName, paths);
+    });
 
-    stage(2, "进入视频发布页");
-    await gotoVideoPublishPage(page);
-    await optimizePublishPageForViewing(page);
+    await runStep(2, "进入视频发布页", "02-open-post-page", async () => {
+      await gotoVideoPublishPage(page);
+      await optimizePublishPageForViewing(page);
+    }, async () => {
+      await page.locator('input[placeholder*="标题"], [contenteditable="true"]').first().waitFor({
+        state: "visible",
+        timeout: scaledMs(10000),
+      });
+    });
 
     const { body: expectedBody, hashtags: expectedHashtags } = normalizeDescriptionForPublish(String(options.desc || ""));
     const limitedHashtags = expectedHashtags.slice(0, MAX_HASHTAGS);
 
-    stage(3, `上传视频素材: ${videoKey}`);
-    await uploadVideo(page, videoKey, accountName);
-    await checkVideoUploaded(page);
+    await runStep(3, `上传视频素材: ${videoKey}`, "03-upload-video", async () => {
+      await uploadVideo(page, videoKey, accountName, debugOptions);
+    }, async () => {
+      await checkVideoUploaded(page);
+    });
 
     if (String(options.scheduleAt || "")) {
-      stage(4, "校验并设置定时发布");
-      await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
-      await checkScheduleSet(page);
+      await runStep(4, "校验并设置定时发布", "04-schedule", async () => {
+        await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
+      }, async () => {
+        await checkScheduleSet(page);
+      });
     } else {
-      stage(4, "定时发布（跳过，未配置）");
+      await runStep(4, "定时发布（跳过，未配置）", "04-schedule-skipped", null, {
+        skipped: true,
+        skipReason: "未配置 scheduleAt",
+      });
     }
 
     if (String(options.productLink || "")) {
-      stage(5, "设置购物车商品链接");
-      await selectCartAndLinkForVideo(
-        page,
-        String(options.productLink || ""),
-        String(options.productTitle || ""),
-        String(options.approvalNumber || "")
-      );
-      await checkProductLinkSet(page);
+      await runStep(5, "设置购物车商品链接", "05-product-link", async () => {
+        await selectCartAndLinkForVideo(
+          page,
+          String(options.productLink || ""),
+          String(options.productTitle || ""),
+          String(options.approvalNumber || "")
+        );
+      }, async () => {
+        await checkProductLinkSet(page, String(options.productTitle || ""));
+      });
     } else {
-      stage(5, "购物车商品链接（跳过，未配置）");
+      await runStep(5, "购物车商品链接（跳过，未配置）", "05-product-link-absent", null, async () => {
+        await checkProductLinkAbsent(page);
+      });
     }
 
-    stage(6, "填写标题、正文与话题");
-    await fillTitleAndDescription(
-      page,
-      String(options.title || ""),
-      String(options.desc || "")
-    );
-    await checkTitleFilled(page, String(options.title || ""));
-    await checkBodyFilled(page, expectedBody);
-    await checkHashtagsSet(page, limitedHashtags);
+    await runStep(6, "填写标题、正文与话题", "06-title-description-topics", async () => {
+      await fillTitleAndDescription(
+        page,
+        String(options.title || ""),
+        String(options.desc || "")
+      );
+    }, async () => {
+      await checkTitleFilled(page, String(options.title || ""));
+      await checkBodyFilled(page, expectedBody);
+      await checkHashtagsSet(page, limitedHashtags);
+    });
 
-    stage(7, "选择视频首帧封面");
-    await selectFirstFrameAsCover(page);
-    await checkCoverSelected(page);
+    await runStep(7, "选择视频首帧封面", "07-cover", async () => {
+      await selectFirstFrameAsCover(page);
+    }, async () => {
+      await checkCoverSelected(page);
+    });
 
-    stage(8, "设置自主声明");
     const isAi = options.isAiContent === true || options.isAiContent === "true";
-    await selectSelfDeclaration(page, isAi);
-    await checkSelfDeclarationSet(page, isAi);
+    await runStep(8, "设置自主声明", "08-self-declaration", async () => {
+      await selectSelfDeclaration(page, isAi);
+    }, async () => {
+      await checkSelfDeclarationSet(page, isAi);
+    });
 
     const { publishEnabled, publishWaitSec } = resolveVideoPublishControls(options);
 
     if (publishEnabled) {
-      stage(9, "点击发布按钮");
-      await clickPublishButton(page, accountName);
+      await runStep(9, "点击发布按钮", "09-publish", async () => {
+        await clickPublishButton(page, accountName, { handleSms: false });
+      });
+
+      if (await isPublishSmsVerificationVisible(page, 1000)) {
+        await runStep(10, "处理短信验证码", "10-sms-verification", async () => {
+          await handlePublishSmsVerification(page, accountName);
+        }, async () => {
+          await checkPublishSmsVerificationCompleted(page);
+        });
+      } else {
+        await runStep(10, "短信验证码（未出现）", "10-sms-verification-skipped", null, {
+          skipped: true,
+          skipReason: "未出现短信验证码弹窗",
+        });
+      }
+
+      await runStep(11, "校验发布提交结果", "11-publish-submit-check", null, async () => {
+        await checkPublishSubmitted(page);
+      });
     } else {
-      stage(9, "跳过点击发布（publishEnabled=false）");
+      await runStep(9, "跳过点击发布（publishEnabled=false）", "09-publish-skipped", null, {
+        skipped: true,
+        skipReason: "publishEnabled=false",
+      });
     }
 
-    stage(10, `发布后停留 ${publishWaitSec}s`);
-    await page.waitForTimeout(scaledMs(publishWaitSec * 1000));
+    await runStep(12, `发布后停留 ${publishWaitSec}s`, "12-post-wait", async () => {
+      await page.waitForTimeout(scaledMs(publishWaitSec * 1000));
+    });
   } catch (error) {
-    await saveDebugArtifacts(page, accountName, "run-failed").catch(() => {});
+    await saveRunFailedArtifacts(page, accountName, debugOptions).catch(() => {});
     throw error;
   } finally {
     await context.close().catch(() => {});

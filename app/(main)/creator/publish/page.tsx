@@ -801,7 +801,45 @@ export default function CreatorPublishPage() {
     );
   }
 
+  async function copyTaskId(id: string) {
+    try {
+      await navigator.clipboard.writeText(id);
+      message.success("已复制任务 ID");
+    } catch {
+      message.error("复制失败，请手动选择复制");
+    }
+  }
+
+  function renderCopyableTaskId(id?: string) {
+    if (!id) return "-";
+    return (
+      <Tooltip title={`${id}（点击复制）`}>
+        <Text
+          code
+          style={{
+            fontSize: 11,
+            cursor: "copy",
+            maxWidth: 116,
+            display: "inline-block",
+            margin: 0,
+          }}
+          ellipsis
+          onClick={() => void copyTaskId(id)}
+        >
+          {id}
+        </Text>
+      </Tooltip>
+    );
+  }
+
   const columns = [
+    {
+      title: "任务ID",
+      dataIndex: "id",
+      align: "center" as const,
+      width: 128,
+      render: (id: string) => renderCopyableTaskId(id),
+    },
     {
       title: "账号",
       dataIndex: "accountName",
@@ -947,22 +985,21 @@ export default function CreatorPublishPage() {
       render: (_: any, r: PublishTask) =>
         r.lastError ? (
           <Tooltip
-            title={
-              <div
-                style={{
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  maxWidth: 480,
-                  maxHeight: "min(60vh, 360px)",
-                  overflowY: "auto",
-                  lineHeight: 1.5,
-                }}
-              >
-                {r.lastError}
-              </div>
-            }
+            title={r.lastError}
             placement="topLeft"
             mouseEnterDelay={0.15}
+            styles={{
+              root: { maxWidth: 480 },
+              body: {
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                overflowWrap: "anywhere",
+                lineHeight: 1.5,
+                maxHeight: "min(60vh, 360px)",
+                overflowX: "hidden",
+                overflowY: "auto",
+              },
+            }}
           >
             <span style={{ display: "block", width: "100%", cursor: "default" }}>
               <Typography.Text type="danger">
@@ -1369,7 +1406,7 @@ export default function CreatorPublishPage() {
         columns={columns as any}
         tableLayout="fixed"
         pagination={{ pageSize: 20, showSizeChanger: false }}
-        scroll={{ x: 1260, y: "calc(100vh - 220px)" }}
+        scroll={{ x: 1388, y: "calc(100vh - 220px)" }}
         onChange={(_pagination, _filters, sorter, extra) => {
           if (extra.action !== "sort") return;
           const s = Array.isArray(sorter) ? sorter[0] : sorter;

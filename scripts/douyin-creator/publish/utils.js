@@ -16,7 +16,7 @@ function parseArgs(argv) {
   }
   return result;
 }
-const { PUBLISH_DEBUG_DIR, saveDebugArtifacts } = require("./debug");
+const { saveDebugArtifacts, saveRunFailedArtifacts } = require("./debug");
 const { waitVisible, setTextLikeInput } = require("./dom");
 const { fillTitleAndDescription } = require("./editor");
 const { selectSelfDeclaration, setScheduleIfNeeded } = require("./publish-form");
@@ -30,6 +30,10 @@ const {
   scrollPublishFormToBottom,
   optimizePublishPageForViewing,
   clickPublishButton,
+  isPublishSmsVerificationVisible,
+  handlePublishSmsVerification,
+  checkPublishSmsVerificationCompleted,
+  checkPublishSubmitted,
   checkVideoUploaded,
   checkImagesUploaded,
   checkCoverSelected,
@@ -38,10 +42,12 @@ const {
   checkHashtagsSet,
   checkScheduleSet,
   checkProductLinkSet,
+  checkProductLinkAbsent,
   checkSelfDeclarationSet,
   checkMusicSelected,
 } = require("./runtime");
 const { normalizeDescriptionForPublish, splitDescription } = require("./editor");
+const { createPublishStepRunner, shouldSaveStepDebug } = require("./step-runner");
 
 const MAX_HASHTAGS = 5;
 
@@ -56,11 +62,11 @@ const VIDEO_POST_URL =
 
 module.exports = {
   MATERIALS_DIR,
-  PUBLISH_DEBUG_DIR,
   ARTICLE_POST_URL,
   VIDEO_POST_URL,
   parseArgs,
   saveDebugArtifacts,
+  saveRunFailedArtifacts,
   waitVisible,
   setTextLikeInput,
   fillTitleAndDescription,
@@ -75,6 +81,10 @@ module.exports = {
   scrollPublishFormToBottom,
   optimizePublishPageForViewing,
   clickPublishButton,
+  isPublishSmsVerificationVisible,
+  handlePublishSmsVerification,
+  checkPublishSmsVerificationCompleted,
+  checkPublishSubmitted,
   checkVideoUploaded,
   checkImagesUploaded,
   checkCoverSelected,
@@ -83,9 +93,12 @@ module.exports = {
   checkHashtagsSet,
   checkScheduleSet,
   checkProductLinkSet,
+  checkProductLinkAbsent,
   checkSelfDeclarationSet,
   checkMusicSelected,
   normalizeDescriptionForPublish,
   splitDescription,
+  createPublishStepRunner,
+  shouldSaveStepDebug,
   MAX_HASHTAGS,
 };

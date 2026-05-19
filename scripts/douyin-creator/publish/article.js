@@ -4,16 +4,20 @@ const { ensureDir, fileExists } = require("../../common/fs");
 const { getAccountPaths } = require("../lib/accounts");
 const { PUBLISH_BROWSER_VIEWPORT, HEADLESS } = require("../lib/env");
 const { attachQrDataUrlSniffer } = require("../lib/qr");
-const { stage, step, done } = require("./logger");
 const {
   MATERIALS_DIR,
   ARTICLE_POST_URL,
   saveDebugArtifacts,
+  saveRunFailedArtifacts,
   fillTitleAndDescription,
   selectSelfDeclaration,
   setScheduleIfNeeded,
   ensureLoggedIn,
   clickPublishButton,
+  isPublishSmsVerificationVisible,
+  handlePublishSmsVerification,
+  checkPublishSmsVerificationCompleted,
+  checkPublishSubmitted,
   scrollPublishFormToBottom,
   optimizePublishPageForViewing,
   checkImagesUploaded,
@@ -22,12 +26,15 @@ const {
   checkHashtagsSet,
   checkScheduleSet,
   checkProductLinkSet,
+  checkProductLinkAbsent,
   checkSelfDeclarationSet,
   checkMusicSelected,
   normalizeDescriptionForPublish,
   MAX_HASHTAGS,
   scaledMs,
   waitForPageSettled,
+  createPublishStepRunner,
+  shouldSaveStepDebug,
 } = require("./utils");
 const { selectCartAndLinkForArticle } = require("./product-link");
 
@@ -35,17 +42,9 @@ let activeBrowser = null;
 let activeContext = null;
 let shuttingDown = false;
 
-function shouldSaveStepDebug(options) {
-  return (
-    options.debugSteps === true ||
-    options.debugSteps === "true" ||
-    process.env.CREATOR_PUBLISH_DEBUG_STEPS === "true"
-  );
-}
-
 async function saveStepDebug(page, accountName, tag, options) {
   if (!shouldSaveStepDebug(options)) return;
-  await saveDebugArtifacts(page, accountName, `step-${tag}`).catch(() => {});
+  await saveDebugArtifacts(page, accountName, `step-${tag}`, options).catch(() => {});
 }
 
 async function shutdown(signal) {
@@ -63,7 +62,7 @@ async function shutdown(signal) {
 process.once("SIGTERM", () => shutdown("SIGTERM"));
 process.once("SIGINT", () => shutdown("SIGINT"));
 
-async function uploadImages(page, imageKeys, accountName) {
+async function uploadImages(page, imageKeys, accountName, options = {}) {
   const filePaths = imageKeys.map((key) => path.join(MATERIALS_DIR, key));
   for (const filePath of filePaths) {
     if (!(await fileExists(filePath))) {
@@ -75,7 +74,7 @@ async function uploadImages(page, imageKeys, accountName) {
 
   const uploadBtn = page.locator('div:has-text("点击上传")').last();
   if (!(await uploadBtn.isVisible({ timeout: scaledMs(5000) }).catch(() => false))) {
-    await saveDebugArtifacts(page, accountName, "upload-not-found");
+    await saveDebugArtifacts(page, accountName, "upload-not-found", options);
     throw new Error("上传按钮不可见，无法触发文件上传");
   }
 
@@ -91,7 +90,7 @@ async function uploadImages(page, imageKeys, accountName) {
     return;
   }
 
-  await saveDebugArtifacts(page, accountName, "upload-not-found");
+  await saveDebugArtifacts(page, accountName, "upload-not-found", options);
   throw new Error("无法触发文件上传");
 }
 
@@ -229,95 +228,142 @@ async function runPublishArticle(options) {
   activeContext = context;
 
   let page;
+  let runStep;
+  let debugOptions = options;
   try {
     page = await context.newPage();
     attachQrDataUrlSniffer(page);
     console.log(`开始图文发布准备: ${accountName}`);
     console.log(`  [选项] productLink=${JSON.stringify(String(options.productLink || ""))} isAiContent=${JSON.stringify(options.isAiContent)} title=${JSON.stringify(options.title)}`);
+    ({ runStep, debugOptions } = createPublishStepRunner({
+      page,
+      accountName,
+      flow: "article",
+      options,
+      saveStepDebug,
+    }));
 
-    stage(1, "检查登录状态");
-    await ensureLoggedIn(page, accountName, paths);
-    await saveStepDebug(page, accountName, "01-login", options);
+    await runStep(1, "检查登录状态", "01-login", async () => {
+      await ensureLoggedIn(page, accountName, paths);
+    });
 
     const { body: expectedBody, hashtags: expectedHashtags } = normalizeDescriptionForPublish(String(options.desc || ""));
     const limitedHashtags = expectedHashtags.slice(0, MAX_HASHTAGS);
 
-    stage(2, "进入图文发布页");
-    await page.goto(ARTICLE_POST_URL, { waitUntil: "domcontentloaded" });
-    await waitForPageSettled(page, { afterClick: false, minWaitMs: 3000 });
-    await optimizePublishPageForViewing(page);
-    await page.evaluate(() => { window.scrollTo(0, 0); document.body?.scrollIntoView?.(); }).catch(() => {});
-    await saveStepDebug(page, accountName, "02-open-post-page", options);
+    await runStep(2, "进入图文发布页", "02-open-post-page", async () => {
+      await page.goto(ARTICLE_POST_URL, { waitUntil: "domcontentloaded" });
+      await waitForPageSettled(page, { afterClick: false, minWaitMs: 3000 });
+      await optimizePublishPageForViewing(page);
+      await page.evaluate(() => { window.scrollTo(0, 0); document.body?.scrollIntoView?.(); }).catch(() => {});
+    }, async () => {
+      await page.locator('text=点击上传').first().waitFor({
+        state: "visible",
+        timeout: scaledMs(10000),
+      });
+    });
 
-    stage(3, `上传图文素材: ${imageKeys.length} 张`);
-    await uploadImages(page, imageKeys, accountName);
-    await checkImagesUploaded(page, imageKeys.length);
-    await saveStepDebug(page, accountName, "03-upload-images", options);
+    await runStep(3, `上传图文素材: ${imageKeys.length} 张`, "03-upload-images", async () => {
+      await uploadImages(page, imageKeys, accountName, debugOptions);
+    }, async () => {
+      await checkImagesUploaded(page, imageKeys.length);
+    });
 
     if (String(options.scheduleAt || "")) {
-      stage(4, "校验并设置定时发布");
-      await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
-      await checkScheduleSet(page);
-      await saveStepDebug(page, accountName, "04-schedule", options);
+      await runStep(4, "校验并设置定时发布", "04-schedule", async () => {
+        await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
+      }, async () => {
+        await checkScheduleSet(page);
+      });
     } else {
-      stage(4, "定时发布（跳过，未配置）");
+      await runStep(4, "定时发布（跳过，未配置）", "04-schedule-skipped", null, {
+        skipped: true,
+        skipReason: "未配置 scheduleAt",
+      });
     }
 
     if (String(options.productLink || "")) {
-      stage(5, "设置购物车商品链接");
-      await selectCartAndLinkForArticle(
-        page,
-        String(options.productLink || ""),
-        String(options.productTitle || ""),
-        String(options.approvalNumber || "")
-      );
-      await checkProductLinkSet(page);
-      await saveStepDebug(page, accountName, "05-product-link", options);
+      await runStep(5, "设置购物车商品链接", "05-product-link", async () => {
+        await selectCartAndLinkForArticle(
+          page,
+          String(options.productLink || ""),
+          String(options.productTitle || ""),
+          String(options.approvalNumber || "")
+        );
+      }, async () => {
+        await checkProductLinkSet(page, String(options.productTitle || ""));
+      });
     } else {
-      stage(5, "购物车商品链接（跳过，未配置）");
+      await runStep(5, "购物车商品链接（跳过，未配置）", "05-product-link-absent", null, async () => {
+        await checkProductLinkAbsent(page);
+      });
     }
 
-    stage(6, "填写标题、正文与话题");
-    await fillTitleAndDescription(
-      page,
-      String(options.title || ""),
-      String(options.desc || "")
-    );
-    await checkTitleFilled(page, String(options.title || ""));
-    await checkBodyFilled(page, expectedBody);
-    await checkHashtagsSet(page, limitedHashtags);
-    await saveStepDebug(page, accountName, "06-title-description-topics", options);
+    await runStep(6, "填写标题、正文与话题", "06-title-description-topics", async () => {
+      await fillTitleAndDescription(
+        page,
+        String(options.title || ""),
+        String(options.desc || "")
+      );
+    }, async () => {
+      await checkTitleFilled(page, String(options.title || ""));
+      await checkBodyFilled(page, expectedBody);
+      await checkHashtagsSet(page, limitedHashtags);
+    });
 
-    stage(7, "设置自主声明");
     const isAi = options.isAiContent === true || options.isAiContent === "true";
-    await selectSelfDeclaration(page, isAi);
-    await checkSelfDeclarationSet(page, isAi);
-    await saveStepDebug(page, accountName, "07-self-declaration", options);
+    await runStep(7, "设置自主声明", "07-self-declaration", async () => {
+      await selectSelfDeclaration(page, isAi);
+    }, async () => {
+      await checkSelfDeclarationSet(page, isAi);
+    });
 
-    stage(8, "选择配乐");
-    await selectMusic(page);
-    await checkMusicSelected(page);
-    await saveStepDebug(page, accountName, "08-music", options);
+    await runStep(8, "选择配乐", "08-music", async () => {
+      await selectMusic(page);
+    }, async () => {
+      await checkMusicSelected(page);
+    });
 
-    stage(9, "处理封面设置");
-    await selectCoverIfNeeded(page, String(options.coverImageKey || ""));
-    await scrollPublishFormToBottom(page);
-    await saveStepDebug(page, accountName, "09-cover", options);
+    await runStep(9, "处理封面设置", "09-cover", async () => {
+      await selectCoverIfNeeded(page, String(options.coverImageKey || ""));
+      await scrollPublishFormToBottom(page);
+    });
 
     const publishEnabled = options.publishEnabled !== "false" && options.publishEnabled !== false;
     const publishWaitSec = Number(options.publishWaitSec) || 3;
 
     if (publishEnabled) {
-      stage(10, "点击发布按钮");
-      await clickPublishButton(page, accountName);
+      await runStep(10, "点击发布按钮", "10-publish", async () => {
+        await clickPublishButton(page, accountName, { handleSms: false });
+      });
+
+      if (await isPublishSmsVerificationVisible(page, 1000)) {
+        await runStep(11, "处理短信验证码", "11-sms-verification", async () => {
+          await handlePublishSmsVerification(page, accountName);
+        }, async () => {
+          await checkPublishSmsVerificationCompleted(page);
+        });
+      } else {
+        await runStep(11, "短信验证码（未出现）", "11-sms-verification-skipped", null, {
+          skipped: true,
+          skipReason: "未出现短信验证码弹窗",
+        });
+      }
+
+      await runStep(12, "校验发布提交结果", "12-publish-submit-check", null, async () => {
+        await checkPublishSubmitted(page);
+      });
     } else {
-      stage(10, "跳过点击发布（publishEnabled=false）");
+      await runStep(10, "跳过点击发布（publishEnabled=false）", "10-publish-skipped", null, {
+        skipped: true,
+        skipReason: "publishEnabled=false",
+      });
     }
 
-    stage(11, `发布后停留 ${publishWaitSec}s`);
-    await page.waitForTimeout(scaledMs(publishWaitSec * 1000));
+    await runStep(13, `发布后停留 ${publishWaitSec}s`, "13-post-wait", async () => {
+      await page.waitForTimeout(scaledMs(publishWaitSec * 1000));
+    });
   } catch (error) {
-    await saveDebugArtifacts(page, accountName, "run-failed").catch(() => {});
+    await saveRunFailedArtifacts(page, accountName, debugOptions).catch(() => {});
     throw error;
   } finally {
     await context.close().catch(() => {});

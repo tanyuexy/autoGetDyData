@@ -3,6 +3,7 @@
 require("dotenv").config();
 
 const path = require("path");
+const fs = require("fs");
 const { spawn } = require("child_process");
 const { MongoClient } = require("mongodb");
 const {
@@ -12,6 +13,11 @@ const {
   readLastTaskError
 } = require("../common/task-log-store");
 const { postInternalApi } = require("../common/internal-api-client");
+const {
+  classifyCreatorPublishFailure,
+  formatFailureForOperator,
+} = require("../douyin-creator/publish/failure-classifier");
+const { getPublishDebugTaskDir } = require("../douyin-creator/publish/debug");
 
 const projectRoot = path.resolve(__dirname, "../..");
 const WORKER_ID = process.env.WORKER_ID || `task-worker-${process.pid}`;
@@ -316,7 +322,18 @@ async function claimTask(task, runtimeTaskId) {
         updatedAt: now,
         displayUpdatedAt: now,
       },
-      $unset: { lastError: "" },
+      $unset: {
+        lastError: "",
+        failureCategory: "",
+        failureRetryable: "",
+        failureSeverity: "",
+        failureReason: "",
+        failedStepIndex: "",
+        failedStepTitle: "",
+        failedStepTag: "",
+        failedStepPhase: "",
+        failedStepStatePath: "",
+      },
     }
   );
   return result.modifiedCount === 1;
@@ -421,6 +438,54 @@ function normalizeTerminationMessage(text, code) {
     return "管理员手动终止";
   }
   return text;
+}
+
+function safeFileName(value) {
+  return String(value || "unknown").replace(/[\\/:*?"<>|]/g, "_");
+}
+
+function readCreatorPublishStepState(task) {
+  if (!task) return null;
+  const taskDir = task.id
+    ? getPublishDebugTaskDir(task.accountName, { task: task.id })
+    : "";
+  const candidates = [
+    taskDir ? path.join(taskDir, "latest-publish-step-state.json") : "",
+  ].filter(Boolean);
+  for (const filePath of candidates) {
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) continue;
+      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      if (parsed && (!parsed.accountName || parsed.accountName === task.accountName)) {
+        return { ...parsed, filePath };
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function buildFailurePatch(task, errorText) {
+  const stepState = readCreatorPublishStepState(task);
+  const classification = classifyCreatorPublishFailure(errorText, stepState, task);
+  const operatorText = formatFailureForOperator(errorText, classification);
+  return {
+    operatorText,
+    stepState,
+    classification,
+    patch: {
+      lastError: operatorText,
+      failureCategory: classification.category,
+      failureRetryable: classification.retryable,
+      failureSeverity: classification.severity,
+      failureReason: classification.reason,
+      failedStepIndex: classification.step?.index,
+      failedStepTitle: classification.step?.title,
+      failedStepTag: classification.step?.tag,
+      failedStepPhase: classification.step?.phase,
+      failedStepStatePath: stepState?.filePath,
+    },
+  };
 }
 
 async function buildRunArgs(task) {
@@ -628,6 +693,14 @@ async function startTask(task) {
       : readLastTaskError(runtimeTaskId) || `退出码 ${code ?? -1}`;
     const manualTerminated = wasCancelled || code === 143 || isManualTerminationText(rawLastError);
     const normalizedLastError = ok ? undefined : normalizeTerminationMessage(rawLastError, code);
+    const failure = !ok && !manualTerminated ? buildFailurePatch(task, normalizedLastError) : null;
+    if (failure) {
+      appendTaskLog(
+        runtimeTaskId,
+        failure.classification.retryable ? "warn" : "error",
+        `[failure-classifier] category=${failure.classification.category} retryable=${failure.classification.retryable} step=${failure.classification.step?.index || "?"}/${failure.classification.step?.phase || "?"} reason=${failure.classification.reason}`
+      );
+    }
     appendTaskDone(
       runtimeTaskId,
       code ?? -1,
@@ -636,12 +709,27 @@ async function startTask(task) {
     if (!wasCancelled) {
       await patchTask(task.id, {
         status: ok ? "success" : manualTerminated ? "cancelled" : "failed",
-        lastError: normalizedLastError,
+        ...(ok
+          ? {
+              lastError: undefined,
+              failureCategory: undefined,
+              failureRetryable: undefined,
+              failureSeverity: undefined,
+              failureReason: undefined,
+              failedStepIndex: undefined,
+              failedStepTitle: undefined,
+              failedStepTag: undefined,
+              failedStepPhase: undefined,
+              failedStepStatePath: undefined,
+            }
+          : manualTerminated
+            ? { lastError: normalizedLastError }
+            : failure.patch),
       });
     }
     await removeRuntimeProcess(runtimeTaskId);
     if (ok && !wasCancelled) await markFeishuPublished(task, runtimeTaskId);
-    if (!ok && !manualTerminated) await markFeishuFailed(task, normalizedLastError, runtimeTaskId);
+    if (!ok && !manualTerminated) await markFeishuFailed(task, failure.operatorText, runtimeTaskId);
   });
 
   child.on("error", async (error) => {
@@ -649,22 +737,30 @@ async function startTask(task) {
     children.delete(runtimeTaskId);
     const manualTerminated = isManualTerminationText(error.message);
     const normalizedLastError = normalizeTerminationMessage(error.message, undefined);
+    const failure = !manualTerminated ? buildFailurePatch(task, normalizedLastError) : null;
     appendTaskLog(
       runtimeTaskId,
       manualTerminated ? "warn" : "error",
       manualTerminated ? normalizedLastError : `Process error: ${error.message}`
     );
+    if (failure) {
+      appendTaskLog(
+        runtimeTaskId,
+        failure.classification.retryable ? "warn" : "error",
+        `[failure-classifier] category=${failure.classification.category} retryable=${failure.classification.retryable} step=${failure.classification.step?.index || "?"}/${failure.classification.step?.phase || "?"} reason=${failure.classification.reason}`
+      );
+    }
     appendTaskDone(runtimeTaskId, -1, manualTerminated ? "管理员手动终止" : error.message);
     const latest = await readTask(task.id);
     if (latest?.status !== "cancelled") {
       await patchTask(task.id, {
         status: manualTerminated ? "cancelled" : "failed",
-        lastError: normalizedLastError,
+        ...(manualTerminated ? { lastError: normalizedLastError } : failure.patch),
       });
     }
     await removeRuntimeProcess(runtimeTaskId);
     if (latest?.status !== "cancelled" && !manualTerminated) {
-      await markFeishuFailed(task, normalizedLastError, runtimeTaskId);
+      await markFeishuFailed(task, failure.operatorText, runtimeTaskId);
     }
   });
 

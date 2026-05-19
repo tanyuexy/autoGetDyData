@@ -288,7 +288,7 @@ function parseNamespace(taskId) {
   return bestNs || "system";
 }
 
-function listRecentTaskLogs(limit = 10) {
+function listRecentTaskLogs(limit = 20) {
   const resultsByKey = new Map();
   const now = new Date();
   const dates = new Set();

@@ -1,18 +1,28 @@
 const { waitVisible, setTextLikeInput } = require("./dom");
 const { step, info } = require("./logger");
 
+async function getFormSectionByTitle(page, title) {
+  const section = page
+    .locator(`xpath=//*[normalize-space()="${title}"]/ancestor::*[.//*[contains(@class,"selectBox")] or .//*[contains(@class,"semi-select")] or .//input or .//label][1]`)
+    .first();
+  if (await section.isVisible({ timeout: 1500 }).catch(() => false)) {
+    return section;
+  }
+  return page.locator(`section:has-text("${title}"), div:has-text("${title}")`).first();
+}
+
 async function selectSelfDeclaration(page, isAiContent) {
   step(`设置自主声明 (isAiContent=${isAiContent})`);
   const targetLabel = isAiContent ? "内容由AI生成" : "无需添加自主声明";
 
-  const section = page.locator('section:has(.title-cnbkZe:has-text("自主声明"))').first();
-  const selectBox = section.locator('[class*="selectBox"]').first();
+  const section = await getFormSectionByTitle(page, "自主声明");
+  const selectBox = section.locator('[class*="selectBox"], .semi-select').first();
 
   if (!(await selectBox.isVisible().catch(() => false))) {
     throw new Error("未找到自主声明下拉框");
   }
 
-  const currentText = await selectBox.locator('[class*="selectText"]').first().textContent().catch(() => "");
+  const currentText = await selectBox.locator('[class*="selectText"], .semi-select-selection-text').first().textContent().catch(() => "");
   if (currentText.includes(targetLabel)) {
     info(`自主声明已是: ${targetLabel}`);
     return;
@@ -21,20 +31,65 @@ async function selectSelfDeclaration(page, isAiContent) {
   await selectBox.click();
   await page.waitForTimeout(1500);
 
-  const targetOption = page.locator(`label:has-text("${targetLabel}")`).first();
-  if (await targetOption.isVisible().catch(() => false)) {
-    await targetOption.click();
-    await page.waitForTimeout(500);
-    step(`已选择: ${targetLabel}`);
-  } else {
+  const modal = page.locator('.semi-modal-content').filter({ hasText: "请选择声明类型" }).first();
+  const targetOption = modal.locator(`label:has-text("${targetLabel}")`).first();
+  if (!(await targetOption.isVisible().catch(() => false))) {
     throw new Error(`未找到自主声明选项: ${targetLabel}`);
   }
 
-  const confirmBtn = page.locator('.semi-modal-content button:has-text("确定")').first();
+  await targetOption.scrollIntoViewIfNeeded().catch(() => {});
+  await targetOption.click().catch(async () => {
+    await targetOption.locator('.semi-radio-addon, input').first().click({ force: true });
+  });
+  await page.waitForTimeout(300);
+
+  const selected = await targetOption
+    .evaluate((label) => {
+      const input = label.querySelector("input");
+      if (input?.checked) return true;
+      if (String(label.className || "").includes("checked")) return true;
+
+      const radioTarget = label.querySelector(".semi-radio-addon") || input || label;
+      for (const type of ["mousedown", "mouseup", "click"]) {
+        radioTarget.dispatchEvent(
+          new MouseEvent(type, { bubbles: true, cancelable: true, view: window })
+        );
+      }
+      return input?.checked || String(label.className || "").includes("checked");
+    })
+    .catch(() => false);
+  if (!selected) {
+    throw new Error(`自主声明选择失败：未选中 "${targetLabel}"`);
+  }
+  step(`已选择: ${targetLabel}`);
+
+  const confirmBtn = modal.locator('button:has-text("确定")').first();
   if (await confirmBtn.isVisible().catch(() => false)) {
+    await page.waitForFunction(
+      (label) => {
+        const btns = Array.from(document.querySelectorAll(".semi-modal-content button"));
+        const btn = btns.find((el) => (el.innerText || "").trim() === label);
+        if (!btn) return false;
+        const cls = String(btn.className || "");
+        return !btn.disabled && !cls.includes("disabled");
+      },
+      "确定",
+      { timeout: 5000 }
+    );
     await confirmBtn.click();
-    await page.waitForTimeout(1000);
+    await modal.waitFor({ state: "hidden", timeout: 8000 }).catch(() => {});
     step("已确定关闭自主声明弹窗");
+  }
+
+  const updatedText = await section
+    .locator('[class*="selectText"], .semi-select-selection-text')
+    .first()
+    .textContent({ timeout: 3000 })
+    .catch(() => "");
+  if (!updatedText.includes(targetLabel)) {
+    throw new Error(
+      `自主声明设置未生效：期望 "${targetLabel}"，实际 "${updatedText.trim() || "(空)"}"`
+    );
   }
 }
 

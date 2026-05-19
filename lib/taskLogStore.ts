@@ -51,7 +51,7 @@ export function loadTaskSnapshot(taskId: string): TaskLogSnapshot {
   return taskLogStore.loadTaskSnapshot(taskId);
 }
 
-export function listRecentTaskLogs(limit = 10): RecentTaskLogMeta[] {
+export function listRecentTaskLogs(limit = 20): RecentTaskLogMeta[] {
   return taskLogStore.listRecentTaskLogs(limit);
 }
 
