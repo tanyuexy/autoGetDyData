@@ -30,10 +30,9 @@ const {
   normalizeDescriptionForPublish,
   MAX_HASHTAGS,
   scaledMs,
-  waitForPageSettled,
   VIDEO_POST_URL,
   createPublishStepRunner,
-  shouldSaveStepDebug,
+  shouldSaveStepDebug
 } = require("./utils");
 const { selectCartAndLinkForVideo } = require("./product-link");
 
@@ -46,7 +45,12 @@ function logVideoPublishStart(accountName, options) {
 
 async function saveStepDebug(page, accountName, tag, options) {
   if (!shouldSaveStepDebug(options)) return;
-  await saveDebugArtifacts(page, accountName, `video-step-${tag}`, options).catch(() => {});
+  await saveDebugArtifacts(
+    page,
+    accountName,
+    `video-step-${tag}`,
+    options
+  ).catch(() => {});
 }
 
 async function gotoVideoPublishPage(page) {
@@ -67,7 +71,7 @@ function resolveVideoPublishControls(options) {
   return {
     publishEnabled:
       options.publishEnabled !== "false" && options.publishEnabled !== false,
-    publishWaitSec: Number(options.publishWaitSec) || 3,
+    publishWaitSec: Number(options.publishWaitSec) || 3
   };
 }
 
@@ -97,23 +101,38 @@ async function uploadVideo(page, videoKey, accountName, options = {}) {
   }
 
   // 视频页面 file input 是隐藏的，用 attached 状态检测
-  await page.waitForSelector('input[type="file"][accept*="video"]', { state: 'attached', timeout: scaledMs(30000) }).catch(() => {});
-  const videoInput = page.locator('input[type="file"][accept*="video"]').first();
+  await page
+    .waitForSelector('input[type="file"][accept*="video"]', {
+      state: "attached",
+      timeout: scaledMs(30000)
+    })
+    .catch(() => {});
+  const videoInput = page
+    .locator('input[type="file"][accept*="video"]')
+    .first();
   if ((await videoInput.count()) > 0) {
     await videoInput.setInputFiles(filePath);
     console.log(`已选择视频文件: ${videoKey}`);
   } else {
-    await saveDebugArtifacts(page, accountName, "video-upload-not-found", options);
+    await saveDebugArtifacts(
+      page,
+      accountName,
+      "video-upload-not-found",
+      options
+    );
     throw new Error("无法触发视频上传");
   }
 
   console.log("等待视频上传完成...");
   try {
-    await page.waitForFunction(() => {
-      const video = document.querySelector('video');
-      const blobImg = document.querySelector('img[src^="blob:"]');
-      return video || blobImg;
-    }, { timeout: scaledMs(120000) });
+    await page.waitForFunction(
+      () => {
+        const video = document.querySelector("video");
+        const blobImg = document.querySelector('img[src^="blob:"]');
+        return video || blobImg;
+      },
+      { timeout: scaledMs(120000) }
+    );
   } catch {}
   await page.waitForTimeout(scaledMs(2000));
 }
@@ -139,7 +158,10 @@ async function selectFirstFrameAsCover(page) {
     const count = await coverItems.count().catch(() => 0);
     for (let i = 0; i < count; i++) {
       const item = coverItems.nth(i);
-      const imgs = await item.locator("img").count().catch(() => 0);
+      const imgs = await item
+        .locator("img")
+        .count()
+        .catch(() => 0);
       const visible = await item.isVisible().catch(() => false);
       const classAttr = await item.getAttribute("class").catch(() => "");
       if (imgs > 0 && visible && !/isSetting/i.test(classAttr)) {
@@ -167,9 +189,15 @@ async function selectFirstFrameAsCover(page) {
     const classAttr = await item.getAttribute("class").catch(() => "");
     if (/selected/i.test(classAttr) || /isSetting/i.test(classAttr)) continue;
     const hasAi =
-      (await item.locator('[class*="ai-"]').count().catch(() => 0)) > 0;
+      (await item
+        .locator('[class*="ai-"]')
+        .count()
+        .catch(() => 0)) > 0;
     if (hasAi) continue;
-    const imgs = await item.locator("img").count().catch(() => 0);
+    const imgs = await item
+      .locator("img")
+      .count()
+      .catch(() => 0);
     if (imgs === 0) continue;
 
     await item.click().catch(() => {});
@@ -184,7 +212,10 @@ async function selectFirstFrameAsCover(page) {
       if (!(await item.isVisible().catch(() => false))) continue;
       const classAttr = await item.getAttribute("class").catch(() => "");
       if (/selected/i.test(classAttr) || /isSetting/i.test(classAttr)) continue;
-      const imgs = await item.locator("img").count().catch(() => 0);
+      const imgs = await item
+        .locator("img")
+        .count()
+        .catch(() => 0);
       if (imgs === 0) continue;
 
       await item.click().catch(() => {});
@@ -226,9 +257,7 @@ async function selectFirstFrameAsCover(page) {
         '[class*="recommendCoverContainer"] > [class*="recommendCover"][class*="selected"]'
       )
       .first();
-    if (
-      await selectedItem.isVisible({ timeout: 1000 }).catch(() => false)
-    ) {
+    if (await selectedItem.isVisible({ timeout: 1000 }).catch(() => false)) {
       console.log("封面 selected 标记已生效");
       return;
     }
@@ -258,14 +287,14 @@ async function runPublishVideo(options) {
     headless: HEADLESS,
     args: [
       "--start-maximized",
-      `--window-size=${PUBLISH_BROWSER_VIEWPORT.width},${PUBLISH_BROWSER_VIEWPORT.height}`,
-    ],
+      `--window-size=${PUBLISH_BROWSER_VIEWPORT.width},${PUBLISH_BROWSER_VIEWPORT.height}`
+    ]
   });
   activeBrowser = browser;
 
   const context = await browser.newContext({
     viewport: PUBLISH_BROWSER_VIEWPORT,
-    storageState: paths.storageStatePath,
+    storageState: paths.storageStatePath
   });
   activeContext = context;
 
@@ -281,88 +310,147 @@ async function runPublishVideo(options) {
       accountName,
       flow: "video",
       options,
-      saveStepDebug,
+      saveStepDebug
     }));
 
     await runStep(1, "检查登录状态", "01-login", async () => {
       await ensureLoggedIn(page, accountName, paths);
     });
 
-    await runStep(2, "进入视频发布页", "02-open-post-page", async () => {
-      await gotoVideoPublishPage(page);
-      await optimizePublishPageForViewing(page);
-    }, async () => {
-      await page.locator('input[placeholder*="标题"], [contenteditable="true"]').first().waitFor({
-        state: "visible",
-        timeout: scaledMs(10000),
-      });
-    });
+    await runStep(
+      2,
+      "进入视频发布页",
+      "02-open-post-page",
+      async () => {
+        await gotoVideoPublishPage(page);
+        await optimizePublishPageForViewing(page);
+      },
+      async () => {
+        await page
+          .locator('input[placeholder*="标题"], [contenteditable="true"]')
+          .first()
+          .waitFor({
+            state: "visible",
+            timeout: scaledMs(10000)
+          });
+      }
+    );
 
-    const { body: expectedBody, hashtags: expectedHashtags } = normalizeDescriptionForPublish(String(options.desc || ""));
+    const { body: expectedBody, hashtags: expectedHashtags } =
+      normalizeDescriptionForPublish(String(options.desc || ""));
     const limitedHashtags = expectedHashtags.slice(0, MAX_HASHTAGS);
 
-    await runStep(3, `上传视频素材: ${videoKey}`, "03-upload-video", async () => {
-      await uploadVideo(page, videoKey, accountName, debugOptions);
-    }, async () => {
-      await checkVideoUploaded(page);
-    });
+    await runStep(
+      3,
+      `上传视频素材: ${videoKey}`,
+      "03-upload-video",
+      async () => {
+        await uploadVideo(page, videoKey, accountName, debugOptions);
+      },
+      async () => {
+        await checkVideoUploaded(page);
+      }
+    );
 
     if (String(options.scheduleAt || "")) {
-      await runStep(4, "校验并设置定时发布", "04-schedule", async () => {
-        await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
-      }, async () => {
-        await checkScheduleSet(page);
-      });
+      await runStep(
+        4,
+        "校验并设置定时发布",
+        "04-schedule",
+        async () => {
+          await setScheduleIfNeeded(page, String(options.scheduleAt || ""));
+        },
+        async () => {
+          await checkScheduleSet(page);
+        }
+      );
     } else {
-      await runStep(4, "定时发布（跳过，未配置）", "04-schedule-skipped", null, {
-        skipped: true,
-        skipReason: "未配置 scheduleAt",
-      });
+      await runStep(
+        4,
+        "定时发布（跳过，未配置）",
+        "04-schedule-skipped",
+        null,
+        {
+          skipped: true,
+          skipReason: "未配置 scheduleAt"
+        }
+      );
     }
 
     if (String(options.productLink || "")) {
-      await runStep(5, "设置购物车商品链接", "05-product-link", async () => {
-        await selectCartAndLinkForVideo(
-          page,
-          String(options.productLink || ""),
-          String(options.productTitle || ""),
-          String(options.approvalNumber || "")
-        );
-      }, async () => {
-        await checkProductLinkSet(page, String(options.productTitle || ""));
-      });
+      await runStep(
+        5,
+        "设置购物车商品链接",
+        "05-product-link",
+        async () => {
+          await selectCartAndLinkForVideo(
+            page,
+            String(options.productLink || ""),
+            String(options.productTitle || ""),
+            String(options.approvalNumber || "")
+          );
+        },
+        async () => {
+          await checkProductLinkSet(page, String(options.productTitle || ""));
+        }
+      );
     } else {
-      await runStep(5, "购物车商品链接（跳过，未配置）", "05-product-link-absent", null, async () => {
-        await checkProductLinkAbsent(page);
-      });
+      await runStep(
+        5,
+        "购物车商品链接（跳过，未配置）",
+        "05-product-link-absent",
+        null,
+        async () => {
+          await checkProductLinkAbsent(page);
+        }
+      );
     }
 
-    await runStep(6, "填写标题、正文与话题", "06-title-description-topics", async () => {
-      await fillTitleAndDescription(
-        page,
-        String(options.title || ""),
-        String(options.desc || "")
-      );
-    }, async () => {
-      await checkTitleFilled(page, String(options.title || ""));
-      await checkBodyFilled(page, expectedBody);
-      await checkHashtagsSet(page, limitedHashtags);
-    });
+    await runStep(
+      6,
+      "填写标题、正文与话题",
+      "06-title-description-topics",
+      async () => {
+        await fillTitleAndDescription(
+          page,
+          String(options.title || ""),
+          String(options.desc || "")
+        );
+      },
+      async () => {
+        await checkTitleFilled(page, String(options.title || ""));
+        await checkBodyFilled(page, expectedBody);
+        await checkHashtagsSet(page, limitedHashtags);
+      }
+    );
 
-    await runStep(7, "选择视频首帧封面", "07-cover", async () => {
-      await selectFirstFrameAsCover(page);
-    }, async () => {
-      await checkCoverSelected(page);
-    });
+    await runStep(
+      7,
+      "选择视频首帧封面",
+      "07-cover",
+      async () => {
+        await selectFirstFrameAsCover(page);
+      },
+      async () => {
+        await checkCoverSelected(page);
+      }
+    );
 
     const isAi = options.isAiContent === true || options.isAiContent === "true";
-    await runStep(8, "设置自主声明", "08-self-declaration", async () => {
-      await selectSelfDeclaration(page, isAi);
-    }, async () => {
-      await checkSelfDeclarationSet(page, isAi);
-    });
+    await runStep(
+      8,
+      "设置自主声明",
+      "08-self-declaration",
+      async () => {
+        await selectSelfDeclaration(page, isAi);
+      },
+      async () => {
+        await checkSelfDeclarationSet(page, isAi);
+      }
+    );
 
-    const { publishEnabled, publishWaitSec } = resolveVideoPublishControls(options);
+    const { publishEnabled, publishWaitSec } =
+      resolveVideoPublishControls(options);
 
     if (publishEnabled) {
       await runStep(9, "点击发布按钮", "09-publish", async () => {
@@ -370,33 +458,64 @@ async function runPublishVideo(options) {
       });
 
       if (await isPublishSmsVerificationVisible(page, 1000)) {
-        await runStep(10, "处理短信验证码", "10-sms-verification", async () => {
-          await handlePublishSmsVerification(page, accountName);
-        }, async () => {
-          await checkPublishSmsVerificationCompleted(page);
-        });
+        await runStep(
+          10,
+          "处理短信验证码",
+          "10-sms-verification",
+          async () => {
+            await handlePublishSmsVerification(page, accountName);
+          },
+          async () => {
+            await checkPublishSmsVerificationCompleted(page);
+          }
+        );
       } else {
-        await runStep(10, "短信验证码（未出现）", "10-sms-verification-skipped", null, {
-          skipped: true,
-          skipReason: "未出现短信验证码弹窗",
-        });
+        await runStep(
+          10,
+          "短信验证码（未出现）",
+          "10-sms-verification-skipped",
+          null,
+          {
+            skipped: true,
+            skipReason: "未出现短信验证码弹窗"
+          }
+        );
       }
 
-      await runStep(11, "校验发布提交结果", "11-publish-submit-check", null, async () => {
-        await checkPublishSubmitted(page);
-      });
+      await runStep(
+        11,
+        "校验发布提交结果",
+        "11-publish-submit-check",
+        null,
+        async () => {
+          await checkPublishSubmitted(page);
+        }
+      );
     } else {
-      await runStep(9, "跳过点击发布（publishEnabled=false）", "09-publish-skipped", null, {
-        skipped: true,
-        skipReason: "publishEnabled=false",
-      });
+      await runStep(
+        9,
+        "跳过点击发布（publishEnabled=false）",
+        "09-publish-skipped",
+        null,
+        {
+          skipped: true,
+          skipReason: "publishEnabled=false"
+        }
+      );
     }
 
-    await runStep(12, `发布后停留 ${publishWaitSec}s`, "12-post-wait", async () => {
-      await page.waitForTimeout(scaledMs(publishWaitSec * 1000));
-    });
+    await runStep(
+      12,
+      `发布后停留 ${publishWaitSec}s`,
+      "12-post-wait",
+      async () => {
+        await page.waitForTimeout(scaledMs(publishWaitSec * 1000));
+      }
+    );
   } catch (error) {
-    await saveRunFailedArtifacts(page, accountName, debugOptions).catch(() => {});
+    await saveRunFailedArtifacts(page, accountName, debugOptions).catch(
+      () => {}
+    );
     throw error;
   } finally {
     await context.close().catch(() => {});

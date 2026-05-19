@@ -311,7 +311,9 @@ async function openTargetAndEnsureLogin(page, paths, accountName, options) {
         return;
       }
       console.log(`账号 [${accountName}] ${reason}，立即保存登录态。`);
-      await saveAuth(context, paths, accountName);
+      await saveAuth(context, paths, accountName, {
+        verifiedDetail: "登录流程中验证通过"
+      });
       trySaveAuth._done = true;
     } catch (error) {
       console.warn(

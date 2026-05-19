@@ -653,14 +653,36 @@ function validateExportedPostListXlsx(filePath, accountName, start, end) {
   );
 }
 
-async function saveAuth(context, paths, accountName) {
+async function saveAuth(context, paths, accountName, options = {}) {
   const cookies = await context.cookies();
+  if (!Array.isArray(cookies) || cookies.length === 0) {
+    throw new Error("浏览器上下文无 cookie，跳过保存登录态");
+  }
   await context.storageState({ path: paths.storageStatePath });
   await fs.writeFile(
     paths.cookiesPath,
     JSON.stringify(cookies, null, 2),
     "utf-8"
   );
+  const verifiedDetail = options.verifiedDetail || "登录态已保存";
+  try {
+    await fs.writeFile(
+      path.join(paths.accountDir, "verified-at.json"),
+      JSON.stringify(
+        {
+          time: Date.now(),
+          detail: verifiedDetail,
+          verified: true,
+          status: "valid"
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+  } catch {
+    // 忽略 verified-at 写入失败
+  }
   console.log(`账号 [${accountName}] 登录态已保存:`);
   console.log(`- storageState: ${paths.storageStatePath}`);
   console.log(`- cookies: ${paths.cookiesPath}`);

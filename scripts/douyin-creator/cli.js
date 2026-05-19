@@ -30,8 +30,8 @@ const {
   HEADLESS
 } = require("./lib/env");
 const { attachQrDataUrlSniffer } = require("./lib/qr");
-const { openTargetAndEnsureLogin } = require("./lib/login");
-const { exportPostListData } = require("./lib/exporter");
+const { openTargetAndEnsureLogin, isLoggedInAtTarget } = require("./lib/login");
+const { exportPostListData, saveAuth } = require("./lib/exporter");
 const { mergeExportFiles } = require("./lib/merge-exports");
 const {
   printAccountExecutionSummary,
@@ -105,6 +105,23 @@ async function runOneAccount(browser, accountName, command, options = {}) {
     }
 
     const exportFilePath = await exportPostListData(page, paths, accountName);
+
+    if (context && page && !page.isClosed()) {
+      const stillLoggedIn = await isLoggedInAtTarget(page).catch(() => false);
+      if (stillLoggedIn) {
+        try {
+          await saveAuth(context, paths, accountName, {
+            verifiedDetail: "导出任务完成后刷新登录态"
+          });
+        } catch (saveError) {
+          console.warn(
+            `账号 [${accountName}] 导出成功但刷新登录态失败:`,
+            saveError.message || saveError
+          );
+        }
+      }
+    }
+
     console.log(`========== 账号完成: ${accountName} ==========\n`);
     return { accountName, ok: true, exportFilePath };
   } catch (error) {
