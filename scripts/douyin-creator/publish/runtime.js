@@ -693,7 +693,7 @@ async function checkCoverSelected(page) {
   // 兜底：检查推荐封面项是否有 selected 标记
   const selectedItem = page
     .locator(
-      '[class*="recommendCoverContainer"] > [class*="recommendCover"][class*="selected"]'
+      '[class*="recommendCoverContainer"] [class*="recommendCover"][class*="selected"]'
     )
     .first();
   if (await selectedItem.isVisible({ timeout: 2000 }).catch(() => false)) {
