@@ -3,18 +3,18 @@
  * 登录抖音创作者平台，通过页面拦截 API 响应抓取作品列表（含抖音链接）
  *
  * 用法:
- *   node scripts/douyin-creator/review.js 账号A 账号B
+ *   node scripts/douyin-creator/commands/review.js 账号A 账号B
  *   或通过环境变量 REVIEW_ACCOUNTS=账号A,账号B 指定
  */
 
 const path = require("path");
 const crypto = require("crypto");
-const { chromium } = require("../common/stealth-browser");
-const { ensureDir } = require("../common/fs");
-const { getAccountPaths } = require("./lib/accounts");
-const { BROWSER_VIEWPORT, HEADLESS } = require("./lib/env");
-const { openTargetAndEnsureLogin } = require("./lib/login");
-const { setPostListDateRange } = require("./lib/exporter");
+const { chromium } = require("../../common/stealth-browser");
+const { ensureDir } = require("../../common/fs");
+const { getAccountPaths } = require("../core/accounts");
+const { BROWSER_VIEWPORT, HEADLESS } = require("../core/env");
+const { openTargetAndEnsureLogin } = require("../core/browser-login");
+const { setPostListDateRange } = require("../export/exporter");
 
 const CONTENT_PAGE_URL = "https://creator.douyin.com/creator-micro/data-center/content";
 
@@ -461,7 +461,7 @@ async function main() {
   }
 
   if (accountNames.length === 0) {
-    const { listAccountDirs } = require("./lib/accounts");
+    const { listAccountDirs } = require("../core/accounts");
     accountNames = await listAccountDirs();
   }
 
@@ -493,7 +493,7 @@ async function main() {
   const successResults = allResults.filter((r) => r.ok);
   if (successResults.length > 0) {
     try {
-      const { postInternalApi } = require("../common/internal-api-client");
+      const { postInternalApi } = require("../../common/internal-api-client");
       const saveResult = await postInternalApi("/api/review/save", { results: successResults });
       console.log(`[review] 已通过内部 API 保存 ${saveResult.saved || 0} 条作品记录到 MongoDB`);
     } catch (e) {

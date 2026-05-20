@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
 
     const taskId = generateTaskIdWithTime("reply");
     const args = [
-      "scripts/douyin-creator/reply-comment.js",
+      "scripts/douyin-creator/commands/reply-comment.js",
       `--account=${accountName}`,
       `--aweme-id=${awemeId}`,
       `--text=${text}`,

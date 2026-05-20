@@ -3,17 +3,17 @@
  * 登录抖音创作者平台，通过 API 抓取作品评论
  *
  * 用法:
- *   node scripts/douyin-creator/comment.js [--max-works=10] 账号A 账号B
+ *   node scripts/douyin-creator/commands/comment.js [--max-works=10] 账号A 账号B
  *   或通过环境变量 ACCOUNTS=账号A,账号B 指定
  */
 
 const path = require("path");
-const { chromium } = require("../common/stealth-browser");
-const { ensureDir } = require("../common/fs");
-const { getAccountPaths } = require("./lib/accounts");
-const { BROWSER_VIEWPORT, HEADLESS } = require("./lib/env");
-const { openTargetAndEnsureLogin } = require("./lib/login");
-const { postInternalApi } = require("../common/internal-api-client");
+const { chromium } = require("../../common/stealth-browser");
+const { ensureDir } = require("../../common/fs");
+const { getAccountPaths } = require("../core/accounts");
+const { BROWSER_VIEWPORT, HEADLESS } = require("../core/env");
+const { openTargetAndEnsureLogin } = require("../core/browser-login");
+const { postInternalApi } = require("../../common/internal-api-client");
 
 const COMMENT_TARGET_URL = "https://creator.douyin.com/creator-micro/interactive/comment";
 
@@ -161,7 +161,7 @@ async function main() {
   }
 
   if (accountNames.length === 0) {
-    const { listAccountDirs } = require("./lib/accounts");
+    const { listAccountDirs } = require("../core/accounts");
     const all = await listAccountDirs();
     accountNames.push(...(all || []));
   }

@@ -1,16 +1,13 @@
 const path = require("path");
 const { chromium } = require("../../common/stealth-browser");
 const { ensureDir, fileExists } = require("../../common/fs");
-const { getAccountPaths } = require("../lib/accounts");
-const { PUBLISH_BROWSER_VIEWPORT, HEADLESS } = require("../lib/env");
-const { attachQrDataUrlSniffer } = require("../lib/qr");
+const { getAccountPaths } = require("../core/accounts");
+const { PUBLISH_BROWSER_VIEWPORT, HEADLESS } = require("../core/env");
+const { attachQrDataUrlSniffer } = require("../core/qr");
+const { saveDebugArtifacts, saveRunFailedArtifacts } = require("./debug");
+const { fillTitleAndDescription, normalizeDescriptionForPublish } = require("./editor");
+const { selectSelfDeclaration, setScheduleIfNeeded } = require("./publish-form");
 const {
-  MATERIALS_DIR,
-  saveDebugArtifacts,
-  saveRunFailedArtifacts,
-  fillTitleAndDescription,
-  selectSelfDeclaration,
-  setScheduleIfNeeded,
   ensureLoggedIn,
   optimizePublishPageForViewing,
   clickPublishButton,
@@ -27,14 +24,21 @@ const {
   checkProductLinkSet,
   checkProductLinkAbsent,
   checkSelfDeclarationSet,
-  normalizeDescriptionForPublish,
-  MAX_HASHTAGS,
   scaledMs,
-  VIDEO_POST_URL,
+} = require("./runtime");
+const {
   createPublishStepRunner,
   shouldSaveStepDebug
-} = require("./utils");
+} = require("./step-runner");
 const { selectCartAndLinkForVideo } = require("./product-link");
+
+const MAX_HASHTAGS = 5;
+const MATERIALS_DIR = path.resolve(
+  process.env.CREATOR_MATERIALS_DIR ||
+    path.join(process.cwd(), "storage/creator-materials")
+);
+const VIDEO_POST_URL =
+  "https://creator.douyin.com/creator-micro/content/post/video";
 
 function logVideoPublishStart(accountName, options) {
   console.log(`开始视频发布准备: ${accountName}`);

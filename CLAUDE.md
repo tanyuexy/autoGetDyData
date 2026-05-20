@@ -51,7 +51,7 @@ Pages call API routes → API enqueues a task → the Playwright script scrapes 
 
 ### Creator account automation
 
-All Douyin Creator Playwright scripts reuse `scripts/douyin-creator/lib/login.js` (`openTargetAndEnsureLogin`).
+All Douyin Creator Playwright scripts reuse `scripts/douyin-creator/core/browser-login.js` (`openTargetAndEnsureLogin`).
 
 **抖创 Cookie / 登录态目录（仓库根下）：** `storage/creator-accounts/<name>/`。每个账号子目录含 Playwright **`storageState.json`**、**`cookies.json`** 及导出数据；脚本复用这些文件以减少重复登录。勿将含真实会话的内容提交到公开远程。
 
@@ -117,6 +117,7 @@ mongosh "mongodb://127.0.0.1:27017/autoGetDyData"
 每次导入或刷新先读飞书任务表。仅当记录同时满足以下条件才进入后续同步判断；否则直接跳过：
 
 ```text
+是否需要自动化 != 否
 审批 = 通过
 备注 != 示例
 所属店铺 有值

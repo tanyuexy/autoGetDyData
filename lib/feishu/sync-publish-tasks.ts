@@ -303,6 +303,8 @@ function buildTaskPayload(snapshot, downloaded) {
 
 function getRecordEligibilityIssue(record) {
   const f = record.fields || {};
+  const needsAutomation = String(f["是否需要自动化"] || "").trim();
+  if (needsAutomation === "否") return "是否需要自动化为否";
   const approval = String(f["审批"] || "").trim();
   if (approval !== "通过") return `审批不是通过(${approval || "空"})`;
   const remark = String(f["备注"] || "").trim();
@@ -399,7 +401,7 @@ async function syncPublishTasks(options = {}) {
     const syncCandidates = records.filter((r) => !getRecordEligibilityIssue(r));
 
     log(
-      `  同步规则：仅处理「审批=通过」且非示例、已填所属店铺、已上传视频/图文内容的记录`
+      `  同步规则：仅处理「是否需要自动化≠否」且「审批=通过」、非示例、已填所属店铺、已上传视频/图文内容的记录`
     );
     log(`  其中 ${syncCandidates.length} 条满足同步条件`);
     if (eligibility.skippedByIssue.size > 0) {

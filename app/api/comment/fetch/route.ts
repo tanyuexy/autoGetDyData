@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     const taskId = generateTaskIdWithTime("comment");
-    const args = ["scripts/douyin-creator/comment.js", `--max-works=${maxWorks}`, ...accounts];
+    const args = ["scripts/douyin-creator/commands/comment.js", `--max-works=${maxWorks}`, ...accounts];
 
     await enqueueTask(taskId, "node", args, { namespace: "comment" });
 

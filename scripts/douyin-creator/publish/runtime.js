@@ -2,21 +2,21 @@ const {
   isLoggedInAtTarget,
   isVerificationUiVisible,
   openTargetAndEnsureLogin
-} = require("../lib/login");
+} = require("../core/browser-login");
 const {
   TARGET_URL,
   PUBLISH_WAIT_MULTIPLIER,
   LOGIN_WAIT_TIMEOUT_MS
-} = require("../lib/env");
+} = require("../core/env");
 const { step, checkOk } = require("./logger");
-const { fetchOtpCode, sendReceiveOtpEmail } = require("../lib/mail");
-const { fillReceiveOtpCodeAndSubmit } = require("../lib/verification");
+const { fetchOtpCode, sendReceiveOtpEmail } = require("../core/notification");
+const { fillReceiveOtpCodeAndSubmit } = require("../core/verification");
 const {
   otpRequestIdByAccount,
   otpRequestSinceByAccount,
   otpLastAppliedByAccount,
   otpLastStatusLogAtByAccount
-} = require("../lib/state");
+} = require("../core/state");
 
 // ---- 自动慢网识别 ----
 

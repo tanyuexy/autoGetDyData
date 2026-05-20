@@ -1,14 +1,14 @@
 /**
  * 抖创 cookie 验证脚本（供 worker 调用）
- * 用法: node scripts/douyin-creator/verify.js <accountName>
+ * 用法: node scripts/douyin-creator/commands/verify.js <accountName>
  * 输出: JSON 结果到 stdout（最后一行）
  */
 
 const path = require("path");
 const fs = require("fs");
-const { chromium } = require("../common/stealth-browser");
-const { getAccountPaths } = require("./lib/accounts");
-const { BROWSER_VIEWPORT, TARGET_URL } = require("./lib/env");
+const { chromium } = require("../../common/stealth-browser");
+const { getAccountPaths } = require("../core/accounts");
+const { BROWSER_VIEWPORT, TARGET_URL } = require("../core/env");
 
 function normalize(name) {
   return String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_");

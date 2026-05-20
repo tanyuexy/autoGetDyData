@@ -2,12 +2,12 @@
  * 使用已保存的 cookie 登录态打开抖音创作者中心
  *
  * 用法:
- *   node scripts/douyin-creator/open.js <accountName> [targetUrl]
+ *   node scripts/douyin-creator/commands/open.js <accountName> [targetUrl]
  */
-const { chromium } = require("../common/stealth-browser");
-const { getAccountPaths } = require("./lib/accounts");
-const { fileExists, ensureDir } = require("../common/fs");
-const { BROWSER_VIEWPORT, LOGIN_PAGE_GOTO_TIMEOUT_MS } = require("./lib/env");
+const { chromium } = require("../../common/stealth-browser");
+const { getAccountPaths } = require("../core/accounts");
+const { fileExists, ensureDir } = require("../../common/fs");
+const { BROWSER_VIEWPORT, LOGIN_PAGE_GOTO_TIMEOUT_MS } = require("../core/env");
 
 const DEFAULT_TARGET_URL = "https://creator.douyin.com/creator-micro/data-center/content";
 

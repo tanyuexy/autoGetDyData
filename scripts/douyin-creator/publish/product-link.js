@@ -1,5 +1,5 @@
 const { step, info } = require("./logger");
-const { PUBLISH_WAIT_MULTIPLIER } = require("../lib/env");
+const { PUBLISH_WAIT_MULTIPLIER } = require("../core/env");
 
 function scaledMs(ms) {
   return Math.round(ms * PUBLISH_WAIT_MULTIPLIER);

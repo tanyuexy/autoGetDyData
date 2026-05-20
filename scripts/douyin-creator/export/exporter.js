@@ -2,8 +2,8 @@ const fs = require("fs/promises");
 const path = require("path");
 const XLSX = require("xlsx");
 const { fileExists } = require("../../common/fs");
-const { clickIfVisible } = require("./login");
-const { getCreatorExportDateStartSpec } = require("./env");
+const { clickIfVisible } = require("../core/browser-login");
+const { getCreatorExportDateStartSpec } = require("../core/env");
 
 function formatYmd(date) {
   const y = date.getFullYear();

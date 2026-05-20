@@ -6,7 +6,7 @@ const {
   LOGIN_REMIND_INTERVAL_MS,
   SMS_REMIND_INTERVAL_MS
 } = require("./env");
-const { sendAlertEmail } = require("./mail");
+const { sendAlertEmail } = require("./notification");
 const { captureLoginQrScreenshot, hasVisibleQr } = require("./qr");
 const {
   isReceiveOtpPanelVisible,
@@ -119,7 +119,7 @@ async function resendLoginReminderByStage(page, paths, accountName, baseReason) 
 
   if (stageHint.includes("手机刷脸验证")) {
     const { captureFaceQrScreenshot } = require("./qr");
-    const { sendFaceVerifyEmail } = require("./mail");
+    const { sendFaceVerifyEmail } = require("./notification");
     const screenshotPath = await captureFaceQrScreenshot(page, paths, accountName);
     await sendFaceVerifyEmail({
       accountName,
@@ -132,7 +132,7 @@ async function resendLoginReminderByStage(page, paths, accountName, baseReason) 
   }
 
   if (stageHint.includes("接收短信验证码")) {
-    const { sendReceiveOtpEmail } = require("./mail");
+    const { sendReceiveOtpEmail } = require("./notification");
     const { maskedPhone } = await readReceiveOtpInfoFromPage(page);
     await sendReceiveOtpEmail({
       accountName,
@@ -145,7 +145,7 @@ async function resendLoginReminderByStage(page, paths, accountName, baseReason) 
   }
 
   if (stageHint.includes("短信验证")) {
-    const { sendSmsVerifyEmail } = require("./mail");
+    const { sendSmsVerifyEmail } = require("./notification");
     const { maskedPhone, smsContent, smsTarget } = await readSmsVerifyInfoFromPage(page);
     await sendSmsVerifyEmail({
       accountName,
@@ -297,7 +297,7 @@ async function openTargetAndEnsureLogin(page, paths, accountName, options) {
     if (!context) return;
     if (trySaveAuth._done) return;
     try {
-      const { saveAuth } = require("./exporter");
+      const { saveAuth } = require("../export/exporter");
       const cookies = await context.cookies();
       if (!Array.isArray(cookies) || cookies.length === 0) return;
       let loggedIn = false;

@@ -3,13 +3,13 @@
  * 以店铺身份在作品下发布评论
  *
  * 用法:
- *   node scripts/douyin-creator/reply-comment.js --account=账号名 --aweme-id=xxx --text="回复内容"
+ *   node scripts/douyin-creator/commands/reply-comment.js --account=账号名 --aweme-id=xxx --text="回复内容"
  */
 
-const { chromium } = require("../common/stealth-browser");
-const { getAccountPaths } = require("./lib/accounts");
-const { BROWSER_VIEWPORT, HEADLESS } = require("./lib/env");
-const { openTargetAndEnsureLogin } = require("./lib/login");
+const { chromium } = require("../../common/stealth-browser");
+const { getAccountPaths } = require("../core/accounts");
+const { BROWSER_VIEWPORT, HEADLESS } = require("../core/env");
+const { openTargetAndEnsureLogin } = require("../core/browser-login");
 
 const COMMENT_PAGE_URL = "https://creator.douyin.com/creator-micro/interactive/comment";
 

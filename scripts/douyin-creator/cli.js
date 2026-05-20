@@ -22,25 +22,39 @@ const { ensureDir, fileExists } = require("../common/fs");
 const {
   getAccountPaths,
   parseCliCommand,
-  resolveAccountsToRun
-} = require("./lib/accounts");
+  resolveAccountsToRun,
+  splitAccountsByCreatorSettingsStatus,
+  printAccountExecutionSummary,
+  printExportChannelSummary
+} = require("./core/accounts");
 const {
   BROWSER_VIEWPORT,
   LOGIN_VERIFY_METHOD,
   HEADLESS
-} = require("./lib/env");
-const { attachQrDataUrlSniffer } = require("./lib/qr");
-const { openTargetAndEnsureLogin, isLoggedInAtTarget } = require("./lib/login");
-const { exportPostListData, saveAuth } = require("./lib/exporter");
-const { mergeExportFiles } = require("./lib/merge-exports");
-const {
-  printAccountExecutionSummary,
-  printExportChannelSummary
-} = require("./lib/index-helpers");
-const { parseArgs } = require("./publish/utils");
+} = require("./core/env");
+const { attachQrDataUrlSniffer } = require("./core/qr");
+const { openTargetAndEnsureLogin, isLoggedInAtTarget } = require("./core/browser-login");
+const { exportPostListData, saveAuth } = require("./export/exporter");
+const { mergeExportFiles } = require("./export/merge");
 const { runPublishArticle } = require("./publish/article");
 const { runPublishVideo } = require("./publish/video");
-const { splitAccountsByCreatorSettingsStatus } = require("./lib/creator-cookie-status");
+
+function parseArgs(argv) {
+  const result = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (!token.startsWith("--")) continue;
+    const key = token.slice(2);
+    const next = argv[i + 1];
+    if (next && !next.startsWith("--")) {
+      result[key] = next;
+      i += 1;
+    } else {
+      result[key] = true;
+    }
+  }
+  return result;
+}
 
 let activeBrowser = null;
 let shuttingDown = false;

@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     const endDate = typeof body?.endDate === "string" ? body.endDate.trim() : "";
 
     const taskId = generateTaskIdWithTime("review");
-    const args = ["scripts/douyin-creator/review.js", ...accounts];
+    const args = ["scripts/douyin-creator/commands/review.js", ...accounts];
 
     const configEnv: Record<string, string | undefined> = {};
     if (startDate) configEnv.REVIEW_DATE_START = startDate;

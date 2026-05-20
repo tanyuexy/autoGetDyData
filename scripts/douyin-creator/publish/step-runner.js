@@ -30,6 +30,13 @@ function shouldSaveStepDebug(options) {
   );
 }
 
+/** 控制台日志：去掉仅用于落盘的元字段，并跳过心跳 */
+function payloadForConsole(payload) {
+  const { runId, flow, timestamp, heartbeat, ...rest } = payload;
+  if (heartbeat) return null;
+  return rest;
+}
+
 function createStepStateStore({ accountName, flow, taskId }) {
   const runId = createPublishDebugRunId();
   const taskDir = getPublishDebugTaskDir(accountName, { task: taskId });
@@ -54,7 +61,10 @@ function createStepStateStore({ accountName, flow, taskId }) {
       fs.appendFile(historyPath, line, "utf8"),
     ];
     await Promise.all(writes);
-    console.log(`[publish-step] ${JSON.stringify(payload)}`);
+    const consolePayload = payloadForConsole(payload);
+    if (consolePayload) {
+      console.log(`[publish-step] ${JSON.stringify(consolePayload)}`);
+    }
   }
 
   return { write, sessionStatePath, historyPath, runId, taskDir, sessionDir };

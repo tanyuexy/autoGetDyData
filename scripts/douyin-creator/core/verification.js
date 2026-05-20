@@ -8,7 +8,7 @@ const {
   sendSmsVerifyEmail,
   sendReceiveOtpEmail,
   fetchOtpCode
-} = require("./mail");
+} = require("./notification");
 const { captureFaceQrScreenshot } = require("./qr");
 const {
   smsNotifySentByAccount,

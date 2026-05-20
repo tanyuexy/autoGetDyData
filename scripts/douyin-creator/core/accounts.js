@@ -3,6 +3,17 @@ const path = require("path");
 const { ensureDir, fileExists } = require("../../common/fs");
 const { ACCOUNTS_DIR } = require("./env");
 
+const ANALYSIS_MAX_AGE_DAYS = 14;
+let cookieChecker = null;
+
+function loadCookieChecker() {
+  if (!cookieChecker) {
+    require("tsx/cjs/api").register();
+    cookieChecker = require(path.join(__dirname, "../../../lib/cookie-checker.ts"));
+  }
+  return cookieChecker;
+}
+
 function normalizeAccountName(name) {
   return String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_");
 }
@@ -115,11 +126,80 @@ async function splitAccountsByStorageState(accounts) {
   return { withAuth, withoutAuth };
 }
 
+function getEffectiveCreatorCookieStatus(accountName) {
+  const {
+    CREATOR_KEY_COOKIE_PATTERNS,
+    analyzeStorageState,
+    mergeVerificationIntoAnalysis,
+    readLastVerified
+  } = loadCookieChecker();
+  const paths = getAccountPaths(accountName);
+  const analysis = analyzeStorageState(
+    paths.storageStatePath,
+    CREATOR_KEY_COOKIE_PATTERNS,
+    ANALYSIS_MAX_AGE_DAYS
+  );
+  const lastVerified = readLastVerified(paths.accountDir);
+  return mergeVerificationIntoAnalysis(analysis, lastVerified);
+}
+
+function splitAccountsByCreatorSettingsStatus(accountNames) {
+  const withAuth = [];
+  const withoutAuth = [];
+  for (const accountName of accountNames) {
+    const { cookieStatus } = getEffectiveCreatorCookieStatus(accountName);
+    if (cookieStatus === "valid" || cookieStatus === "warning") {
+      withAuth.push(accountName);
+    } else {
+      withoutAuth.push(accountName);
+    }
+  }
+  return { withAuth, withoutAuth };
+}
+
+function printAccountExecutionSummary(results) {
+  const successCount = results.filter((item) => item.ok).length;
+  const failed = results.filter((item) => !item.ok);
+
+  console.log(`\n全部执行完成: 成功 ${successCount} / ${results.length}`);
+  if (failed.length > 0) {
+    console.log("失败账号:");
+    for (const item of failed) {
+      console.log(`- ${item.accountName}: ${item.error}`);
+    }
+    process.exitCode = 1;
+  }
+
+  return {
+    successCount,
+    failed,
+    allSuccess: results.length > 0 && successCount === results.length
+  };
+}
+
+function printExportChannelSummary(withAuth, withoutAuth, loginVerifyMethod) {
+  console.log(`导出通道A(已有登录态): ${withAuth.length} 个账号`);
+  console.log(`导出通道B(需登录验证): ${withoutAuth.length} 个账号`);
+  console.log(
+    `登录验证方式: ${
+      loginVerifyMethod === "sms"
+        ? "发送短信验证"
+        : loginVerifyMethod === "receive_sms_code"
+          ? "接收短信验证码(邮件回填)"
+          : "二维码/默认流程"
+    }`
+  );
+}
+
 module.exports = {
   normalizeAccountName,
   getAccountPaths,
   listAccountDirs,
   parseCliCommand,
   resolveAccountsToRun,
-  splitAccountsByStorageState
+  splitAccountsByStorageState,
+  getEffectiveCreatorCookieStatus,
+  splitAccountsByCreatorSettingsStatus,
+  printAccountExecutionSummary,
+  printExportChannelSummary
 };

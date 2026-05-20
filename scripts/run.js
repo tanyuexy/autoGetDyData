@@ -32,23 +32,23 @@ const ROUTES = {
     argv: ["login"]
   },
   "creator:open": {
-    script: "scripts/douyin-creator/open.js",
+    script: "scripts/douyin-creator/commands/open.js",
     argv: []
   },
   "creator:review": {
-    script: "scripts/douyin-creator/review.js",
+    script: "scripts/douyin-creator/commands/review.js",
     argv: []
   },
   "creator:comment": {
-    script: "scripts/douyin-creator/comment.js",
+    script: "scripts/douyin-creator/commands/comment.js",
     argv: []
   },
   "creator:reply-comment": {
-    script: "scripts/douyin-creator/reply-comment.js",
+    script: "scripts/douyin-creator/commands/reply-comment.js",
     argv: []
   },
   "creator:verify": {
-    script: "scripts/douyin-creator/verify.js",
+    script: "scripts/douyin-creator/commands/verify.js",
     argv: []
   },
 
