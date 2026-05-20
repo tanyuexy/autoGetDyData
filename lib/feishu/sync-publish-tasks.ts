@@ -301,16 +301,63 @@ function buildTaskPayload(snapshot, downloaded) {
   };
 }
 
-function getRecordEligibilityIssue(record) {
+function normalizeShopNameKey(name) {
+  return String(name || "").replace(/\s+/g, "").trim();
+}
+
+function normalizeAutomationFlag(raw) {
+  if (raw == null || raw === "") return "";
+  if (typeof raw === "string") return raw.trim();
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) => normalizeAutomationFlag(item))
+      .filter(Boolean)
+      .join(",");
+  }
+  if (typeof raw === "object") {
+    return String(raw.text ?? raw.name ?? "").trim();
+  }
+  return String(raw).trim();
+}
+
+/** 店铺信息表：店铺名 -> 是否需要自动化（是/否） */
+function buildShopAutomationByNameMap(shopInfoRecords) {
+  const map = new Map();
+  for (const record of shopInfoRecords || []) {
+    const fields = record.fields || {};
+    const shopName = String(fields["店铺名"] || "").trim();
+    if (!shopName) continue;
+    map.set(normalizeShopNameKey(shopName), normalizeAutomationFlag(fields["是否需要自动化"]));
+  }
+  return map;
+}
+
+function extractTaskShopName(record) {
+  const shop = record?.fields?.["所属店铺"];
+  if (Array.isArray(shop) && shop[0]?.text) return String(shop[0].text).trim();
+  if (typeof shop === "string") return shop.trim();
+  return "";
+}
+
+function isShopAutomationDisabled(shopName, shopAutomationByName) {
+  if (!shopName || !shopAutomationByName) return false;
+  return shopAutomationByName.get(normalizeShopNameKey(shopName)) === "否";
+}
+
+function getRecordEligibilityIssue(record, shopAutomationByName) {
   const f = record.fields || {};
-  const needsAutomation = String(f["是否需要自动化"] || "").trim();
-  if (needsAutomation === "否") return "是否需要自动化为否";
   const approval = String(f["审批"] || "").trim();
   if (approval !== "通过") return `审批不是通过(${approval || "空"})`;
   const remark = String(f["备注"] || "").trim();
   if (remark === "示例") return "备注为示例";
   const shop = f["所属店铺"];
   if (!shop || !Array.isArray(shop) || !shop[0]?.text) return "缺少所属店铺";
+
+  const taskShopName = extractTaskShopName(record);
+  if (isShopAutomationDisabled(taskShopName, shopAutomationByName)) {
+    return `店铺「${taskShopName}」在店铺信息表中是否需要自动化为否`;
+  }
+
   const attachments = f["视频/图文内容"];
   if (!attachments || !Array.isArray(attachments) || !attachments.length) {
     return "缺少视频/图文内容";
@@ -318,14 +365,14 @@ function getRecordEligibilityIssue(record) {
   return "";
 }
 
-function summarizeEligibility(records) {
+function summarizeEligibility(records, shopAutomationByName) {
   const stats = {
     eligible: 0,
     skippedByIssue: new Map(),
   };
 
   for (const record of records) {
-    const issue = getRecordEligibilityIssue(record);
+    const issue = getRecordEligibilityIssue(record, shopAutomationByName);
     if (!issue) {
       stats.eligible++;
       continue;
@@ -359,7 +406,22 @@ async function syncPublishTasks(options = {}) {
     }
 
     const { records } = await readBitable("task");
-    log(`  找到 ${records.length} 条飞书记录`);
+    log(`  找到 ${records.length} 条任务表记录`);
+
+    log(`${summaryPrefix} 读取店铺信息表（按店铺名匹配是否需要自动化）...`);
+    const { records: shopInfoRecords } = await readBitable("shopInfo", { recordsOnly: true });
+    const shopAutomationByName = buildShopAutomationByNameMap(shopInfoRecords);
+    const disabledShopNames = [];
+    for (const record of shopInfoRecords || []) {
+      const shopName = String(record.fields?.["店铺名"] || "").trim();
+      if (shopName && shopAutomationByName.get(normalizeShopNameKey(shopName)) === "否") {
+        disabledShopNames.push(shopName);
+      }
+    }
+    log(
+      `  店铺信息表 ${shopInfoRecords.length} 条，其中是否需要自动化=否 的店铺 ${disabledShopNames.length} 个` +
+        (disabledShopNames.length ? `：${disabledShopNames.join("、")}` : "")
+    );
 
     const rowNumberMap = new Map();
     records.forEach((record, index) => {
@@ -397,11 +459,13 @@ async function syncPublishTasks(options = {}) {
       rowUpdatedCount++;
     }
 
-    const eligibility = summarizeEligibility(records);
-    const syncCandidates = records.filter((r) => !getRecordEligibilityIssue(r));
+    const eligibility = summarizeEligibility(records, shopAutomationByName);
+    const syncCandidates = records.filter(
+      (r) => !getRecordEligibilityIssue(r, shopAutomationByName)
+    );
 
     log(
-      `  同步规则：仅处理「是否需要自动化≠否」且「审批=通过」、非示例、已填所属店铺、已上传视频/图文内容的记录`
+      `  同步规则：任务表「所属店铺」与店铺信息表「店铺名」一致且该店是否需要自动化=否 则跳过；另需审批=通过、非示例、已填所属店铺、已上传视频/图文内容`
     );
     log(`  其中 ${syncCandidates.length} 条满足同步条件`);
     if (eligibility.skippedByIssue.size > 0) {
