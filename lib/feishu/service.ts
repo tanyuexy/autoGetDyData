@@ -1,4 +1,6 @@
 import { getConfig } from "@/lib/configService";
+import { normalizeFeishuAiProvider } from "@/lib/feishuAiProvider";
+import type { LlmProvider } from "@/lib/llm";
 
 type FeishuSyncProfile = "creator" | "shop";
 
@@ -49,6 +51,17 @@ export async function backupFeishuBitable(options: {
   await runWithArgs(args);
 }
 
+export async function peekFeishuPublishImportCandidates(options: {
+  logger?: (...args: unknown[]) => void;
+} = {}) {
+  await prepareProjectConfigEnv("task");
+  const { peekFeishuSyncCandidates } = require("@/lib/feishu/sync-publish-tasks");
+  return await peekFeishuSyncCandidates({
+    logger: options.logger || console.log,
+    summaryPrefix: "[peek-feishu-import-api]",
+  });
+}
+
 export async function importPublishTasksFromFeishu(options: {
   autoStart?: boolean;
   allowCreate?: boolean;
@@ -62,6 +75,57 @@ export async function importPublishTasksFromFeishu(options: {
     logger: options.logger || console.log,
     summaryPrefix: "[import-publish-tasks-api]",
   });
+}
+
+/** 预检 →（有候选则）AI 生成正文 → 飞书导入；手动与定时调度共用 */
+export async function runFeishuPublishImportPipeline(options: {
+  autoStart?: boolean;
+  allowCreate?: boolean;
+  provider?: LlmProvider;
+  logger?: (...args: unknown[]) => void;
+  isCancelled?: () => boolean;
+  summaryPrefix?: string;
+} = {}) {
+  const log = options.logger || console.log;
+  const summaryPrefix = options.summaryPrefix || "[feishu-import-pipeline]";
+
+  log(`${summaryPrefix} 预检：飞书任务表是否满足导入条件`);
+  const peek = await peekFeishuPublishImportCandidates({ logger: log });
+  log(
+    `  预检结果：任务表 ${peek.totalRecords} 条，待导入预检 ${peek.syncCandidateCount} 条` +
+      (peek.remoteCreatedSkipCount
+        ? `（已排除飞书已创建任务=是 ${peek.remoteCreatedSkipCount} 条）`
+        : "")
+  );
+
+  if (peek.syncCandidateCount <= 0) {
+    log("  没有满足同步条件的飞书任务，跳过 AI 生成与导入");
+    return { skipped: true, reason: "no-sync-candidates" as const, peek };
+  }
+
+  const config = await getConfig();
+  const provider = options.provider ?? normalizeFeishuAiProvider(config.creatorPublish?.feishuAiProvider);
+
+  log(`${summaryPrefix} 步骤 1/2：飞书 AI 正文生成 (provider=${provider})`);
+  try {
+    await generateFeishuTaskAiContent({
+      provider,
+      logger: log,
+      isCancelled: options.isCancelled,
+    });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    log(`  ⚠️ AI 正文生成失败，继续执行导入: ${message}`);
+  }
+
+  log(`${summaryPrefix} 步骤 2/2：从飞书导入任务`);
+  const importSummary = await importPublishTasksFromFeishu({
+    autoStart: options.autoStart === true,
+    allowCreate: options.allowCreate !== false,
+    logger: log,
+  });
+
+  return { skipped: false, peek, importSummary };
 }
 
 export async function generateFeishuTaskAiContent(options: {

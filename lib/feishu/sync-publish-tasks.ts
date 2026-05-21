@@ -90,6 +90,11 @@ function getHashtagLength(tag) {
   return Array.from(tag).length;
 }
 
+/** 去掉 # 与标签名之间的空白，便于识别 `# 好物` 这类写法 */
+function stripSpacesAfterHash(text) {
+  return String(text || "").replace(/#(\s+)/g, "#");
+}
+
 /**
  * 与 scripts/douyin-creator/publish/editor.js 的 splitDescription 保持一致。
  * 从正文中提取 #话题，短话题（≤10字）从正文移除，长话题保留在正文中。
@@ -98,7 +103,7 @@ function splitDescription(text) {
   const hashtags = [];
   const plainHashtags = [];
 
-  let body = String(text || "")
+  let body = stripSpacesAfterHash(text)
     .replace(/#([^\s#]+)/g, (_matched, rawTag) => {
       const tag = cleanHashtag(rawTag);
       if (!tag) return "";
@@ -190,7 +195,7 @@ function buildRecordSnapshot(record) {
   const scheduleRaw = f["计划发布时间"];
   const scheduleAt = parseScheduleAt(scheduleRaw);
   const type = inferType(attachments);
-  const remoteCreatedStatus = String(f["已创建任务"] || "").trim();
+  const remoteCreatedStatus = getRemoteCreatedStatus(record);
 
   return {
     accountName,
@@ -344,6 +349,14 @@ function isShopAutomationDisabled(shopName, shopAutomationByName) {
   return shopAutomationByName.get(normalizeShopNameKey(shopName)) === "否";
 }
 
+function getRemoteCreatedStatus(record) {
+  return String(record?.fields?.["已创建任务"] || "").trim();
+}
+
+function isRemoteCreatedDone(record) {
+  return getRemoteCreatedStatus(record) === "是";
+}
+
 function getRecordEligibilityIssue(record, shopAutomationByName) {
   const f = record.fields || {};
   const approval = String(f["审批"] || "").trim();
@@ -385,6 +398,38 @@ function summarizeEligibility(records, shopAutomationByName) {
 
 function shouldQueueExistingTaskOnAutoStart(task) {
   return task?.status === "pending" || task?.status === "cancelled";
+}
+
+/** 轻量预检：满足导入前置条件的飞书任务行数（不读 Mongo、不下载附件） */
+async function peekFeishuSyncCandidates(options = {}) {
+  const logger = options.logger || console.log;
+  const log = (...args) => logger(...args);
+  const summaryPrefix = options.summaryPrefix || "[peek-feishu-sync]";
+
+  log(`${summaryPrefix} 预检飞书任务表同步条件...`);
+  const { records } = await readBitable("task");
+  const { records: shopInfoRecords } = await readBitable("shopInfo", { recordsOnly: true });
+  const shopAutomationByName = buildShopAutomationByNameMap(shopInfoRecords);
+  const eligibleRecords = records.filter(
+    (record) => !getRecordEligibilityIssue(record, shopAutomationByName)
+  );
+  const remoteCreatedSkipCount = eligibleRecords.filter((record) =>
+    isRemoteCreatedDone(record)
+  ).length;
+  const syncCandidates = eligibleRecords.filter((record) => !isRemoteCreatedDone(record));
+  const eligibility = summarizeEligibility(records, shopAutomationByName);
+
+  log(
+    `  任务表 ${records.length} 条，满足同步条件 ${eligibleRecords.length} 条` +
+      `，排除飞书已创建任务=是 ${remoteCreatedSkipCount} 条，待导入预检 ${syncCandidates.length} 条`
+  );
+
+  return {
+    totalRecords: records.length,
+    syncCandidateCount: syncCandidates.length,
+    eligibleCount: eligibility.eligible,
+    remoteCreatedSkipCount,
+  };
 }
 
 async function syncPublishTasks(options = {}) {
@@ -754,4 +799,5 @@ async function syncPublishTasks(options = {}) {
 
 module.exports = {
   syncPublishTasks,
+  peekFeishuSyncCandidates,
 };

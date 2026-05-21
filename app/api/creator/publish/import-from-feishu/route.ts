@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateTaskIdWithTime, canStartTask } from "@/lib/taskManager";
 import { startApiTask } from "@/lib/apiTaskRunner";
-import { importPublishTasksFromFeishu } from "@/lib/feishu/service";
+import { runFeishuPublishImportPipeline } from "@/lib/feishu/service";
 import crypto from "crypto";
 
 export const maxDuration = 0;
@@ -19,13 +19,20 @@ export async function POST(request: NextRequest) {
 
     const suffix = crypto.randomBytes(3).toString("hex");
     const taskId = `${generateTaskIdWithTime("feishu-import")}-${suffix}`;
-    startApiTask(taskId, "creator-publish", { target: "feishu-import" }, async ({ log }) => {
-      await importPublishTasksFromFeishu({
-        autoStart,
-        allowCreate: true,
-        logger: (...args) => log(...args),
-      });
-    });
+    startApiTask(
+      taskId,
+      "creator-publish",
+      { target: "feishu-import" },
+      async ({ log, isCancelled }) => {
+        await runFeishuPublishImportPipeline({
+          autoStart,
+          allowCreate: true,
+          logger: (...args) => log(...args),
+          isCancelled,
+          summaryPrefix: "[import-from-feishu-api]",
+        });
+      }
+    );
 
     return NextResponse.json({ taskId });
   } catch (e: any) {

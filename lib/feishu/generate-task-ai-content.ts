@@ -162,9 +162,9 @@ function resolveProductForTask(task: TaskCandidate, indexes: ProductIndexes): Pr
 function isGeneratedContent(value: unknown): value is GeneratedContent {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      typeof (value as { content?: unknown }).content === "string" &&
-      (value as { content: string }).content.trim()
+    typeof value === "object" &&
+    typeof (value as { content?: unknown }).content === "string" &&
+    (value as { content: string }).content.trim()
   );
 }
 
@@ -216,7 +216,6 @@ async function generateContent(
       },
     ],
     temperature: 0.7,
-    maxTokens: 800,
     validate: isGeneratedContent,
   });
 

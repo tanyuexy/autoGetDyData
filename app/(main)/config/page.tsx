@@ -9,6 +9,10 @@ import AccountTable from "@/components/AccountTable";
 import { useTaskContext } from "@/contexts/TaskContext";
 import type { ConfigData, CreatorAccount } from "@/types";
 import {
+  FEISHU_AI_PROVIDER_OPTIONS,
+  normalizeFeishuAiProvider,
+} from "@/lib/feishuAiProvider";
+import {
   normalizePublishMaxConcurrent,
   PUBLISH_MAX_CONCURRENT_DEFAULT,
   PUBLISH_MAX_CONCURRENT_HARD_MAX,
@@ -20,6 +24,7 @@ const DEFAULT_CREATOR_PUBLISH_CONFIG: CreatorPublishConfig = {
   publishEnabled: true,
   publishWaitSec: 3,
   publishMaxConcurrent: PUBLISH_MAX_CONCURRENT_DEFAULT,
+  feishuAiProvider: "siliconflow",
   automation: {
     enabled: false,
     mode: "weekly",
@@ -61,6 +66,9 @@ function normalizeCreatorPublishConfig(input?: Partial<CreatorPublishConfig> | n
     publishWaitSec: input?.publishWaitSec ?? DEFAULT_CREATOR_PUBLISH_CONFIG.publishWaitSec,
     publishMaxConcurrent: normalizePublishMaxConcurrent(
       input?.publishMaxConcurrent ?? DEFAULT_CREATOR_PUBLISH_CONFIG.publishMaxConcurrent
+    ),
+    feishuAiProvider: normalizeFeishuAiProvider(
+      input?.feishuAiProvider ?? DEFAULT_CREATOR_PUBLISH_CONFIG.feishuAiProvider
     ),
     automation: {
       enabled: input?.automation?.enabled ?? DEFAULT_CREATOR_PUBLISH_CONFIG.automation!.enabled,
@@ -448,6 +456,28 @@ export default function ConfigPage() {
                   <Button disabled>个</Button>
                 </Space.Compact>
               </Space>
+
+              <Space align="center" size={16}>
+                <Space orientation="vertical" size={0}>
+                  <Typography.Text strong>飞书 AI 正文模型</Typography.Text>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    「AI生成正文」与定时导入前的 AI 生成共用；写入 app_config
+                  </Typography.Text>
+                </Space>
+                <Select
+                  value={publishConfig.feishuAiProvider ?? "siliconflow"}
+                  onChange={(value) =>
+                    autoSave({
+                      creatorPublish: {
+                        ...publishConfig,
+                        feishuAiProvider: normalizeFeishuAiProvider(value),
+                      },
+                    })
+                  }
+                  style={{ width: 160 }}
+                  options={FEISHU_AI_PROVIDER_OPTIONS}
+                />
+              </Space>
             </Space>
           </SettingSection>
 
@@ -474,7 +504,7 @@ export default function ConfigPage() {
                 <Space orientation="vertical" size={0}>
                   <Typography.Text strong>启用自动从飞书导入并执行任务</Typography.Text>
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    到达设定时间后自动运行“从飞书导入任务”，新导入任务会直接进入执行队列
+                    到达设定时间后先 AI 生成飞书空正文，再自动“从飞书导入任务”，新导入任务会直接进入执行队列
                   </Typography.Text>
                 </Space>
               </Space>

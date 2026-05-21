@@ -27,7 +27,12 @@ import {
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { useTaskContext } from "@/contexts/TaskContext";
+import {
+  FEISHU_AI_PROVIDER_OPTIONS,
+  normalizeFeishuAiProvider,
+} from "@/lib/feishuAiProvider";
 import { antdTagPresetStyle } from "@/lib/semanticTagStyles";
+import type { ConfigData, FeishuAiProvider } from "@/types";
 
 const { Text } = Typography;
 
@@ -39,8 +44,6 @@ const TASK_TYPE_OPTIONS: { label: string; value: TaskType }[] = [
 ];
 
 type TaskStatus = "pending" | "queued" | "running" | "success" | "failed" | "cancelled";
-
-type FeishuAiProvider = "siliconflow" | "deepseek";
 
 const TERMINABLE_TASK_STATUSES = new Set<TaskStatus>(["queued", "running"]);
 
@@ -242,6 +245,26 @@ export default function CreatorPublishPage() {
   const [taskTypeFilters, setTaskTypeFilters] = useState<TaskType[]>([]);
 
   const schedulePresets = useMemo(() => scheduleQuickPresets(), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/config");
+        if (!res.ok) return;
+        const cfg = (await res.json()) as ConfigData;
+        if (cancelled) return;
+        setFeishuAiProvider(
+          normalizeFeishuAiProvider(cfg.creatorPublish?.feishuAiProvider)
+        );
+      } catch {
+        /* 保持默认 siliconflow */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const editScheduleTimeOptions = useMemo(() => {
     if (!editState?.scheduleAt) return [];
@@ -665,6 +688,32 @@ export default function CreatorPublishPage() {
       message.error(e.message || "启动导入失败");
     }
     setImporting(false);
+  }
+
+  async function handleFeishuAiProviderChange(value: FeishuAiProvider) {
+    setFeishuAiProvider(value);
+    try {
+      const res = await fetch("/api/config");
+      if (!res.ok) throw new Error("读取配置失败");
+      const cfg = (await res.json()) as ConfigData;
+      const saveRes = await fetch("/api/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...cfg,
+          creatorPublish: {
+            ...(cfg.creatorPublish || {}),
+            feishuAiProvider: normalizeFeishuAiProvider(value),
+          },
+        }),
+      });
+      if (!saveRes.ok) {
+        const data = await saveRes.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || "保存配置失败");
+      }
+    } catch (e: any) {
+      message.error(e.message || "保存 AI 模型配置失败");
+    }
   }
 
   async function handleGenerateFeishuAiContent() {
@@ -1363,12 +1412,9 @@ export default function CreatorPublishPage() {
                 <Text type="secondary" style={{ fontSize: 12 }}>AI 模型选择</Text>
                 <Select
                   value={feishuAiProvider}
-                  onChange={setFeishuAiProvider}
+                  onChange={handleFeishuAiProviderChange}
                   style={{ width: "100%" }}
-                  options={[
-                    { label: "SiliconFlow", value: "siliconflow" },
-                    { label: "DeepSeek", value: "deepseek" },
-                  ]}
+                  options={FEISHU_AI_PROVIDER_OPTIONS}
                 />
               </Space>
             }

@@ -12,7 +12,10 @@ const {
   ensureTaskLogMeta,
   readLastTaskError
 } = require("../common/task-log-store");
-const { postInternalApi } = require("../common/internal-api-client");
+const {
+  postInternalApi,
+  startAndWaitInternalApiTask
+} = require("../common/internal-api-client");
 const {
   classifyCreatorPublishFailure,
   formatFailureForOperator
@@ -282,20 +285,28 @@ async function enqueueCreatorPublishAutomationJob(taskId, reason) {
   appendTaskLog(
     taskId,
     "info",
-    `自动调度触发，准备从飞书导入并执行任务 (${reason})`
+    `自动调度触发 (${reason})，启动飞书导入流水线（预检 → AI 正文 → 导入）`
   );
-  const data = await postInternalApi(
-    "/api/creator/publish/import-from-feishu",
-    {
-      autoStart: true
-    }
-  );
-  appendTaskLog(
-    taskId,
-    "info",
-    `已通过 Next API 启动飞书导入任务: ${data.taskId || "(unknown)"}`
-  );
-  appendTaskDone(taskId, 0, `Started API task ${data.taskId || ""}`.trim());
+  try {
+    const result = await startAndWaitInternalApiTask(
+      "/api/creator/publish/import-from-feishu",
+      { autoStart: true },
+      { timeoutMs: 2 * 60 * 60 * 1000 }
+    );
+    appendTaskLog(
+      taskId,
+      "info",
+      `飞书导入流水线完成: ${result.summary || "(ok)"}`
+    );
+    appendTaskDone(taskId, 0, result.summary || "Done");
+  } catch (err) {
+    appendTaskLog(
+      taskId,
+      "error",
+      `飞书导入流水线失败: ${err.message || err}`
+    );
+    appendTaskDone(taskId, 1, err.message || "Failed");
+  }
 }
 
 async function processCreatorPublishAutomation() {

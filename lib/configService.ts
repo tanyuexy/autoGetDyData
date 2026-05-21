@@ -1,5 +1,6 @@
 import type { ConfigData } from "@/types";
 import { getDb } from "./db/mongo";
+import { normalizeFeishuAiProvider } from "./feishuAiProvider";
 import { normalizePublishMaxConcurrent, PUBLISH_MAX_CONCURRENT_DEFAULT } from "./publishConcurrency";
 
 function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigData {
@@ -17,6 +18,7 @@ function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigDa
       publishMaxConcurrent: normalizePublishMaxConcurrent(
         data?.creatorPublish?.publishMaxConcurrent ?? PUBLISH_MAX_CONCURRENT_DEFAULT
       ),
+      feishuAiProvider: normalizeFeishuAiProvider(data?.creatorPublish?.feishuAiProvider),
       automation: {
         enabled: data?.creatorPublish?.automation?.enabled ?? false,
         mode: data?.creatorPublish?.automation?.mode ?? "weekly",

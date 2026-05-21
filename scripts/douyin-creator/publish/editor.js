@@ -16,11 +16,16 @@ function getHashtagLength(tag) {
   return Array.from(tag).length;
 }
 
+/** 去掉 # 与标签名之间的空白，便于识别 `# 好物` 这类写法 */
+function stripSpacesAfterHash(text) {
+  return String(text || "").replace(/#(\s+)/g, "#");
+}
+
 function splitDescription(text) {
   const hashtags = [];
   const plainHashtags = [];
 
-  let body = text
+  let body = stripSpacesAfterHash(text)
     .replace(/#([^\s#]+)/g, (matched, rawTag) => {
       const tag = cleanHashtag(rawTag);
       if (!tag) return "";
