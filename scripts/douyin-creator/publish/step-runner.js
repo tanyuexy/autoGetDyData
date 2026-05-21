@@ -7,12 +7,19 @@ const {
   getPublishDebugTaskDir,
   getPublishDebugSessionDir,
   markStepDebugSaved,
-  saveDebugArtifacts,
+  saveDebugArtifacts
 } = require("./debug");
 const { stage, done } = require("./logger");
+const { LOGIN_WAIT_TIMEOUT_MS } = require("../core/env");
 
-const DEFAULT_STEP_TIMEOUT_MS = Number(process.env.CREATOR_PUBLISH_STEP_TIMEOUT_MS || 8 * 60 * 1000);
-const STEP_HEARTBEAT_MS = Number(process.env.CREATOR_PUBLISH_STEP_HEARTBEAT_MS || 15 * 1000);
+const DEFAULT_STEP_TIMEOUT_MS = Number(
+  process.env.CREATOR_PUBLISH_STEP_TIMEOUT_MS || 8 * 60 * 1000
+);
+/** 与 handlePublishSmsVerification 内 OTP 轮询（LOGIN_WAIT_TIMEOUT_*）对齐*/
+const PUBLISH_SMS_VERIFICATION_STEP_TIMEOUT_MS = LOGIN_WAIT_TIMEOUT_MS;
+const STEP_HEARTBEAT_MS = Number(
+  process.env.CREATOR_PUBLISH_STEP_HEARTBEAT_MS || 15 * 1000
+);
 
 function safeName(value) {
   return String(value || "unknown").replace(/[\\/:*?"<>|]/g, "_");
@@ -40,7 +47,10 @@ function payloadForConsole(payload) {
 function createStepStateStore({ accountName, flow, taskId }) {
   const runId = createPublishDebugRunId();
   const taskDir = getPublishDebugTaskDir(accountName, { task: taskId });
-  const sessionDir = getPublishDebugSessionDir(accountName, { task: taskId, runId });
+  const sessionDir = getPublishDebugSessionDir(accountName, {
+    task: taskId,
+    runId
+  });
   const sessionStatePath = path.join(sessionDir, "publish-step-state.json");
   const historyPath = path.join(sessionDir, `${safeName(flow)}-steps.jsonl`);
 
@@ -52,13 +62,13 @@ function createStepStateStore({ accountName, flow, taskId }) {
       flow,
       accountName,
       timestamp: formatPublishDebugTimestamp(),
-      ...record,
+      ...record
     };
     const line = `${JSON.stringify(payload)}\n`;
     const serialized = JSON.stringify(payload, null, 2);
     const writes = [
       fs.writeFile(sessionStatePath, serialized, "utf8"),
-      fs.appendFile(historyPath, line, "utf8"),
+      fs.appendFile(historyPath, line, "utf8")
     ];
     await Promise.all(writes);
     const consolePayload = payloadForConsole(payload);
@@ -72,7 +82,10 @@ function createStepStateStore({ accountName, flow, taskId }) {
 
 async function closePageForTimeout(page) {
   if (!page) return;
-  await page.context?.().close?.().catch(() => {});
+  await page
+    .context?.()
+    .close?.()
+    .catch(() => {});
   await page.close?.().catch(() => {});
 }
 
@@ -88,23 +101,36 @@ function createPublishStepRunner({
   accountName,
   flow,
   options = {},
-  saveStepDebug,
+  saveStepDebug
 }) {
-  const store = createStepStateStore({ accountName, flow, taskId: options.task });
+  const store = createStepStateStore({
+    accountName,
+    flow,
+    taskId: options.task
+  });
   const debugOptions = {
     ...options,
     runId: store.runId,
-    runDir: store.sessionDir,
+    runDir: store.sessionDir
   };
 
-  async function runStep(index, title, tag, action, verifyOrOptions, maybeOptions) {
+  async function runStep(
+    index,
+    title,
+    tag,
+    action,
+    verifyOrOptions,
+    maybeOptions
+  ) {
     let verify = verifyOrOptions;
     let stepOptions = maybeOptions || {};
     if (verifyOrOptions && typeof verifyOrOptions === "object") {
       verify = verifyOrOptions.verify;
       stepOptions = verifyOrOptions;
     }
-    const timeoutMs = Number(stepOptions.timeoutMs || options.stepTimeoutMs || DEFAULT_STEP_TIMEOUT_MS);
+    const timeoutMs = Number(
+      stepOptions.timeoutMs || options.stepTimeoutMs || DEFAULT_STEP_TIMEOUT_MS
+    );
 
     stage(index, title);
     const startedAt = Date.now();
@@ -115,7 +141,7 @@ function createPublishStepRunner({
         ...base,
         status: "skipped",
         reason: stepOptions.skipReason || title,
-        durationMs: 0,
+        durationMs: 0
       });
       done(index);
       return;
@@ -130,22 +156,27 @@ function createPublishStepRunner({
         status: "running",
         phase,
         timeoutMs,
-        durationMs: Date.now() - startedAt,
+        durationMs: Date.now() - startedAt
       });
 
       let settled = false;
-      const heartbeat = setInterval(() => {
-        if (settled) return;
-        store.write({
-          ...base,
-          status: "running",
-          phase,
-          timeoutMs,
-          durationMs: Date.now() - startedAt,
-          phaseDurationMs: Date.now() - phaseStartedAt,
-          heartbeat: true,
-        }).catch(() => {});
-      }, Math.max(1000, STEP_HEARTBEAT_MS));
+      const heartbeat = setInterval(
+        () => {
+          if (settled) return;
+          store
+            .write({
+              ...base,
+              status: "running",
+              phase,
+              timeoutMs,
+              durationMs: Date.now() - startedAt,
+              phaseDurationMs: Date.now() - phaseStartedAt,
+              heartbeat: true
+            })
+            .catch(() => {});
+        },
+        Math.max(1000, STEP_HEARTBEAT_MS)
+      );
       heartbeat.unref?.();
 
       let timeout = null;
@@ -157,26 +188,35 @@ function createPublishStepRunner({
                 work,
                 new Promise((_, reject) => {
                   timeout = setTimeout(async () => {
-                    const timeoutError = new Error(`步骤 ${phase} 超时 ${formatTimeoutSeconds(timeoutMs)} 秒`);
+                    const timeoutError = new Error(
+                      `步骤 ${phase} 超时 ${formatTimeoutSeconds(timeoutMs)} 秒`
+                    );
                     timeoutError.stepTimeout = true;
-                    await store.write({
-                      ...base,
-                      ...(await readPageSnapshot(page)),
-                      status: "failed",
-                      phase,
-                      error: timeoutError.message,
-                      timeoutMs,
-                      durationMs: Date.now() - startedAt,
-                      phaseDurationMs: Date.now() - phaseStartedAt,
-                    }).catch(() => {});
+                    await store
+                      .write({
+                        ...base,
+                        ...(await readPageSnapshot(page)),
+                        status: "failed",
+                        phase,
+                        error: timeoutError.message,
+                        timeoutMs,
+                        durationMs: Date.now() - startedAt,
+                        phaseDurationMs: Date.now() - phaseStartedAt
+                      })
+                      .catch(() => {});
                     const timeoutTag = `${safeName(flow)}-step-${tag}-${phase}-timeout`;
-                    await saveDebugArtifacts(page, accountName, timeoutTag, debugOptions).catch(() => {});
+                    await saveDebugArtifacts(
+                      page,
+                      accountName,
+                      timeoutTag,
+                      debugOptions
+                    ).catch(() => {});
                     markStepDebugSaved(debugOptions, timeoutTag);
                     await closePageForTimeout(page);
                     reject(timeoutError);
                   }, timeoutMs);
                   timeout.unref?.();
-                }),
+                })
               ])
             : work;
         await guarded;
@@ -193,7 +233,12 @@ function createPublishStepRunner({
       if (typeof saveStepDebug === "function") {
         await saveStepDebug(page, accountName, tag, debugOptions);
       } else if (shouldSaveStepDebug(options)) {
-        await saveDebugArtifacts(page, accountName, `${safeName(flow)}-step-${tag}`, debugOptions).catch(() => {});
+        await saveDebugArtifacts(
+          page,
+          accountName,
+          `${safeName(flow)}-step-${tag}`,
+          debugOptions
+        ).catch(() => {});
       }
       await store.write({
         ...base,
@@ -201,23 +246,30 @@ function createPublishStepRunner({
         status: "passed",
         phase: "done",
         timeoutMs,
-        durationMs: Date.now() - startedAt,
+        durationMs: Date.now() - startedAt
       });
       done(index);
     } catch (error) {
       const message = error?.message || String(error);
-      await store.write({
-        ...base,
-        ...(await readPageSnapshot(page)),
-        status: "failed",
-        phase: "failed",
-        error: message,
-        timeoutMs,
-        durationMs: Date.now() - startedAt,
-      }).catch(() => {});
+      await store
+        .write({
+          ...base,
+          ...(await readPageSnapshot(page)),
+          status: "failed",
+          phase: "failed",
+          error: message,
+          timeoutMs,
+          durationMs: Date.now() - startedAt
+        })
+        .catch(() => {});
       if (!error?.stepTimeout) {
         const failedTag = `${safeName(flow)}-step-${tag}-failed`;
-        await saveDebugArtifacts(page, accountName, failedTag, debugOptions).catch(() => {});
+        await saveDebugArtifacts(
+          page,
+          accountName,
+          failedTag,
+          debugOptions
+        ).catch(() => {});
         markStepDebugSaved(debugOptions, failedTag);
       }
       const wrapped = new Error(`阶段 ${index}「${title}」失败：${message}`);
@@ -232,4 +284,5 @@ function createPublishStepRunner({
 module.exports = {
   createPublishStepRunner,
   shouldSaveStepDebug,
+  PUBLISH_SMS_VERIFICATION_STEP_TIMEOUT_MS
 };

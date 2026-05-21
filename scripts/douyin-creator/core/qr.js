@@ -794,7 +794,10 @@ async function hasVisibleQr(page) {
     "img[alt*='二维码']",
     "[class*='qrcode'] img",
     "[class*='qrcode'] canvas",
-    "canvas"
+    "[aria-label='二维码']",
+    "div:has-text('扫码登录') canvas",
+    "div:has-text('手机刷脸验证') canvas",
+    "[role='dialog'] canvas"
   ];
   for (const selector of qrSelectors) {
     const visible = await page

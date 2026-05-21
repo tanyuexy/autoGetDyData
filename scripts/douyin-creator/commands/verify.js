@@ -9,6 +9,7 @@ const fs = require("fs");
 const { chromium } = require("../../common/stealth-browser");
 const { getAccountPaths } = require("../core/accounts");
 const { BROWSER_VIEWPORT, TARGET_URL } = require("../core/env");
+const { isLoggedInAtTarget } = require("../core/browser-login");
 
 function normalize(name) {
   return String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_");
@@ -53,35 +54,15 @@ async function main() {
       await page.waitForTimeout(3000);
 
       const url = page.url() || "";
-      const inTargetPage = url.includes("/creator-micro/data-center/content");
       const isLoginPage = url.includes("login") || url.includes("passport");
+      const loggedIn = await isLoggedInAtTarget(page).catch(() => false);
 
       if (isLoginPage) {
         detail = "cookie 已失效 — 页面重定向到登录页";
-      } else if (inTargetPage) {
-        const hasPostListTab = await page
-          .locator("text=投稿列表")
-          .first()
-          .isVisible({ timeout: 2000 })
-          .catch(() => false);
-
-        if (hasPostListTab) {
-          verified = true;
-          status = "valid";
-          detail = "验证通过 — 检测到投稿列表";
-        } else {
-          const hasQr = await page
-            .locator("text=扫码登录")
-            .first()
-            .isVisible({ timeout: 1000 })
-            .catch(() => false);
-
-          if (hasQr) {
-            detail = "cookie 已失效 — 页面显示扫码登录";
-          } else {
-            detail = "验证不确定 — 在目标页面但未检测到投稿列表";
-          }
-        }
+      } else if (loggedIn) {
+        verified = true;
+        status = "valid";
+        detail = "验证通过 — 检测到创作者中心已登录";
       } else {
         detail = `验证不确定 — 当前 URL: ${url}`;
       }

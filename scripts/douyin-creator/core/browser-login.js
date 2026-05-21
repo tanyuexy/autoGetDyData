@@ -20,13 +20,48 @@ const {
 const { loginStageHintByAccount } = require("./state");
 
 async function isLoggedInAtTarget(page) {
-  const inTargetPage = page.url().includes("/creator-micro/data-center/content");
+  const url = page.url() || "";
+  if (!url.includes("creator.douyin.com")) return false;
+  if (url.includes("login") || url.includes("passport")) return false;
+
+  const hasLoginUi = await page
+    .locator("text=扫码登录")
+    .first()
+    .isVisible({ timeout: 400 })
+    .catch(() => false);
+  if (hasLoginUi || (await hasVisibleQr(page).catch(() => false))) {
+    return false;
+  }
+
+  const inTargetPage = url.includes("/creator-micro/data-center/content");
   const hasPostListTab = await page
     .locator("text=投稿列表")
     .first()
     .isVisible({ timeout: 1500 })
     .catch(() => false);
-  return inTargetPage && hasPostListTab;
+  if (inTargetPage && hasPostListTab) return true;
+
+  const inCreatorMicro = url.includes("/creator-micro/");
+  if (!inCreatorMicro) return false;
+
+  const loggedInShellSelectors = [
+    "text=发布视频",
+    "text=内容管理",
+    "text=数据中心",
+    "text=创作中心"
+  ];
+  for (const selector of loggedInShellSelectors) {
+    if (
+      await page
+        .locator(selector)
+        .first()
+        .isVisible({ timeout: 500 })
+        .catch(() => false)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function isVerificationUiVisible(page) {

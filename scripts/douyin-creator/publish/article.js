@@ -30,7 +30,8 @@ const {
 } = require("./runtime");
 const {
   createPublishStepRunner,
-  shouldSaveStepDebug
+  shouldSaveStepDebug,
+  PUBLISH_SMS_VERIFICATION_STEP_TIMEOUT_MS,
 } = require("./step-runner");
 const { selectCartAndLinkForArticle } = require("./product-link");
 
@@ -341,11 +342,18 @@ async function runPublishArticle(options) {
       });
 
       if (await isPublishSmsVerificationVisible(page, 1000)) {
-        await runStep(11, "处理短信验证码", "11-sms-verification", async () => {
-          await handlePublishSmsVerification(page, accountName);
-        }, async () => {
-          await checkPublishSmsVerificationCompleted(page);
-        });
+        await runStep(
+          11,
+          "处理短信验证码",
+          "11-sms-verification",
+          async () => {
+            await handlePublishSmsVerification(page, accountName);
+          },
+          async () => {
+            await checkPublishSmsVerificationCompleted(page);
+          },
+          { timeoutMs: PUBLISH_SMS_VERIFICATION_STEP_TIMEOUT_MS }
+        );
       } else {
         await runStep(11, "短信验证码（未出现）", "11-sms-verification-skipped", null, {
           skipped: true,

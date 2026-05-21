@@ -28,7 +28,8 @@ const {
 } = require("./runtime");
 const {
   createPublishStepRunner,
-  shouldSaveStepDebug
+  shouldSaveStepDebug,
+  PUBLISH_SMS_VERIFICATION_STEP_TIMEOUT_MS,
 } = require("./step-runner");
 const { selectCartAndLinkForVideo } = require("./product-link");
 
@@ -471,7 +472,8 @@ async function runPublishVideo(options) {
           },
           async () => {
             await checkPublishSmsVerificationCompleted(page);
-          }
+          },
+          { timeoutMs: PUBLISH_SMS_VERIFICATION_STEP_TIMEOUT_MS }
         );
       } else {
         await runStep(
