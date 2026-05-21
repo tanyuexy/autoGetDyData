@@ -71,8 +71,7 @@ const ROUTES = {
   "shop:verify": {
     script: "scripts/douyin-shop/verify.js",
     argv: []
-  },
-
+  }
 };
 
 function printHelp() {
@@ -91,7 +90,9 @@ async function loadProjectConfigJson() {
   try {
     await client.connect();
     const db = client.db(process.env.MONGODB_DB || "autoGetDyData");
-    const config = await db.collection("app_config").findOne({ _id: "default" });
+    const config = await db
+      .collection("app_config")
+      .findOne({ _id: "default" });
     return JSON.stringify(config || {});
   } finally {
     await client.close().catch(() => {});

@@ -15,11 +15,11 @@ const {
 const { postInternalApi } = require("../common/internal-api-client");
 const {
   classifyCreatorPublishFailure,
-  formatFailureForOperator,
+  formatFailureForOperator
 } = require("../douyin-creator/publish/failure-classifier");
 const {
   getPublishDebugTaskDir,
-  readLatestPublishStepStateFromTaskDir,
+  readLatestPublishStepStateFromTaskDir
 } = require("../douyin-creator/publish/debug");
 
 const projectRoot = path.resolve(__dirname, "../..");
@@ -29,7 +29,9 @@ const POLL_MS = Number(
     process.env.CREATOR_PUBLISH_WORKER_POLL_MS ||
     5000
 );
-const PUBLISH_TIMEOUT_MS = Number(process.env.CREATOR_PUBLISH_TIMEOUT_MS || 30 * 60 * 1000);
+const PUBLISH_TIMEOUT_MS = Number(
+  process.env.CREATOR_PUBLISH_TIMEOUT_MS || 30 * 60 * 1000
+);
 const DEFAULT_NAMESPACE_LIMITS = {
   "creator-export": 1,
   "creator-open": Number.POSITIVE_INFINITY,
@@ -37,7 +39,7 @@ const DEFAULT_NAMESPACE_LIMITS = {
   "creator-publish": 3,
   login: 1,
   system: 1,
-  feishu: 1,
+  feishu: 1
 };
 
 let mongoClient = null;
@@ -57,27 +59,36 @@ async function getDb() {
     mongoDb.collection("creator_publish_tasks").createIndexes([
       { key: { status: 1, updatedAt: -1 }, name: "status_updatedAt" },
       { key: { accountName: 1, status: 1 }, name: "account_status" },
-      { key: { taskId: 1 }, name: "taskId_sparse", sparse: true },
+      { key: { taskId: 1 }, name: "taskId_sparse", sparse: true }
     ]),
-    mongoDb.collection("runtime_processes").createIndex({ namespace: 1 }, { name: "namespace" }),
+    mongoDb
+      .collection("runtime_processes")
+      .createIndex({ namespace: 1 }, { name: "namespace" }),
     mongoDb.collection("task_jobs").createIndexes([
-      { key: { status: 1, namespace: 1, createdAt: 1 }, name: "status_namespace_createdAt" },
+      {
+        key: { status: 1, namespace: 1, createdAt: 1 },
+        name: "status_namespace_createdAt"
+      },
       { key: { taskId: 1 }, name: "taskId_unique", unique: true },
-      { key: { namespace: 1, status: 1 }, name: "namespace_status" },
+      { key: { namespace: 1, status: 1 }, name: "namespace_status" }
     ]),
     mongoDb.collection("shop_export_items").createIndexes([
       { key: { key: 1 }, name: "key_unique", unique: true },
       { key: { runId: 1, status: 1 }, name: "run_status" },
       { key: { shopName: 1, kind: 1, dataDate: 1 }, name: "shop_kind_date" },
-      { key: { updatedAt: -1 }, name: "updatedAt" },
-    ]),
+      { key: { updatedAt: -1 }, name: "updatedAt" }
+    ])
   ]);
   return mongoDb;
 }
 
 async function readQueuedJobs() {
   const db = await getDb();
-  return db.collection("task_jobs").find({ status: "queued" }).sort({ createdAt: 1 }).toArray();
+  return db
+    .collection("task_jobs")
+    .find({ status: "queued" })
+    .sort({ createdAt: 1 })
+    .toArray();
 }
 
 async function readRunningJobs() {
@@ -95,7 +106,7 @@ const TASK_TABLE_PATCH_KEYS = new Set([
   "lastError",
   "accountName",
   "payload",
-  "feishuRowNumber",
+  "feishuRowNumber"
 ]);
 
 function publishPatchTouchesDisplay(patch) {
@@ -112,20 +123,20 @@ function buildPatchUpdate(patch, updatedAt, options = {}) {
   }
   if (options.forCreatorPublish && publishPatchTouchesDisplay(patch)) {
     const u = $set.updatedAt;
-    $set.displayUpdatedAt = u instanceof Date ? u.toISOString() : new Date(u).toISOString();
+    $set.displayUpdatedAt =
+      u instanceof Date ? u.toISOString() : new Date(u).toISOString();
   }
   return {
     ...(Object.keys($set).length ? { $set } : {}),
-    ...(Object.keys($unset).length ? { $unset } : {}),
+    ...(Object.keys($unset).length ? { $unset } : {})
   };
 }
 
 async function patchJob(taskId, patch) {
   const db = await getDb();
-  await db.collection("task_jobs").updateOne(
-    { taskId },
-    buildPatchUpdate(patch, new Date())
-  );
+  await db
+    .collection("task_jobs")
+    .updateOne({ taskId }, buildPatchUpdate(patch, new Date()));
 }
 
 async function claimJob(job) {
@@ -137,9 +148,9 @@ async function claimJob(job) {
         status: "running",
         workerId: WORKER_ID,
         startedAt: new Date(),
-        updatedAt: new Date(),
+        updatedAt: new Date()
       },
-      $unset: { lastError: "" },
+      $unset: { lastError: "" }
     }
   );
   return result.modifiedCount === 1;
@@ -185,7 +196,7 @@ function getCreatorPublishAutomation(config) {
             .map((item) => Number(item))
             .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6)
         : [],
-      times: normalizeWeeklyTimes(automation.weekly?.times),
+      times: normalizeWeeklyTimes(automation.weekly?.times)
     },
     interval: {
       days: Array.isArray(automation.interval?.days)
@@ -196,8 +207,8 @@ function getCreatorPublishAutomation(config) {
       everyMinutes: Math.max(1, Number(automation.interval?.everyMinutes) || 0),
       anchorAt: automation.interval?.anchorAt
         ? String(automation.interval.anchorAt)
-        : null,
-    },
+        : null
+    }
   };
 }
 
@@ -213,15 +224,20 @@ function getDueAutomationSlot(automation, now) {
     return {
       slotKey: `creator-publish:auto:weekly:${slot}`,
       taskId: `creator-publish-auto-weekly-${slot}`,
-      reason: `weekly day=${day} time=${minute}`,
+      reason: `weekly day=${day} time=${minute}`
     };
   }
 
-  const everyMinutes = Math.max(1, Number(automation.interval.everyMinutes) || 0);
+  const everyMinutes = Math.max(
+    1,
+    Number(automation.interval.everyMinutes) || 0
+  );
   if (!everyMinutes) return null;
   const day = now.getDay();
   if (!automation.interval.days.includes(day)) return null;
-  const anchor = automation.interval.anchorAt ? new Date(automation.interval.anchorAt) : now;
+  const anchor = automation.interval.anchorAt
+    ? new Date(automation.interval.anchorAt)
+    : now;
   if (Number.isNaN(anchor.getTime())) return null;
   const elapsedMs = now.getTime() - anchor.getTime();
   if (elapsedMs < 0) return null;
@@ -241,7 +257,7 @@ function getDueAutomationSlot(automation, now) {
   return {
     slotKey: `creator-publish:auto:interval:${everyMinutes}:${slot}`,
     taskId: `creator-publish-auto-interval-${everyMinutes}m-${slot}`,
-    reason: `interval every=${everyMinutes}m slot=${slot}`,
+    reason: `interval every=${everyMinutes}m slot=${slot}`
   };
 }
 
@@ -254,8 +270,8 @@ async function tryClaimAutomationSlot(slotKey) {
       $setOnInsert: {
         _id: slotKey,
         createdAt: now,
-        workerId: WORKER_ID,
-      },
+        workerId: WORKER_ID
+      }
     },
     { upsert: true }
   );
@@ -263,11 +279,22 @@ async function tryClaimAutomationSlot(slotKey) {
 }
 
 async function enqueueCreatorPublishAutomationJob(taskId, reason) {
-  appendTaskLog(taskId, "info", `自动调度触发，准备从飞书导入并执行任务 (${reason})`);
-  const data = await postInternalApi("/api/creator/publish/import-from-feishu", {
-    autoStart: true,
-  });
-  appendTaskLog(taskId, "info", `已通过 Next API 启动飞书导入任务: ${data.taskId || "(unknown)"}`);
+  appendTaskLog(
+    taskId,
+    "info",
+    `自动调度触发，准备从飞书导入并执行任务 (${reason})`
+  );
+  const data = await postInternalApi(
+    "/api/creator/publish/import-from-feishu",
+    {
+      autoStart: true
+    }
+  );
+  appendTaskLog(
+    taskId,
+    "info",
+    `已通过 Next API 启动飞书导入任务: ${data.taskId || "(unknown)"}`
+  );
   appendTaskDone(taskId, 0, `Started API task ${data.taskId || ""}`.trim());
 }
 
@@ -282,7 +309,9 @@ async function processCreatorPublishAutomation() {
   if (!(await tryClaimAutomationSlot(due.slotKey))) return;
 
   await enqueueCreatorPublishAutomationJob(due.taskId, due.reason);
-  console.log(`[task-worker] creator-publish automation triggered: ${due.reason}`);
+  console.log(
+    `[task-worker] creator-publish automation triggered: ${due.reason}`
+  );
 }
 
 async function readQueuedTasks() {
@@ -296,7 +325,10 @@ async function readQueuedTasks() {
 
 async function readRunningTasks() {
   const db = await getDb();
-  return db.collection("creator_publish_tasks").find({ status: "running" }).toArray();
+  return db
+    .collection("creator_publish_tasks")
+    .find({ status: "running" })
+    .toArray();
 }
 
 async function readTask(id) {
@@ -306,10 +338,14 @@ async function readTask(id) {
 
 async function patchTask(id, patch) {
   const db = await getDb();
-  await db.collection("creator_publish_tasks").updateOne(
-    { id },
-    buildPatchUpdate(patch, new Date().toISOString(), { forCreatorPublish: true })
-  );
+  await db
+    .collection("creator_publish_tasks")
+    .updateOne(
+      { id },
+      buildPatchUpdate(patch, new Date().toISOString(), {
+        forCreatorPublish: true
+      })
+    );
 }
 
 async function claimTask(task, runtimeTaskId) {
@@ -323,7 +359,7 @@ async function claimTask(task, runtimeTaskId) {
         taskId: runtimeTaskId,
         workerId: WORKER_ID,
         updatedAt: now,
-        displayUpdatedAt: now,
+        displayUpdatedAt: now
       },
       $unset: {
         lastError: "",
@@ -335,8 +371,8 @@ async function claimTask(task, runtimeTaskId) {
         failedStepTitle: "",
         failedStepTag: "",
         failedStepPhase: "",
-        failedStepStatePath: "",
-      },
+        failedStepStatePath: ""
+      }
     }
   );
   return result.modifiedCount === 1;
@@ -345,11 +381,13 @@ async function claimTask(task, runtimeTaskId) {
 async function registerRuntimeProcess(record) {
   const updatedAt = Date.now();
   const db = await getDb();
-  await db.collection("runtime_processes").replaceOne(
-    { taskId: record.taskId },
-    { ...record, _id: record.taskId, updatedAt },
-    { upsert: true }
-  );
+  await db
+    .collection("runtime_processes")
+    .replaceOne(
+      { taskId: record.taskId },
+      { ...record, _id: record.taskId, updatedAt },
+      { upsert: true }
+    );
 }
 
 async function removeRuntimeProcess(taskId) {
@@ -359,13 +397,17 @@ async function removeRuntimeProcess(taskId) {
 
 /** 与各 namespace 并行上限对齐；creator-publish 同时考虑 Mongo 配置与 CREATOR_PUBLISH_MAX_CONCURRENT */
 function getWorkerNamespaceLimit(namespace, appConfig) {
-  const envKey = `JOB_MAX_${String(namespace || "system").toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`;
+  const envKey = `JOB_MAX_${String(namespace || "system")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")}`;
   const fromJobEnv = Number(process.env[envKey]);
-  if (Number.isFinite(fromJobEnv) && fromJobEnv > 0) return Math.floor(fromJobEnv);
+  if (Number.isFinite(fromJobEnv) && fromJobEnv > 0)
+    return Math.floor(fromJobEnv);
 
   if (namespace === "creator-publish") {
     const legacyEnv = Number(process.env.CREATOR_PUBLISH_MAX_CONCURRENT);
-    if (Number.isFinite(legacyEnv) && legacyEnv > 0) return Math.floor(legacyEnv);
+    if (Number.isFinite(legacyEnv) && legacyEnv > 0)
+      return Math.floor(legacyEnv);
 
     const raw = Number(appConfig?.creatorPublish?.publishMaxConcurrent);
     if (Number.isFinite(raw)) {
@@ -403,13 +445,15 @@ function classifyChildLogLine(line, fallbackLevel) {
     const tag = prefixed[1].toLowerCase();
     return {
       level: tag === "error" ? "error" : tag === "info" ? "info" : "warn",
-      text: prefixed[2],
+      text: prefixed[2]
     };
   }
 
   if (
     fallbackLevel === "error" &&
-    /(继续依赖导出文件日期校验|日期范围校验未通过|首屏存在范围外日期|未采集到投稿列表文本|^\[migration\])/.test(raw)
+    /(继续依赖导出文件日期校验|日期范围校验未通过|首屏存在范围外日期|未采集到投稿列表文本|^\[migration\])/.test(
+      raw
+    )
   ) {
     return { level: "warn", text: raw };
   }
@@ -450,12 +494,18 @@ function safeFileName(value) {
 function readCreatorPublishStepState(task) {
   if (!task?.id) return null;
   const taskDir = getPublishDebugTaskDir(task.accountName, { task: task.id });
-  return readLatestPublishStepStateFromTaskDir(taskDir, { accountName: task.accountName });
+  return readLatestPublishStepStateFromTaskDir(taskDir, {
+    accountName: task.accountName
+  });
 }
 
 function buildFailurePatch(task, errorText) {
   const stepState = readCreatorPublishStepState(task);
-  const classification = classifyCreatorPublishFailure(errorText, stepState, task);
+  const classification = classifyCreatorPublishFailure(
+    errorText,
+    stepState,
+    task
+  );
   const operatorText = formatFailureForOperator(errorText, classification);
   return {
     operatorText,
@@ -471,33 +521,50 @@ function buildFailurePatch(task, errorText) {
       failedStepTitle: classification.step?.title,
       failedStepTag: classification.step?.tag,
       failedStepPhase: classification.step?.phase,
-      failedStepStatePath: stepState?.filePath,
-    },
+      failedStepStatePath: stepState?.filePath
+    }
   };
 }
 
 async function buildRunArgs(task) {
-  const cmd = task.payload.type === "video" ? "creator:publish-video" : "creator:publish-article";
-  const args = [path.join(projectRoot, "scripts/run.js"), cmd, "--account", task.accountName, "--task", task.id];
+  const cmd =
+    task.payload.type === "video"
+      ? "creator:publish-video"
+      : "creator:publish-article";
+  const args = [
+    path.join(projectRoot, "scripts/run.js"),
+    cmd,
+    "--account",
+    task.accountName,
+    "--task",
+    task.id
+  ];
 
   if (task.payload.type === "video") {
     args.push("--videoKey", task.payload.videoFileKey);
   } else {
     args.push("--imageKeys", task.payload.imagesFileKeys.join(","));
-    if (task.payload.coverImageKey) args.push("--coverImageKey", task.payload.coverImageKey);
+    if (task.payload.coverImageKey)
+      args.push("--coverImageKey", task.payload.coverImageKey);
   }
 
-  if (task.payload.productLink) args.push("--productLink", task.payload.productLink);
+  if (task.payload.productLink)
+    args.push("--productLink", task.payload.productLink);
   if (task.payload.title) args.push("--title", task.payload.title);
   if (task.payload.description) args.push("--desc", task.payload.description);
-  if (task.payload.productTitle) args.push("--productTitle", task.payload.productTitle);
-  if (task.payload.approvalNumber) args.push("--approvalNumber", task.payload.approvalNumber);
+  if (task.payload.productTitle)
+    args.push("--productTitle", task.payload.productTitle);
+  if (task.payload.approvalNumber)
+    args.push("--approvalNumber", task.payload.approvalNumber);
   if (task.payload.isAiContent) args.push("--isAiContent");
-  if (task.payload.scheduleAt) args.push("--scheduleAt", task.payload.scheduleAt);
+  if (task.payload.scheduleAt)
+    args.push("--scheduleAt", task.payload.scheduleAt);
 
   const publishCfg = (await readConfig()).creatorPublish || {};
-  const publishEnabled = task.payload.publishEnabled ?? publishCfg.publishEnabled ?? true;
-  const publishWaitSec = task.payload.publishWaitSec ?? publishCfg.publishWaitSec ?? 3;
+  const publishEnabled =
+    task.payload.publishEnabled ?? publishCfg.publishEnabled ?? true;
+  const publishWaitSec =
+    task.payload.publishWaitSec ?? publishCfg.publishWaitSec ?? 3;
   args.push("--publishEnabled", String(publishEnabled));
   args.push("--publishWaitSec", String(publishWaitSec));
   return args;
@@ -508,7 +575,7 @@ async function markFeishuPublished(task, runtimeTaskId) {
   try {
     await postInternalApi("/api/feishu/task-writeback", {
       action: "published",
-      recordId: task.feishuRecordId,
+      recordId: task.feishuRecordId
     });
   } catch (error) {
     appendTaskLog(
@@ -520,7 +587,9 @@ async function markFeishuPublished(task, runtimeTaskId) {
 }
 
 function formatFeishuFailureStatus(errorText) {
-  const raw = String(errorText || "").replace(/\s+/g, " ").trim();
+  const raw = String(errorText || "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!raw) return "创建失败: 未知错误";
   return `创建失败: ${raw}`.slice(0, 200);
 }
@@ -539,7 +608,7 @@ function isScheduleToday(scheduleAt) {
     timeZone: "Asia/Shanghai",
     year: "numeric",
     month: "2-digit",
-    day: "2-digit",
+    day: "2-digit"
   });
   return fmt.format(new Date()) === fmt.format(new Date(scheduleAt));
 }
@@ -568,7 +637,7 @@ async function markFeishuFailed(task, errorText, runtimeTaskId) {
     await postInternalApi("/api/feishu/task-writeback", {
       recordId: task.feishuRecordId,
       statusText: formatFeishuFailureStatus(errorText),
-      approvalText: "异常待修改",
+      approvalText: "异常待修改"
     });
   } catch (error) {
     appendTaskLog(
@@ -585,27 +654,33 @@ async function startTask(task) {
   if (!claimed) return false;
 
   const args = await buildRunArgs(task);
-  let headless = String(process.env.HEADLESS === "true" || process.env.HEADLESS === "1");
+  let headless = String(
+    process.env.HEADLESS === "true" || process.env.HEADLESS === "1"
+  );
   try {
     const cfg = await readConfig();
     headless = String(cfg.headless === true);
-  } catch { }
+  } catch {}
   ensureTaskLogMeta(
     runtimeTaskId,
     {
       taskId: runtimeTaskId,
       namespace: "creator-publish",
       accountName: task.accountName,
-      target: task.id,
+      target: task.id
     },
     new Date().toISOString()
   );
-  appendTaskLog(runtimeTaskId, "info", `worker=${WORKER_ID} starting task=${task.id}`);
+  appendTaskLog(
+    runtimeTaskId,
+    "info",
+    `worker=${WORKER_ID} starting task=${task.id}`
+  );
   const child = spawn(process.execPath, args, {
     cwd: projectRoot,
     env: { ...process.env, HEADLESS: headless },
     stdio: ["ignore", "pipe", "pipe"],
-    detached: process.platform !== "win32",
+    detached: process.platform !== "win32"
   });
   children.set(runtimeTaskId, child);
 
@@ -620,7 +695,7 @@ async function startTask(task) {
       cwd: projectRoot,
       startedAt: Date.now(),
       timeoutMs: PUBLISH_TIMEOUT_MS,
-      interactive: false,
+      interactive: false
     });
   }
 
@@ -653,9 +728,14 @@ async function startTask(task) {
   });
 
   const timeout = setTimeout(() => {
-    appendTaskLog(runtimeTaskId, "error", `任务运行超过 ${Math.round(PUBLISH_TIMEOUT_MS / 1000)} 秒，自动终止`);
+    appendTaskLog(
+      runtimeTaskId,
+      "error",
+      `任务运行超过 ${Math.round(PUBLISH_TIMEOUT_MS / 1000)} 秒，自动终止`
+    );
     try {
-      if (child.pid && process.platform !== "win32") process.kill(-child.pid, "SIGTERM");
+      if (child.pid && process.platform !== "win32")
+        process.kill(-child.pid, "SIGTERM");
       else child.kill("SIGTERM");
     } catch {}
   }, PUBLISH_TIMEOUT_MS);
@@ -679,9 +759,15 @@ async function startTask(task) {
     const rawLastError = ok
       ? undefined
       : readLastTaskError(runtimeTaskId) || `退出码 ${code ?? -1}`;
-    const manualTerminated = wasCancelled || code === 143 || isManualTerminationText(rawLastError);
-    const normalizedLastError = ok ? undefined : normalizeTerminationMessage(rawLastError, code);
-    const failure = !ok && !manualTerminated ? buildFailurePatch(task, normalizedLastError) : null;
+    const manualTerminated =
+      wasCancelled || code === 143 || isManualTerminationText(rawLastError);
+    const normalizedLastError = ok
+      ? undefined
+      : normalizeTerminationMessage(rawLastError, code);
+    const failure =
+      !ok && !manualTerminated
+        ? buildFailurePatch(task, normalizedLastError)
+        : null;
     if (failure) {
       appendTaskLog(
         runtimeTaskId,
@@ -692,7 +778,9 @@ async function startTask(task) {
     appendTaskDone(
       runtimeTaskId,
       code ?? -1,
-      manualTerminated ? "管理员手动终止" : `Process exited with code ${code ?? -1}`
+      manualTerminated
+        ? "管理员手动终止"
+        : `Process exited with code ${code ?? -1}`
     );
     if (!wasCancelled) {
       await patchTask(task.id, {
@@ -708,24 +796,30 @@ async function startTask(task) {
               failedStepTitle: undefined,
               failedStepTag: undefined,
               failedStepPhase: undefined,
-              failedStepStatePath: undefined,
+              failedStepStatePath: undefined
             }
           : manualTerminated
             ? { lastError: normalizedLastError }
-            : failure.patch),
+            : failure.patch)
       });
     }
     await removeRuntimeProcess(runtimeTaskId);
     if (ok && !wasCancelled) await markFeishuPublished(task, runtimeTaskId);
-    if (!ok && !manualTerminated) await markFeishuFailed(task, failure.operatorText, runtimeTaskId);
+    if (!ok && !manualTerminated)
+      await markFeishuFailed(task, failure.operatorText, runtimeTaskId);
   });
 
   child.on("error", async (error) => {
     clearTimeout(timeout);
     children.delete(runtimeTaskId);
     const manualTerminated = isManualTerminationText(error.message);
-    const normalizedLastError = normalizeTerminationMessage(error.message, undefined);
-    const failure = !manualTerminated ? buildFailurePatch(task, normalizedLastError) : null;
+    const normalizedLastError = normalizeTerminationMessage(
+      error.message,
+      undefined
+    );
+    const failure = !manualTerminated
+      ? buildFailurePatch(task, normalizedLastError)
+      : null;
     appendTaskLog(
       runtimeTaskId,
       manualTerminated ? "warn" : "error",
@@ -738,12 +832,18 @@ async function startTask(task) {
         `[failure-classifier] category=${failure.classification.category} retryable=${failure.classification.retryable} step=${failure.classification.step?.index || "?"}/${failure.classification.step?.phase || "?"} reason=${failure.classification.reason}`
       );
     }
-    appendTaskDone(runtimeTaskId, -1, manualTerminated ? "管理员手动终止" : error.message);
+    appendTaskDone(
+      runtimeTaskId,
+      -1,
+      manualTerminated ? "管理员手动终止" : error.message
+    );
     const latest = await readTask(task.id);
     if (latest?.status !== "cancelled") {
       await patchTask(task.id, {
         status: manualTerminated ? "cancelled" : "failed",
-        ...(manualTerminated ? { lastError: normalizedLastError } : failure.patch),
+        ...(manualTerminated
+          ? { lastError: normalizedLastError }
+          : failure.patch)
       });
     }
     await removeRuntimeProcess(runtimeTaskId);
@@ -759,13 +859,17 @@ async function startJob(job) {
   const claimed = await claimJob(job);
   if (!claimed) return false;
 
-  appendTaskLog(job.taskId, "info", `worker=${WORKER_ID} starting job namespace=${job.namespace}`);
+  appendTaskLog(
+    job.taskId,
+    "info",
+    `worker=${WORKER_ID} starting job namespace=${job.namespace}`
+  );
   const command = job.command === "node" ? process.execPath : job.command;
   const child = spawn(command, Array.isArray(job.args) ? job.args : [], {
     cwd: job.cwd || projectRoot,
     env: { ...process.env, ...(job.env || {}) },
     stdio: ["ignore", "pipe", "pipe"],
-    detached: process.platform !== "win32",
+    detached: process.platform !== "win32"
   });
   children.set(job.taskId, child);
 
@@ -780,7 +884,7 @@ async function startJob(job) {
       cwd: job.cwd || projectRoot,
       startedAt: Date.now(),
       timeoutMs: job.timeoutMs,
-      interactive: job.interactive === true,
+      interactive: job.interactive === true
     });
   }
 
@@ -815,9 +919,14 @@ async function startJob(job) {
   let timeout = null;
   if (job.timeoutMs && job.timeoutMs > 0 && !job.interactive) {
     timeout = setTimeout(() => {
-      appendTaskLog(job.taskId, "error", `任务运行超过 ${Math.round(job.timeoutMs / 1000)} 秒，自动终止`);
+      appendTaskLog(
+        job.taskId,
+        "error",
+        `任务运行超过 ${Math.round(job.timeoutMs / 1000)} 秒，自动终止`
+      );
       try {
-        if (child.pid && process.platform !== "win32") process.kill(-child.pid, "SIGTERM");
+        if (child.pid && process.platform !== "win32")
+          process.kill(-child.pid, "SIGTERM");
         else child.kill("SIGTERM");
       } catch {}
     }, job.timeoutMs);
@@ -849,7 +958,7 @@ async function startJob(job) {
         status: ok ? "success" : "failed",
         finishedAt: new Date(),
         exitCode: code ?? -1,
-        lastError: ok ? undefined : `退出码 ${code ?? -1}`,
+        lastError: ok ? undefined : `退出码 ${code ?? -1}`
       });
     }
     await removeRuntimeProcess(job.taskId);
@@ -866,7 +975,7 @@ async function startJob(job) {
         status: "failed",
         finishedAt: new Date(),
         exitCode: -1,
-        lastError: error.message,
+        lastError: error.message
       });
     }
     await removeRuntimeProcess(job.taskId);
@@ -882,7 +991,9 @@ async function reconcileStaleRunningTasks() {
     if (task.workerId && task.workerId !== WORKER_ID && !task.pid) continue;
     await patchTask(task.id, {
       status: "failed",
-      lastError: task.pid ? "子进程异常退出（PID 已不存在）" : "Worker 重启后发现未绑定运行进程",
+      lastError: task.pid
+        ? "子进程异常退出（PID 已不存在）"
+        : "Worker 重启后发现未绑定运行进程"
     });
   }
 }
@@ -896,7 +1007,9 @@ async function reconcileStaleJobs() {
       status: "failed",
       finishedAt: new Date(),
       exitCode: -1,
-      lastError: job.pid ? "子进程异常退出（PID 已不存在）" : "Worker 重启后发现未绑定运行进程",
+      lastError: job.pid
+        ? "子进程异常退出（PID 已不存在）"
+        : "Worker 重启后发现未绑定运行进程"
     });
     await removeRuntimeProcess(job.taskId);
   }
@@ -930,8 +1043,12 @@ async function tick() {
 
   const running = await readRunningTasks();
   const runningJobs = await readRunningJobs();
-  const runningPublishJobs = runningJobs.filter((job) => job.namespace === "creator-publish").length;
-  const runningAccounts = new Set(running.map((task) => task.accountName).filter(Boolean));
+  const runningPublishJobs = runningJobs.filter(
+    (job) => job.namespace === "creator-publish"
+  ).length;
+  const runningAccounts = new Set(
+    running.map((task) => task.accountName).filter(Boolean)
+  );
   const publishCap = getWorkerNamespaceLimit("creator-publish", appConfig);
   let available = Math.max(0, publishCap - running.length - runningPublishJobs);
   if (available <= 0) return;
@@ -950,10 +1067,13 @@ async function tick() {
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`[task-worker] received ${signal}, stopping ${children.size} child process(es)...`);
+  console.log(
+    `[task-worker] received ${signal}, stopping ${children.size} child process(es)...`
+  );
   for (const child of children.values()) {
     try {
-      if (child.pid && process.platform !== "win32") process.kill(-child.pid, "SIGTERM");
+      if (child.pid && process.platform !== "win32")
+        process.kill(-child.pid, "SIGTERM");
       else child.kill("SIGTERM");
     } catch {}
   }

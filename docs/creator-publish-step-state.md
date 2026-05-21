@@ -48,6 +48,35 @@ storage/creator-publish-debug/<店铺名>/_manual/<runId>/
 
 发布按钮是否真实点击由 `publishEnabled` 控制。`publishEnabled=false` 时不会点击最终发布按钮，会输出发布跳过步骤。
 
+## 飞书导入与自动入队规则
+
+发布任务前端状态与本地 `creator_publish_tasks.status` 的对应关系：
+
+| 本地状态 | 前端文案 | 含义 |
+| --- | --- | --- |
+| `pending` | 待执行 | 已创建但尚未进入发布执行队列 |
+| `queued` | 队列中 | 等待后台 worker 拉起发布脚本 |
+| `running` | 执行中 | 发布脚本正在运行 |
+| `success` | 成功 | 发布脚本退出码为 0，若有飞书 record 会回写「已创建任务」= 是 |
+| `failed` | 失败 | 发布脚本异常结束 |
+| `cancelled` | 已取消 | 管理员手动终止或取消 |
+
+飞书任务导入入口支持两种模式：
+
+| 入口 | `autoStart` | 状态规则 |
+| --- | --- | --- |
+| 手动点击「从飞书导入任务」 | `false` | 新建任务为 `pending`；已有任务内容变化后重置为 `pending` |
+| 配置管理「自动调度」触发 | `true` | 新建任务为 `queued`；已有任务内容变化后更新为 `queued`；已有任务内容无变化但本地为 `pending` 或 `cancelled` 时，也更新为 `queued` |
+
+自动导入只处理满足飞书同步条件的记录：审批通过、非示例、已填所属店铺、已上传视频/图文内容，且店铺信息表未配置「是否需要自动化=否」。以下记录不会被自动入队：
+
+- 本地同一飞书 record 的任务正在 `running`。
+- 飞书「已创建任务」为「是」。
+- 本地不存在任务且飞书「已创建任务」既不是空也不是「否」。
+- 本地已有任务内容无变化，但状态不是 `pending` 或 `cancelled`，例如 `success`、`failed`、`queued`。
+
+自动导入把 `pending` 或 `cancelled` 任务重新入队时，会清理 `lastError`、`taskId`、`pid`、`workerId`。如果任务原本有 `scheduleAt`，入队后仍按该定时时间执行；只有前端「立即执行」操作会清空 `scheduleAt`。
+
 ## 视频挂车流程
 
 | 序号 | tag | 步骤 | action | verify |

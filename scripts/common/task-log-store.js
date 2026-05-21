@@ -20,11 +20,14 @@ const PREFIX_MAP = {
   "shop-login-": "shop-login",
   "shop-export-": "shop-export",
   "shop-": "shop-export",
-  "feishu-": "feishu",
+  "feishu-": "feishu"
 };
 
 function getTaskLogsDir() {
-  return path.resolve(process.cwd(), process.env.TASK_LOGS_DIR || DEFAULT_TASK_LOGS_DIR);
+  return path.resolve(
+    process.cwd(),
+    process.env.TASK_LOGS_DIR || DEFAULT_TASK_LOGS_DIR
+  );
 }
 
 function ensureDir(dir) {
@@ -32,7 +35,11 @@ function ensureDir(dir) {
 }
 
 function hashText(text) {
-  return crypto.createHash("sha1").update(String(text || "")).digest("hex").slice(0, 10);
+  return crypto
+    .createHash("sha1")
+    .update(String(text || ""))
+    .digest("hex")
+    .slice(0, 10);
 }
 
 function safeTaskFileName(taskId) {
@@ -67,13 +74,13 @@ function normalizeLogEntry(levelOrEntry, text) {
     return {
       level: normalizeLevel(levelOrEntry.level),
       text: String(levelOrEntry.text || ""),
-      timestamp: levelOrEntry.timestamp || new Date().toISOString(),
+      timestamp: levelOrEntry.timestamp || new Date().toISOString()
     };
   }
   return {
     level: normalizeLevel(levelOrEntry),
     text: String(text || ""),
-    timestamp: new Date().toISOString(),
+    timestamp: new Date().toISOString()
   };
 }
 
@@ -144,7 +151,7 @@ function appendTaskDone(taskId, code, summary) {
   appendTaskLog(taskId, {
     level: "info",
     text: `DONE code=${code ?? -1} summary=${summary || `Process exited with code ${code ?? -1}`}`,
-    timestamp: new Date().toISOString(),
+    timestamp: new Date().toISOString()
   });
 }
 
@@ -157,13 +164,13 @@ function parseLogLine(rawLine) {
     return {
       text: trimmed,
       level: "info",
-      timestamp: new Date().toISOString(),
+      timestamp: new Date().toISOString()
     };
   }
   return {
     text: match[3],
     level: normalizeLevel(match[2]),
-    timestamp: match[1],
+    timestamp: match[1]
   };
 }
 
@@ -172,7 +179,7 @@ function parseDone(content) {
   if (!match) return null;
   return {
     code: parseInt(match[1], 10),
-    summary: match[2] || "",
+    summary: match[2] || ""
   };
 }
 
@@ -194,7 +201,11 @@ function candidateDates(taskId) {
 
 function readTaskLogContent(taskId) {
   for (const date of candidateDates(taskId)) {
-    const exactPath = path.join(getTaskLogsDir(), date, `${String(taskId || "").trim()}.log`);
+    const exactPath = path.join(
+      getTaskLogsDir(),
+      date,
+      `${String(taskId || "").trim()}.log`
+    );
     try {
       const content = fs.readFileSync(exactPath, "utf-8");
       if (content.trim()) {
@@ -203,7 +214,7 @@ function readTaskLogContent(taskId) {
           content,
           date,
           filePath: exactPath,
-          meta: parseMetaLine(firstLine),
+          meta: parseMetaLine(firstLine)
         };
       }
     } catch {
@@ -221,7 +232,7 @@ function readTaskLogContent(taskId) {
           content,
           date,
           filePath,
-          meta: parseMetaLine(firstLine),
+          meta: parseMetaLine(firstLine)
         };
       }
     } catch {
@@ -242,14 +253,18 @@ function loadTaskLogEvents(taskId) {
   }
   const done = parseDone(row.content);
   if (done) {
-    events.push({ event: "done", data: JSON.stringify({ code: done.code, summary: done.summary }) });
+    events.push({
+      event: "done",
+      data: JSON.stringify({ code: done.code, summary: done.summary })
+    });
   }
   return events.length > 0 ? events : null;
 }
 
 function loadTaskSnapshot(taskId) {
   const events = loadTaskLogEvents(taskId);
-  if (!events) return { found: false, logs: [], done: false, exitCode: null, summary: "" };
+  if (!events)
+    return { found: false, logs: [], done: false, exitCode: null, summary: "" };
 
   const logs = [];
   let done = false;
@@ -337,7 +352,7 @@ function listRecentTaskLogs(limit = 20) {
         hasDone: Boolean(done),
         exitCode: done ? done.code : null,
         namespace: String(meta?.namespace || parseNamespace(taskId)),
-        mtime: stat.mtimeMs,
+        mtime: stat.mtimeMs
       };
       const key = `${date}:${realTaskId}`;
       const prev = resultsByKey.get(key);
@@ -387,5 +402,5 @@ module.exports = {
   loadTaskSnapshot,
   parseNamespace,
   readLastTaskError,
-  safeTaskFileName,
+  safeTaskFileName
 };

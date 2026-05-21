@@ -383,6 +383,10 @@ function summarizeEligibility(records, shopAutomationByName) {
   return stats;
 }
 
+function shouldQueueExistingTaskOnAutoStart(task) {
+  return task?.status === "pending" || task?.status === "cancelled";
+}
+
 async function syncPublishTasks(options = {}) {
   const {
     autoStart = false,
@@ -527,27 +531,74 @@ async function syncPublishTasks(options = {}) {
       const syncState = getExistingTaskSyncState(existingTask, snapshot, contentHash);
 
       if (syncState.action === "skip-unchanged") {
+        if (autoStart && shouldQueueExistingTaskOnAutoStart(existingTask)) {
+          const queuedAt = new Date().toISOString();
+          await db.collection("creator_publish_tasks").updateOne(
+            { id: existingTask.id },
+            {
+              $set: {
+                status: "queued",
+                updatedAt: queuedAt,
+                displayUpdatedAt: queuedAt,
+              },
+              $unset: {
+                lastError: "",
+                taskId: "",
+                pid: "",
+                workerId: "",
+              },
+            }
+          );
+          existingTasksByRecordId.set(record.record_id || "", {
+            ...existingTask,
+            status: "queued",
+            updatedAt: queuedAt,
+            displayUpdatedAt: queuedAt,
+          });
+          log(`  → 已有任务加入执行队列: ${label}（taskId=${existingTask.id}，原状态=${existingTask.status}）`);
+        }
         unchangedCount++;
         continue;
       }
 
       if (syncState.action === "backfill-hash-only") {
         const feishuRowNumber = rowNumberMap.get(record.record_id || "");
+        const shouldQueueExisting = autoStart && shouldQueueExistingTaskOnAutoStart(existingTask);
+        const originalStatus = existingTask.status;
+        const queuedAt = shouldQueueExisting ? new Date().toISOString() : "";
         await db.collection("creator_publish_tasks").updateOne(
           { id: existingTask.id },
           {
             $set: {
               feishuContentHash: contentHash,
+              ...(shouldQueueExisting
+                ? { status: "queued", updatedAt: queuedAt, displayUpdatedAt: queuedAt }
+                : {}),
               ...(feishuRowNumber ? { feishuRowNumber } : {}),
             },
-            ...(feishuRowNumber ? {} : { $unset: { feishuRowNumber: "" } }),
+            ...(feishuRowNumber && !shouldQueueExisting
+              ? {}
+              : {
+                  $unset: {
+                    ...(feishuRowNumber ? {} : { feishuRowNumber: "" }),
+                    ...(shouldQueueExisting
+                      ? { lastError: "", taskId: "", pid: "", workerId: "" }
+                      : {}),
+                  },
+                }),
           }
         );
         existingTasksByRecordId.set(record.record_id || "", {
           ...existingTask,
           feishuContentHash: contentHash,
           feishuRowNumber,
+          ...(shouldQueueExisting
+            ? { status: "queued", updatedAt: queuedAt, displayUpdatedAt: queuedAt }
+            : {}),
         });
+        if (shouldQueueExisting) {
+          log(`  → 已有任务加入执行队列: ${label}（taskId=${existingTask.id}，原状态=${originalStatus}）`);
+        }
         backfilledHashCount++;
         unchangedCount++;
         continue;
@@ -585,6 +636,7 @@ async function syncPublishTasks(options = {}) {
         const payload = buildTaskPayload(snapshot, downloaded);
         const nowIso = new Date().toISOString();
         const feishuRowNumber = rowNumberMap.get(record.record_id || "");
+        const nextStatus = autoStart ? "queued" : "pending";
 
         if (existingTask) {
           await db.collection("creator_publish_tasks").updateOne(
@@ -592,7 +644,7 @@ async function syncPublishTasks(options = {}) {
             {
               $set: {
                 accountName: snapshot.accountName,
-                status: "pending",
+                status: nextStatus,
                 payload,
                 feishuRecordId: record.record_id || "",
                 feishuContentHash: contentHash,
@@ -612,14 +664,18 @@ async function syncPublishTasks(options = {}) {
           existingTasksByRecordId.set(record.record_id || "", {
             ...existingTask,
             accountName: snapshot.accountName,
-            status: "pending",
+            status: nextStatus,
             payload,
             feishuContentHash: contentHash,
             feishuRowNumber,
             updatedAt: nowIso,
             displayUpdatedAt: nowIso,
           });
-          log(`    ✓ 已更新并重置为待执行: ${existingTask.id}`);
+          log(
+            autoStart
+              ? `    ✓ 已更新并加入执行队列: ${existingTask.id}`
+              : `    ✓ 已更新并重置为待执行: ${existingTask.id}`
+          );
           updatedCount++;
         } else {
           const task = {

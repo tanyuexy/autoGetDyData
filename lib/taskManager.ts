@@ -287,7 +287,7 @@ async function scheduleForceKill(
     for (const childPid of descendants.reverse()) killPid(childPid, "SIGKILL");
     killPid(pid, "SIGKILL");
     if (process.platform !== "win32") {
-      try { process.kill(-pid, "SIGKILL"); } catch {}
+      try { process.kill(-pid, "SIGKILL"); } catch { }
     }
   }, 5000).unref?.();
 }
