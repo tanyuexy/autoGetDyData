@@ -66,16 +66,17 @@ storage/creator-publish-debug/<店铺名>/_manual/<runId>/
 | 入口 | `autoStart` | 状态规则 |
 | --- | --- | --- |
 | 手动点击「从飞书导入任务」 | `false` | 新建任务为 `pending`；已有任务内容变化后重置为 `pending` |
-| 配置管理「自动调度」触发 | `true` | 新建任务为 `queued`；已有任务内容变化后更新为 `queued`；已有任务内容无变化但本地为 `pending` 或 `cancelled` 时，也更新为 `queued` |
+| 配置管理「自动调度」触发 | `true` | 新建任务为 `queued`；已有任务内容变化后更新为 `queued`；已有任务内容无变化但本地为 `pending`、`cancelled`，或可重试的 `failed` 时，也更新为 `queued` |
 
 自动导入只处理满足飞书同步条件的记录：审批通过、非示例、已填所属店铺、已上传视频/图文内容，且店铺信息表未配置「是否需要自动化=否」。以下记录不会被自动入队：
 
 - 本地同一飞书 record 的任务正在 `running`。
 - 飞书「已创建任务」为「是」。
 - 本地不存在任务且飞书「已创建任务」既不是空也不是「否」。
-- 本地已有任务内容无变化，但状态不是 `pending` 或 `cancelled`，例如 `success`、`failed`、`queued`。
+- 本地已有任务内容无变化，但状态不是 `pending`、`cancelled` 或可重试的 `failed`，例如 `success`、`queued`。
+- 本地已有任务为 `failed`，且失败原因包含「购物车限额/限购」或「定时时间不满足平台要求」。这两类失败需要修改商品/发布时间后再执行，定时调度不会原样反复重跑。
 
-自动导入把 `pending` 或 `cancelled` 任务重新入队时，会清理 `lastError`、`taskId`、`pid`、`workerId`。如果任务原本有 `scheduleAt`，入队后仍按该定时时间执行；只有前端「立即执行」操作会清空 `scheduleAt`。
+自动导入把 `pending`、`cancelled` 或可重试的 `failed` 任务重新入队时，会清理 `lastError`、`taskId`、`pid`、`workerId`。如果任务原本有 `scheduleAt`，入队后仍按该定时时间执行；只有前端「立即执行」操作会清空 `scheduleAt`。
 
 ## 视频挂车流程
 

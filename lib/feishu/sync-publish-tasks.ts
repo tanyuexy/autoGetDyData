@@ -396,8 +396,21 @@ function summarizeEligibility(records, shopAutomationByName) {
   return stats;
 }
 
+function isExcludedAutoRetryFailure(task) {
+  const text = [
+    task?.lastError,
+    task?.failureReason,
+    task?.failureCategory,
+    task?.failedStepTitle,
+    task?.failedStepTag,
+  ].filter(Boolean).join(" ");
+  return /购物车限额|购物车限购|定时时间不满足平台要求/.test(text);
+}
+
 function shouldQueueExistingTaskOnAutoStart(task) {
-  return task?.status === "pending" || task?.status === "cancelled";
+  if (task?.status === "pending" || task?.status === "cancelled") return true;
+  if (task?.status === "failed") return !isExcludedAutoRetryFailure(task);
+  return false;
 }
 
 /** 轻量预检：满足导入前置条件的飞书任务行数（不读 Mongo、不下载附件） */
