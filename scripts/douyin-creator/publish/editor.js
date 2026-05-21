@@ -8,6 +8,10 @@ function cleanHashtag(tag) {
   return String(tag || "").replace(/\s+/g, "").trim();
 }
 
+function normalizeTopicText(text) {
+  return cleanHashtag(String(text || "").replace(/^#/, ""));
+}
+
 function getHashtagLength(tag) {
   return Array.from(tag).length;
 }
@@ -109,10 +113,10 @@ async function getRecognizedTopicTexts(page) {
 }
 
 function topicTextMatches(actualText, expectedTopic) {
-  const actual = cleanHashtag(actualText.replace(/^#/, ""));
-  const expected = cleanHashtag(expectedTopic);
+  const actual = normalizeTopicText(actualText);
+  const expected = normalizeTopicText(expectedTopic);
   if (!actual || !expected) return false;
-  return actual.includes(expected) || expected.includes(actual);
+  return actual === expected;
 }
 
 async function waitForTopicRecognized(page, topic, timeout = 2500) {
@@ -252,5 +256,7 @@ async function fillTitleAndDescription(page, title, description) {
 module.exports = {
   fillTitleAndDescription,
   normalizeDescriptionForPublish,
+  normalizeTopicText,
   splitDescription,
+  topicTextMatches,
 };

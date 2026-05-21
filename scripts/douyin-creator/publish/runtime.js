@@ -17,6 +17,7 @@ const {
   otpLastAppliedByAccount,
   otpLastStatusLogAtByAccount
 } = require("../core/state");
+const { topicTextMatches } = require("./editor");
 
 // ---- 自动慢网识别 ----
 
@@ -762,14 +763,7 @@ async function checkHashtagsSet(page, expectedHashtags) {
   let matchedCount = 0;
   const unmatched = [];
   for (const expected of expectedHashtags) {
-    const clean = expected.replace(/\s+/g, "");
-    if (
-      topicTexts.some(
-        (t) =>
-          t.replace(/\s+/g, "").includes(clean) ||
-          clean.includes(t.replace(/\s+/g, ""))
-      )
-    ) {
+    if (topicTexts.some((t) => topicTextMatches(t, expected))) {
       matchedCount++;
     } else {
       unmatched.push(expected);
