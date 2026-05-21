@@ -1,6 +1,6 @@
-import fs from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
+import fse from "fs-extra";
 import {
   SHOP_KEY_COOKIE_PATTERNS,
   analyzeStorageState,
@@ -22,7 +22,7 @@ export async function GET() {
       if (envVal) return path.resolve(process.cwd(), envVal);
       const newPath = path.resolve(process.cwd(), "storage/shop-accounts");
       const oldPath = path.resolve(process.cwd(), "accounts-shop");
-      if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+      if (fse.existsSync(oldPath) && !fse.existsSync(newPath)) {
         return oldPath;
       }
       return newPath;

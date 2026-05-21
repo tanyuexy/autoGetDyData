@@ -1,7 +1,6 @@
-const fs = require("fs/promises");
 const path = require("path");
 const XLSX = require("xlsx");
-const { fileExists } = require("../../common/fs");
+const fse = require("fs-extra");
 const { clickIfVisible } = require("../core/browser-login");
 const { getCreatorExportDateStartSpec } = require("../core/env");
 
@@ -659,14 +658,14 @@ async function saveAuth(context, paths, accountName, options = {}) {
     throw new Error("浏览器上下文无 cookie，跳过保存登录态");
   }
   await context.storageState({ path: paths.storageStatePath });
-  await fs.writeFile(
+  await fse.writeFile(
     paths.cookiesPath,
     JSON.stringify(cookies, null, 2),
     "utf-8"
   );
   const verifiedDetail = options.verifiedDetail || "登录态已保存";
   try {
-    await fs.writeFile(
+    await fse.writeFile(
       path.join(paths.accountDir, "verified-at.json"),
       JSON.stringify(
         {
@@ -691,11 +690,11 @@ async function saveAuth(context, paths, accountName, options = {}) {
 
 async function cleanupOldExportFiles(dataDir, keepFileName) {
   try {
-    const names = await fs.readdir(dataDir);
+    const names = await fse.readdir(dataDir);
     for (const name of names) {
       if (name === keepFileName) continue;
       if (!name.toLowerCase().endsWith(".xlsx")) continue;
-      await fs.unlink(path.join(dataDir, name)).catch(() => {});
+      await fse.unlink(path.join(dataDir, name)).catch(() => {});
     }
   } catch {
     // ignore cleanup failure
@@ -740,14 +739,14 @@ async function exportPostListData(page, paths, accountName) {
   const savePath = path.join(paths.dataDir, latestFileName);
   await download.saveAs(tempPath);
 
-  if (!(await fileExists(tempPath))) {
+  if (!(await fse.pathExists(tempPath))) {
     console.log(`账号 [${accountName}] 提示：文件已触发下载，但未检测到落盘。`);
   }
 
   validateExportedPostListXlsx(tempPath, accountName, dateRange.start, dateRange.end);
-  await fs.rename(tempPath, savePath).catch(async () => {
-    await fs.unlink(savePath).catch(() => {});
-    await fs.rename(tempPath, savePath);
+  await fse.rename(tempPath, savePath).catch(async () => {
+    await fse.unlink(savePath).catch(() => {});
+    await fse.rename(tempPath, savePath);
   });
   await cleanupOldExportFiles(paths.dataDir, latestFileName);
 

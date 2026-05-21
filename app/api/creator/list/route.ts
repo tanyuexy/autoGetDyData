@@ -1,6 +1,6 @@
-import fs from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
+import fse from "fs-extra";
 import {
   CREATOR_KEY_COOKIE_PATTERNS,
   analyzeStorageState,
@@ -19,7 +19,7 @@ export async function GET() {
       if (envVal) return path.resolve(process.cwd(), envVal);
       const newPath = path.resolve(process.cwd(), "storage/creator-accounts");
       const oldPath = path.resolve(process.cwd(), "accounts");
-      if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+      if (fse.existsSync(oldPath) && !fse.existsSync(newPath)) {
         return oldPath;
       }
       return newPath;
@@ -44,11 +44,11 @@ export async function GET() {
         const { cookieStatus, cookieDetail } = mergeVerificationIntoAnalysis(analysis, lastVerified);
 
         try {
-          fs.accessSync(cookiesPath);
+          fse.accessSync(cookiesPath);
           hasCookies = true;
         } catch {}
         try {
-          const raw = fs.readFileSync(exportCfgPath, "utf-8");
+          const raw = fse.readFileSync(exportCfgPath, "utf-8");
           const cfg = JSON.parse(raw) as { creatorExportDateStart?: string };
           if (cfg?.creatorExportDateStart) {
             hasExportDate = true;

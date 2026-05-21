@@ -1,6 +1,5 @@
-const fs = require("fs/promises");
 const path = require("path");
-const { ensureDir, fileExists } = require("../../common/fs");
+const fse = require("fs-extra");
 const { BROWSER_VIEWPORT } = require("./env");
 
 const qrDataUrlStateByPage = new WeakMap();
@@ -73,7 +72,7 @@ async function saveDataUrlPng(dataUrl, savePath, options = {}) {
       if (ratioDiff > maxAspectDiff) return false;
     }
   }
-  await fs.writeFile(savePath, buf);
+  await fse.writeFile(savePath, buf);
   return true;
 }
 
@@ -97,7 +96,7 @@ async function saveImageBuffer(image, savePath, options = {}) {
     }
   }
 
-  await fs.writeFile(savePath, buffer);
+  await fse.writeFile(savePath, buffer);
   return true;
 }
 
@@ -678,7 +677,7 @@ async function captureVerifyDialogScreenshot(page, paths, accountName, suffix) {
   if (dialogVisible) {
     await dialog.screenshot({ path: screenshotPath }).catch(() => {});
   }
-  if (!(await fileExists(screenshotPath))) {
+  if (!(await fse.pathExists(screenshotPath))) {
     await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
   }
   console.log(`账号 [${accountName}] 已保存验证截图: ${screenshotPath}`);
@@ -686,7 +685,7 @@ async function captureVerifyDialogScreenshot(page, paths, accountName, suffix) {
 }
 
 async function captureFaceQrScreenshot(page, paths, accountName) {
-  await ensureDir(paths.alertDir);
+  await fse.ensureDir(paths.alertDir);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const screenshotPath = path.join(
     paths.alertDir,
@@ -732,12 +731,12 @@ async function captureFaceQrScreenshot(page, paths, accountName) {
     const viewport = page.viewportSize() || BROWSER_VIEWPORT;
     const clip = clipAroundBox(box, viewport, 14);
     await page.screenshot({ path: screenshotPath, clip }).catch(() => {});
-    if (await fileExists(screenshotPath)) {
+    if (await fse.pathExists(screenshotPath)) {
       return true;
     }
 
     await locator.screenshot({ path: screenshotPath }).catch(() => {});
-    return fileExists(screenshotPath);
+    return fse.pathExists(screenshotPath);
   };
 
   const qrSelectors = [
@@ -777,7 +776,7 @@ async function captureFaceQrScreenshot(page, paths, accountName) {
     .catch(() => false);
   if (dialogVisible) {
     await faceDialog.screenshot({ path: screenshotPath }).catch(() => {});
-    if (await fileExists(screenshotPath)) {
+    if (await fse.pathExists(screenshotPath)) {
       console.log(
         `账号 [${accountName}] 已保存刷脸验证弹窗截图: ${screenshotPath}`
       );
@@ -813,7 +812,7 @@ async function hasVisibleQr(page) {
 }
 
 async function captureLoginQrScreenshot(page, paths, accountName) {
-  await ensureDir(paths.alertDir);
+  await fse.ensureDir(paths.alertDir);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const screenshotPath = path.join(paths.alertDir, `${timestamp}-login-qr.png`);
 
@@ -937,11 +936,11 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
 
     const clip = clipAroundBox(box, viewport, 70);
     await page.screenshot({ path: screenshotPath, clip }).catch(() => {});
-    if (await fileExists(screenshotPath)) {
+    if (await fse.pathExists(screenshotPath)) {
       return true;
     }
     await locator.screenshot({ path: screenshotPath }).catch(() => {});
-    return fileExists(screenshotPath);
+    return fse.pathExists(screenshotPath);
   };
 
   const qrSelectors = [
@@ -974,7 +973,7 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
     .catch(() => false);
   if (loginTitleVisible) {
     await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
-    if (await fileExists(screenshotPath)) {
+    if (await fse.pathExists(screenshotPath)) {
       console.log(
         `账号 [${accountName}] 已保存扫码登录全屏截图: ${screenshotPath}`
       );

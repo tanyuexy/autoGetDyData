@@ -10,7 +10,7 @@
 const path = require("path");
 const crypto = require("crypto");
 const { chromium } = require("../../common/stealth-browser");
-const { ensureDir } = require("../../common/fs");
+const fse = require("fs-extra");
 const { getAccountPaths } = require("../core/accounts");
 const { BROWSER_VIEWPORT, HEADLESS } = require("../core/env");
 const { openTargetAndEnsureLogin } = require("../core/browser-login");
@@ -372,8 +372,8 @@ async function fetchAllItemsFromPage(page, dateRange) {
 
 async function scrapeReviewForAccount(browser, accountName) {
   const paths = getAccountPaths(accountName);
-  await ensureDir(paths.accountDir);
-  await ensureDir(paths.dataDir);
+  await fse.ensureDir(paths.accountDir);
+  await fse.ensureDir(paths.dataDir);
 
   const context = await browser.newContext({
     viewport: BROWSER_VIEWPORT,

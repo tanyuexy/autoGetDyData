@@ -1,7 +1,7 @@
 import crypto from "crypto";
-import fs from "fs";
 import path from "path";
 import { NextRequest, NextResponse } from "next/server";
+import fse from "fs-extra";
 
 const MATERIALS_DIR = path.resolve(
   process.env.CREATOR_MATERIALS_DIR ||
@@ -9,7 +9,7 @@ const MATERIALS_DIR = path.resolve(
 );
 
 function ensureDir(p: string) {
-  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+  fse.ensureDirSync(p);
 }
 
 function safeName(name: string) {
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     const absPath = path.join(MATERIALS_DIR, fileKey);
 
     const buf = Buffer.from(await file.arrayBuffer());
-    fs.writeFileSync(absPath, buf);
+    fse.writeFileSync(absPath, buf);
 
     return NextResponse.json({ ok: true, fileKey, originalName, size: buf.length });
   } catch (e: any) {

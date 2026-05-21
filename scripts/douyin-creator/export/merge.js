@@ -1,15 +1,13 @@
-const fs = require("fs/promises");
-const { existsSync } = require("fs");
 const path = require("path");
 const XLSX = require("xlsx");
-const { ensureDir } = require("../../common/fs");
+const fse = require("fs-extra");
 
 const OUTPUT_DIR = (() => {
   const envVal = process.env.EXPORTS_DIR;
   if (envVal) return path.resolve(process.cwd(), envVal);
   const newPath = path.resolve(process.cwd(), "storage/exports");
   const oldPath = path.resolve(process.cwd(), "data");
-  if (existsSync(oldPath) && !existsSync(newPath)) {
+  if (fse.existsSync(oldPath) && !fse.existsSync(newPath)) {
     console.warn("[migration] 正在使用旧目录 \"data/\"，建议移动到 \"storage/exports/\" 或设置 EXPORTS_DIR");
     return oldPath;
   }
@@ -156,19 +154,19 @@ async function mergeExportFiles(accountResults, options = {}) {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, OUTPUT_SHEET_NAME);
 
-  await ensureDir(OUTPUT_DIR);
+  await fse.ensureDir(OUTPUT_DIR);
   const outputFileName = isPartial
     ? `部分-${makeTimestampForFileName()}-${PARTIAL_OUTPUT_FILE_SUFFIX}`
     : OUTPUT_FILE_NAME;
   const outputPath = path.join(OUTPUT_DIR, outputFileName);
 
   try {
-    const names = await fs.readdir(OUTPUT_DIR);
+    const names = await fse.readdir(OUTPUT_DIR);
     const suffix = "-全部店铺-作品列表.xlsx";
     for (const name of names) {
       if (name === outputFileName) continue;
       if (!isPartial && name.endsWith(suffix)) {
-        await fs.unlink(path.join(OUTPUT_DIR, name)).catch(() => {});
+        await fse.unlink(path.join(OUTPUT_DIR, name)).catch(() => {});
       }
     }
   } catch {

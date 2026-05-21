@@ -1,4 +1,6 @@
 // @ts-nocheck
+const fse = require("fs-extra");
+const path = require("path");
 async function createBitableRecord(config, accessToken, fields) {
   if (!config.bitableAppToken) {
     throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
@@ -399,8 +401,6 @@ async function updateBitableRecord(config, accessToken, recordId, fields, tableI
   return parsed.data || parsed;
 }
 
-const fs = require("fs");
-const path = require("path");
 
 async function downloadAttachment(config, accessToken, fileToken, saveDir, fileName) {
   if (!fileToken) throw new Error("缺少 fileToken");
@@ -436,13 +436,13 @@ async function downloadAttachment(config, accessToken, fileToken, saveDir, fileN
   }
   if (!finalName) finalName = fileToken;
 
-  if (saveDir && !fs.existsSync(saveDir)) {
-    fs.mkdirSync(saveDir, { recursive: true });
+  if (saveDir && !fse.existsSync(saveDir)) {
+    fse.ensureDirSync(saveDir);
   }
 
   const savePath = saveDir ? path.join(saveDir, finalName) : finalName;
   const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(savePath, buffer);
+  fse.writeFileSync(savePath, buffer);
 
   return { filePath: savePath, fileName: finalName, size: buffer.length };
 }

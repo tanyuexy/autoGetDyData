@@ -1039,7 +1039,7 @@ export default function CreatorPublishPage() {
             mouseEnterDelay={0.15}
             styles={{
               root: { maxWidth: 480 },
-              body: {
+              container: {
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
                 overflowWrap: "anywhere",

@@ -1,6 +1,6 @@
 require("dotenv").config();
 
-const fs = require("fs/promises");
+const fse = require("fs-extra");
 const { chromium } = require("../common/stealth-browser");
 
 const { BROWSER_VIEWPORT, HEADLESS, getDefaultAccounts } = require("./lib/env");
@@ -304,8 +304,8 @@ async function runOne(browser, account, options = {}) {
 
 async function resetAccountDataDir(account) {
   const paths = getAccountPaths(account?.email || "");
-  await fs.rm(paths.dataDir, { recursive: true, force: true });
-  await fs.mkdir(paths.dataDir, { recursive: true });
+  await fse.rm(paths.dataDir, { recursive: true, force: true });
+  await fse.ensureDir(paths.dataDir);
   console.log(`[${account.email}] 已清空历史导出目录: ${paths.dataDir}`);
 }
 

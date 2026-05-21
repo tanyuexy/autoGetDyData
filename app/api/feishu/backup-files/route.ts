@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import fs from "fs";
 import path from "path";
+import fse from "fs-extra";
 
 export const maxDuration = 0;
 
@@ -17,8 +17,8 @@ export async function GET() {
       (key) => {
         const filename = FILES[key];
         const fullPath = path.join(EXPORTS_DIR, filename);
-        const exists = fs.existsSync(fullPath);
-        const stat = exists ? fs.statSync(fullPath) : null;
+        const exists = fse.existsSync(fullPath);
+        const stat = exists ? fse.statSync(fullPath) : null;
         return {
           key,
           filename,

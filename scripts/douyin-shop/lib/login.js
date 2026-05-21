@@ -1,5 +1,5 @@
 const path = require("path");
-const fs = require("fs/promises");
+const fse = require("fs-extra");
 
 const {
   SHOP_LOGIN_URL,
@@ -201,9 +201,9 @@ function getAccountPaths(email) {
 }
 
 async function ensureAccountPaths(paths) {
-  await fs.mkdir(paths.accountDir, { recursive: true });
-  await fs.mkdir(paths.debugDir, { recursive: true });
-  await fs.mkdir(paths.dataDir, { recursive: true });
+  await fse.ensureDir(paths.accountDir);
+  await fse.ensureDir(paths.debugDir);
+  await fse.ensureDir(paths.dataDir);
 }
 
 /**
@@ -500,9 +500,9 @@ async function saveStorageState(context, paths) {
   await context.storageState({ path: paths.storageStatePath });
   try {
     const state = JSON.parse(
-      await fs.readFile(paths.storageStatePath, "utf-8")
+      await fse.readFile(paths.storageStatePath, "utf-8")
     );
-    await fs.writeFile(
+    await fse.writeFile(
       paths.cookiesPath,
       JSON.stringify(state.cookies || [], null, 2),
       "utf-8"
@@ -513,8 +513,7 @@ async function saveStorageState(context, paths) {
   // 登录成功后写入浏览器验证快照，使 /api/shop/list 的静态分析能合并到此结果
   try {
     const vp = path.join(paths.accountDir, "verified-at.json");
-    const fsSync = require("fs");
-    fsSync.writeFileSync(
+        fse.writeFileSync(
       vp,
       JSON.stringify({
         time: Date.now(),

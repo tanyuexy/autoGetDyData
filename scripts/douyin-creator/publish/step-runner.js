@@ -1,6 +1,5 @@
 const path = require("path");
-const fs = require("fs/promises");
-const { ensureDir } = require("../../common/fs");
+const fse = require("fs-extra");
 const {
   createPublishDebugRunId,
   formatPublishDebugTimestamp,
@@ -55,8 +54,8 @@ function createStepStateStore({ accountName, flow, taskId }) {
   const historyPath = path.join(sessionDir, `${safeName(flow)}-steps.jsonl`);
 
   async function write(record) {
-    await ensureDir(taskDir);
-    await ensureDir(sessionDir);
+    await fse.ensureDir(taskDir);
+    await fse.ensureDir(sessionDir);
     const payload = {
       runId,
       flow,
@@ -67,8 +66,8 @@ function createStepStateStore({ accountName, flow, taskId }) {
     const line = `${JSON.stringify(payload)}\n`;
     const serialized = JSON.stringify(payload, null, 2);
     const writes = [
-      fs.writeFile(sessionStatePath, serialized, "utf8"),
-      fs.appendFile(historyPath, line, "utf8")
+      fse.writeFile(sessionStatePath, serialized, "utf8"),
+      fse.appendFile(historyPath, line, "utf8")
     ];
     await Promise.all(writes);
     const consolePayload = payloadForConsole(payload);

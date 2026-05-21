@@ -1,6 +1,5 @@
-const fs = require("fs/promises");
 const path = require("path");
-const { ensureDir, fileExists } = require("../../common/fs");
+const fse = require("fs-extra");
 const { ACCOUNTS_DIR } = require("./env");
 
 const ANALYSIS_MAX_AGE_DAYS = 14;
@@ -30,8 +29,8 @@ function getAccountPaths(accountName) {
 }
 
 async function listAccountDirs() {
-  await ensureDir(ACCOUNTS_DIR);
-  const entries = await fs.readdir(ACCOUNTS_DIR, { withFileTypes: true });
+  await fse.ensureDir(ACCOUNTS_DIR);
+  const entries = await fse.readdir(ACCOUNTS_DIR, { withFileTypes: true });
   return entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
@@ -116,7 +115,7 @@ async function splitAccountsByStorageState(accounts) {
   const withoutAuth = [];
   for (const accountName of accounts) {
     const paths = getAccountPaths(accountName);
-    const hasStorage = await fileExists(paths.storageStatePath);
+    const hasStorage = await fse.pathExists(paths.storageStatePath);
     if (hasStorage) {
       withAuth.push(accountName);
     } else {

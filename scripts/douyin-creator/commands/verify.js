@@ -1,3 +1,4 @@
+const fse = require("fs-extra");
 /**
  * 抖创 cookie 验证脚本（供 worker 调用）
  * 用法: node scripts/douyin-creator/commands/verify.js <accountName>
@@ -5,7 +6,6 @@
  */
 
 const path = require("path");
-const fs = require("fs");
 const { chromium } = require("../../common/stealth-browser");
 const { getAccountPaths } = require("../core/accounts");
 const { BROWSER_VIEWPORT, TARGET_URL } = require("../core/env");
@@ -28,7 +28,7 @@ async function main() {
 
   const paths = getAccountPaths(accountName);
 
-  if (!fs.existsSync(paths.storageStatePath)) {
+  if (!fse.existsSync(paths.storageStatePath)) {
     output({ accountName, verified: false, status: "missing", detail: "未找到 storageState.json 文件" });
     process.exit(0);
   }
@@ -74,7 +74,7 @@ async function main() {
 
     try {
       const vp = path.join(paths.accountDir, "verified-at.json");
-      fs.writeFileSync(
+      fse.writeFileSync(
         vp,
         JSON.stringify({ time: Date.now(), detail, verified, status }),
         "utf-8"

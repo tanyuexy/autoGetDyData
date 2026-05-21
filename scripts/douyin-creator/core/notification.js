@@ -1,6 +1,6 @@
-const fs = require("fs");
 const crypto = require("crypto");
 const path = require("path");
+const fse = require("fs-extra");
 const nodemailer = require("nodemailer");
 const { ImapFlow } = require("imapflow");
 const { simpleParser } = require("mailparser");
@@ -116,7 +116,7 @@ async function sendWeComText(content, overrides = {}) {
 
 async function sendWeComImageFromFile(filePath, overrides = {}) {
   if (!filePath) return false;
-  const buffer = await fs.promises.readFile(filePath);
+  const buffer = await fse.readFile(filePath);
   return postWeComMessage(
     {
       msgtype: "image",

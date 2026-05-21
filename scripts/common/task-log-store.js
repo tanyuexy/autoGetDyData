@@ -1,4 +1,4 @@
-const fs = require("fs");
+const fse = require("fs-extra");
 const path = require("path");
 const crypto = require("crypto");
 
@@ -31,7 +31,7 @@ function getTaskLogsDir() {
 }
 
 function ensureDir(dir) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fse.ensureDirSync(dir);
 }
 
 function hashText(text) {
@@ -119,14 +119,14 @@ function ensureTaskLogMeta(taskId, meta, timestamp = new Date().toISOString()) {
     ensureDir(path.dirname(filePath));
     let current = "";
     try {
-      current = fs.readFileSync(filePath, "utf-8");
+      current = fse.readFileSync(filePath, "utf-8");
     } catch {
       // Create the file below.
     }
     const firstLine = current.split("\n", 1)[0] || "";
     if (parseMetaLine(firstLine)) return;
     const nextContent = formatMetaLine(taskId, meta) + current;
-    fs.writeFileSync(filePath, nextContent, "utf-8");
+    fse.writeFileSync(filePath, nextContent, "utf-8");
   } catch {
     // Log metadata persistence must not break task execution.
   }
@@ -137,7 +137,7 @@ function appendTaskLog(taskId, levelOrEntry, text) {
     const entry = normalizeLogEntry(levelOrEntry, text);
     const filePath = getTaskLogPath(taskId, entry.timestamp.slice(0, 10));
     ensureDir(path.dirname(filePath));
-    fs.appendFileSync(
+    fse.appendFileSync(
       filePath,
       `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.text}\n`,
       "utf-8"
@@ -207,7 +207,7 @@ function readTaskLogContent(taskId) {
       `${String(taskId || "").trim()}.log`
     );
     try {
-      const content = fs.readFileSync(exactPath, "utf-8");
+      const content = fse.readFileSync(exactPath, "utf-8");
       if (content.trim()) {
         const firstLine = content.split("\n", 1)[0] || "";
         return {
@@ -225,7 +225,7 @@ function readTaskLogContent(taskId) {
   for (const date of candidateDates(taskId)) {
     const filePath = getTaskLogPath(taskId, date);
     try {
-      const content = fs.readFileSync(filePath, "utf-8");
+      const content = fse.readFileSync(filePath, "utf-8");
       if (content.trim()) {
         const firstLine = content.split("\n", 1)[0] || "";
         return {
@@ -317,7 +317,7 @@ function listRecentTaskLogs(limit = 20) {
     const dir = path.join(getTaskLogsDir(), date);
     let entries;
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = fse.readdirSync(dir, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -329,8 +329,8 @@ function listRecentTaskLogs(limit = 20) {
       let stat;
       let content;
       try {
-        stat = fs.statSync(filePath);
-        content = fs.readFileSync(filePath, "utf-8");
+        stat = fse.statSync(filePath);
+        content = fse.readFileSync(filePath, "utf-8");
       } catch {
         continue;
       }

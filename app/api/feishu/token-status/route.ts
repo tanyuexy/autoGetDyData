@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
+import fse from "fs-extra";
 
 export async function GET() {
   try {
-    const fs = require("fs");
     const { getFeishuTokenCachePath } = require("@/lib/feishu/core/config");
 
     const cachePath = getFeishuTokenCachePath();
@@ -12,7 +12,7 @@ export async function GET() {
     let expiresAt: string | null = null;
 
     try {
-      const raw = fs.readFileSync(cachePath, "utf-8");
+      const raw = fse.readFileSync(cachePath, "utf-8");
       const data = JSON.parse(raw);
       if (data && data.accessToken) {
         hasToken = true;

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { enqueueTask, generateTaskIdWithTime } from "@/lib/taskManager";
 import { getDb } from "@/lib/db/mongo";
+import fse from "fs-extra";
 
 async function waitForTaskDone(taskId: string, timeoutMs: number) {
   const db = await getDb();
@@ -24,21 +25,20 @@ export async function POST(request: Request) {
     }
 
     const path = require("path");
-    const fs = require("fs");
 
     const ACCOUNTS_DIR = (() => {
       const envVal = process.env.CREATOR_ACCOUNTS_DIR;
       if (envVal) return path.resolve(process.cwd(), envVal);
       const newPath = path.resolve(process.cwd(), "storage/creator-accounts");
       const oldPath = path.resolve(process.cwd(), "accounts");
-      if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) return oldPath;
+      if (fse.existsSync(oldPath) && !fse.existsSync(newPath)) return oldPath;
       return newPath;
     })();
 
     const normalized = String(accountName).trim().replace(/[\\/:*?"<>|]/g, "_");
     const storagePath = path.join(ACCOUNTS_DIR, normalized, "storageState.json");
 
-    if (!fs.existsSync(storagePath)) {
+    if (!fse.existsSync(storagePath)) {
       return NextResponse.json({
         accountName,
         verified: false,
@@ -56,8 +56,8 @@ export async function POST(request: Request) {
     await waitForTaskDone(taskId, 2 * 60 * 1000);
 
     const vp = path.join(ACCOUNTS_DIR, normalized, "verified-at.json");
-    if (fs.existsSync(vp)) {
-      const result = JSON.parse(fs.readFileSync(vp, "utf-8"));
+    if (fse.existsSync(vp)) {
+      const result = JSON.parse(fse.readFileSync(vp, "utf-8"));
       return NextResponse.json({ accountName, ...result });
     }
 

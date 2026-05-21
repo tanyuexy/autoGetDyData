@@ -1,6 +1,5 @@
 const path = require("path");
-const fs = require("fs");
-const { ensureDir } = require("../../common/fs");
+const fse = require("fs-extra");
 
 const PUBLISH_DEBUG_DIR = path.resolve(
   process.env.CREATOR_PUBLISH_DEBUG_DIR ||
@@ -83,16 +82,16 @@ function isPublishDebugRunId(name) {
 
 /** 任务目录下最近一次运行的 publish-step-state.json（按 runId 字典序取最新） */
 function readLatestPublishStepStateFromTaskDir(taskDir, { accountName } = {}) {
-  if (!taskDir || !fs.existsSync(taskDir)) return null;
+  if (!taskDir || !fse.existsSync(taskDir)) return null;
 
   let latestRunId = "";
   let latestStatePath = "";
 
-  for (const name of fs.readdirSync(taskDir)) {
+  for (const name of fse.readdirSync(taskDir)) {
     if (!isPublishDebugRunId(name) || name <= latestRunId) continue;
     const statePath = path.join(taskDir, name, "publish-step-state.json");
     try {
-      if (!fs.statSync(statePath).isFile()) continue;
+      if (!fse.statSync(statePath).isFile()) continue;
     } catch {
       continue;
     }
@@ -103,7 +102,7 @@ function readLatestPublishStepStateFromTaskDir(taskDir, { accountName } = {}) {
   if (!latestStatePath) return null;
 
   try {
-    const parsed = JSON.parse(fs.readFileSync(latestStatePath, "utf8"));
+    const parsed = JSON.parse(fse.readFileSync(latestStatePath, "utf8"));
     if (!parsed || typeof parsed !== "object") return null;
     if (accountName && parsed.accountName && parsed.accountName !== accountName) return null;
     return { ...parsed, filePath: latestStatePath };
@@ -173,7 +172,7 @@ async function saveRunFailedArtifacts(page, accountName, options = {}) {
 
 async function saveDebugArtifacts(page, accountName, tag, options = {}) {
   const dir = resolvePublishDebugArtifactDir(accountName, options);
-  await ensureDir(dir);
+  await fse.ensureDir(dir);
 
   const ymlPath = path.join(dir, `${tag}.yml`);
   const screenshotPath = path.join(dir, `${tag}.png`);
@@ -181,7 +180,7 @@ async function saveDebugArtifacts(page, accountName, tag, options = {}) {
 
   try {
     const yaml = await capturePageAriaSnapshot(page);
-    fs.writeFileSync(ymlPath, yaml, "utf-8");
+    fse.writeFileSync(ymlPath, yaml, "utf-8");
     console.log(`已保存页面结构: ${ymlPath}`);
   } catch {}
 
@@ -189,7 +188,7 @@ async function saveDebugArtifacts(page, accountName, tag, options = {}) {
     const htmlPath = path.join(dir, `${tag}.html`);
     try {
       const html = await page.content();
-      fs.writeFileSync(htmlPath, html, "utf-8");
+      fse.writeFileSync(htmlPath, html, "utf-8");
       console.log(`已保存调试 HTML: ${htmlPath}`);
     } catch {}
   }

@@ -6,7 +6,7 @@
  */
 const { chromium } = require("../../common/stealth-browser");
 const { getAccountPaths } = require("../core/accounts");
-const { fileExists, ensureDir } = require("../../common/fs");
+const fse = require("fs-extra");
 const { BROWSER_VIEWPORT, LOGIN_PAGE_GOTO_TIMEOUT_MS } = require("../core/env");
 
 const DEFAULT_TARGET_URL = "https://creator.douyin.com/creator-micro/data-center/content";
@@ -60,11 +60,11 @@ async function main() {
   const targetUrl = normalizeTargetUrl(process.argv[3]);
 
   const paths = getAccountPaths(accountName);
-  await ensureDir(paths.accountDir);
-  await ensureDir(paths.dataDir);
-  await ensureDir(paths.alertDir);
+  await fse.ensureDir(paths.accountDir);
+  await fse.ensureDir(paths.dataDir);
+  await fse.ensureDir(paths.alertDir);
 
-  const hasAuth = await fileExists(paths.storageStatePath);
+  const hasAuth = await fse.pathExists(paths.storageStatePath);
   if (!hasAuth) {
     console.error(`账号 ${accountName} 尚未登录，请先执行登录`);
     process.exit(1);

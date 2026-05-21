@@ -1,5 +1,5 @@
 const path = require("path");
-const fs = require("fs/promises");
+const fse = require("fs-extra");
 
 const {
   pickLatestSelectableCalendarDay,
@@ -277,7 +277,7 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   const exportLabel = options.exportLabel || "视频明细";
   const exportBatchId = options.exportBatchId ? String(options.exportBatchId) : null;
   const started = Date.now();
-  await fs.mkdir(saveDir, { recursive: true });
+  await fse.ensureDir(saveDir);
 
   const allButtons = page.locator('button:has-text("下载明细")');
   const btnCount = await allButtons.count().catch(() => 0);

@@ -1,5 +1,5 @@
-import fs from "fs";
 import path from "path";
+import fse from "fs-extra";
 
 /** Cookie UI 语义：与表格「登录态」列一致 */
 export type CookieUiStatus = "valid" | "warning" | "expired" | "missing";
@@ -131,7 +131,7 @@ export function analyzeStorageState(
 ): StorageStateAnalysisResult {
   let fileStat;
   try {
-    fileStat = fs.statSync(storagePath);
+    fileStat = fse.statSync(storagePath);
   } catch {
     return {
       status: COOKIE_STATUS.MISSING,
@@ -148,7 +148,7 @@ export function analyzeStorageState(
 
   let cookies: StorageCookie[];
   try {
-    const raw = fs.readFileSync(storagePath, "utf-8");
+    const raw = fse.readFileSync(storagePath, "utf-8");
     const data = JSON.parse(raw) as { cookies?: StorageCookie[] };
     cookies = Array.isArray(data.cookies) ? data.cookies : [];
   } catch {
@@ -225,7 +225,7 @@ export function analyzeStorageState(
 export function readLastVerified(accountDir: string): VerifiedSnapshot {
   const vp = path.join(accountDir, "verified-at.json");
   try {
-    const raw = fs.readFileSync(vp, "utf-8");
+    const raw = fse.readFileSync(vp, "utf-8");
     const data = JSON.parse(raw) as {
       time?: number;
       verified?: boolean;

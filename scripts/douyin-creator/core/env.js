@@ -1,4 +1,4 @@
-const fs = require("fs");
+const fse = require("fs-extra");
 const path = require("path");
 const { readProjectConfigFromEnv } = require("../../common/project-config");
 
@@ -24,7 +24,7 @@ const ACCOUNTS_DIR = (() => {
   if (envVal) return path.resolve(process.cwd(), envVal);
   const newPath = path.resolve(process.cwd(), "storage/creator-accounts");
   const oldPath = path.resolve(process.cwd(), "accounts");
-  if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+  if (fse.existsSync(oldPath) && !fse.existsSync(newPath)) {
     console.warn("[migration] 正在使用旧目录 \"accounts/\"，建议移动到 \"storage/creator-accounts/\" 或设置 CREATOR_ACCOUNTS_DIR");
     return oldPath;
   }
@@ -159,12 +159,12 @@ function readCreatorExportFromAccountFile(accountName) {
   if (!dir) return null;
   const full = path.join(ACCOUNTS_DIR, dir, CREATOR_EXPORT_ACCOUNT_FILE);
   try {
-    const st = fs.statSync(full);
+    const st = fse.statSync(full);
     const prev = creatorExportPerAccountFileCache.get(full);
     if (prev && prev.mtimeMs === st.mtimeMs) {
       return prev.value;
     }
-    const raw = fs.readFileSync(full, "utf-8");
+    const raw = fse.readFileSync(full, "utf-8");
     const data = JSON.parse(raw);
     let v = null;
     if (data && typeof data.creatorExportDateStart === "string") {

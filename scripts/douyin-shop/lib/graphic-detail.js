@@ -1,5 +1,5 @@
 const path = require("path");
-const fs = require("fs/promises");
+const fse = require("fs-extra");
 
 const {
   pickLatestSelectableCalendarDay,
@@ -180,7 +180,7 @@ function safeShopDirName(name) {
 async function clickGraphicDownloadAndSave(page, tag, saveDir, options = {}) {
   const exportBatchId = options.exportBatchId ? String(options.exportBatchId) : null;
   const started = Date.now();
-  await fs.mkdir(saveDir, { recursive: true });
+  await fse.ensureDir(saveDir);
 
   const btn = page.locator("#graphicDetail button:has-text(\"下载明细\")").first();
   await btn.waitFor({ state: "visible", timeout: 12000 });

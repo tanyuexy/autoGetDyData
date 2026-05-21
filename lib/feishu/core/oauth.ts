@@ -1,5 +1,5 @@
 // @ts-nocheck
-const fs = require("fs/promises");
+const fse = require("fs-extra");
 const path = require("path");
 
 function normalizeScope(scopeText) {
@@ -100,7 +100,7 @@ async function refreshAccessToken(config, refreshToken) {
 
 async function readTokenCache(tokenCachePath) {
   try {
-    const raw = await fs.readFile(tokenCachePath, "utf8");
+    const raw = await fse.readFile(tokenCachePath, "utf8");
     if (!raw.trim()) return null;
     return JSON.parse(raw);
   } catch (error) {
@@ -110,8 +110,8 @@ async function readTokenCache(tokenCachePath) {
 }
 
 async function writeTokenCache(tokenCachePath, tokenRecord) {
-  await fs.mkdir(path.dirname(tokenCachePath), { recursive: true });
-  await fs.writeFile(
+  await fse.ensureDir(path.dirname(tokenCachePath));
+  await fse.writeFile(
     tokenCachePath,
     JSON.stringify(
       {

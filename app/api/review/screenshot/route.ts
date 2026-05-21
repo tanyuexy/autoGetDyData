@@ -1,6 +1,6 @@
-import fs from "fs";
 import path from "path";
 import { NextRequest, NextResponse } from "next/server";
+import fse from "fs-extra";
 
 const SCREENSHOT_ROOT = path.resolve(process.cwd(), "storage/creator-accounts");
 
@@ -18,11 +18,11 @@ export async function GET(request: NextRequest) {
     if (path.extname(fullPath).toLowerCase() !== ".png") {
       return NextResponse.json({ error: "only png screenshots are allowed" }, { status: 400 });
     }
-    if (!fs.existsSync(fullPath)) {
+    if (!fse.existsSync(fullPath)) {
       return NextResponse.json({ error: "screenshot not found" }, { status: 404 });
     }
 
-    const file = fs.readFileSync(fullPath);
+    const file = fse.readFileSync(fullPath);
     return new NextResponse(file, {
       headers: {
         "Content-Type": "image/png",

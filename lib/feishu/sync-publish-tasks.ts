@@ -1,7 +1,7 @@
 // @ts-nocheck
+import fse from "fs-extra";
 require("dotenv").config();
 
-const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { MongoClient } = require("mongodb");
@@ -16,7 +16,7 @@ const MATERIALS_DIR = path.resolve(
 );
 
 function ensureDir(dir) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fse.ensureDirSync(dir);
 }
 
 function generateTaskId() {
@@ -26,7 +26,7 @@ function generateTaskId() {
 function makeUniqueFileName(originalName, dir) {
   const ext = path.extname(originalName);
   const base = path.basename(originalName, ext);
-  const candidates = new Set(fs.existsSync(dir) ? fs.readdirSync(dir) : []);
+  const candidates = new Set(fse.existsSync(dir) ? fse.readdirSync(dir) : []);
   let name = originalName;
   let i = 1;
   while (candidates.has(name)) {

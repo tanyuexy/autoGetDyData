@@ -1,6 +1,6 @@
 const path = require("path");
 const { chromium } = require("../../common/stealth-browser");
-const { ensureDir, fileExists } = require("../../common/fs");
+const fse = require("fs-extra");
 const { getAccountPaths } = require("../core/accounts");
 const { PUBLISH_BROWSER_VIEWPORT, HEADLESS } = require("../core/env");
 const { attachQrDataUrlSniffer } = require("../core/qr");
@@ -101,7 +101,7 @@ process.once("SIGINT", () => shutdown("SIGINT"));
 
 async function uploadVideo(page, videoKey, accountName, options = {}) {
   const filePath = path.join(MATERIALS_DIR, videoKey);
-  if (!(await fileExists(filePath))) {
+  if (!(await fse.pathExists(filePath))) {
     throw new Error(`视频文件不存在: ${filePath}`);
   }
 
@@ -279,11 +279,11 @@ async function runPublishVideo(options) {
   if (!videoKey) throw new Error("缺少 --videoKey");
 
   const paths = getAccountPaths(accountName);
-  await ensureDir(paths.accountDir);
-  await ensureDir(paths.dataDir);
-  await ensureDir(paths.alertDir);
+  await fse.ensureDir(paths.accountDir);
+  await fse.ensureDir(paths.dataDir);
+  await fse.ensureDir(paths.alertDir);
 
-  const hasStoredAuth = await fileExists(paths.storageStatePath);
+  const hasStoredAuth = await fse.pathExists(paths.storageStatePath);
   if (!hasStoredAuth) {
     throw new Error(`账号 ${accountName} 缺少 storageState，无法自动发布视频`);
   }

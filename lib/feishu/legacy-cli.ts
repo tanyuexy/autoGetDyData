@@ -1,7 +1,7 @@
 // @ts-nocheck
+import fse from "fs-extra";
 require("dotenv").config();
 
-const fs = require("fs/promises");
 const path = require("path");
 const { spawn } = require("child_process");
 const XLSX = require("xlsx");
@@ -44,7 +44,6 @@ const SHOP_XLSX_FIELD_ALIASES = {
   数据日期: "日期"
 };
 
-const { existsSync } = require("fs");
 const { readProjectConfigFromEnv } = require("../../scripts/common/project-config");
 
 function getDefaultExportsDir() {
@@ -52,7 +51,7 @@ function getDefaultExportsDir() {
   if (envVal) return envVal;
   const newPath = path.resolve(process.cwd(), "storage/exports");
   const oldPath = path.resolve(process.cwd(), "data");
-  if (existsSync(oldPath) && !existsSync(newPath)) {
+  if (fse.existsSync(oldPath) && !fse.existsSync(newPath)) {
     console.warn("[migration] 正在使用旧目录 \"data/\"，建议移动到 \"storage/exports/\" 或设置 EXPORTS_DIR");
     return "data";
   }
@@ -176,7 +175,7 @@ function openUrlInDefaultBrowser(url) {
 async function readFieldsFromArgs(args) {
   const fieldsFile = readOption(args, "fields-file", "fieldsFile");
   if (fieldsFile) {
-    const raw = await fs.readFile(
+    const raw = await fse.readFile(
       path.resolve(process.cwd(), fieldsFile),
       "utf8"
     );
@@ -384,7 +383,7 @@ async function findLatestXlsxFile(relativeDir, namePrefix = "") {
     String(relativeDir || getDefaultExportsDir()).trim()
   );
   const prefix = String(namePrefix || "").trim();
-  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  const entries = await fse.readdir(dirPath, { withFileTypes: true });
   let bestFull = "";
   let bestMtime = 0;
   for (const ent of entries) {
@@ -392,7 +391,7 @@ async function findLatestXlsxFile(relativeDir, namePrefix = "") {
     if (isFeishuBitableBackupXlsxFileName(ent.name)) continue;
     if (prefix && !ent.name.startsWith(prefix)) continue;
     const full = path.join(dirPath, ent.name);
-    const st = await fs.stat(full);
+    const st = await fse.stat(full);
     if (!bestFull || st.mtimeMs > bestMtime) {
       bestFull = full;
       bestMtime = st.mtimeMs;
@@ -825,7 +824,7 @@ async function backupBitableProfileToXlsx({
     return outPath;
   }
 
-  await fs.mkdir(outDir, { recursive: true });
+  await fse.ensureDir(outDir);
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.aoa_to_sheet(rows);
   XLSX.utils.book_append_sheet(workbook, worksheet, "备份");

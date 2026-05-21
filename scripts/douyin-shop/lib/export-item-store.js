@@ -1,4 +1,4 @@
-const fs = require("fs/promises");
+const fse = require("fs-extra");
 const { MongoClient } = require("mongodb");
 
 let client = null;
@@ -83,7 +83,7 @@ async function markRunning(input) {
 async function markSuccess(input, filePath) {
   let fileSize = null;
   try {
-    fileSize = (await fs.stat(filePath)).size;
+    fileSize = (await fse.stat(filePath)).size;
   } catch {
     // keep null
   }

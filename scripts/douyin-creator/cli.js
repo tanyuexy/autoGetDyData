@@ -18,7 +18,7 @@ const path = require("path");
 const { startAndWaitInternalApiTask } = require("../common/internal-api-client");
 const { chromium } = require("../common/stealth-browser");
 
-const { ensureDir, fileExists } = require("../common/fs");
+const fse = require("fs-extra");
 const {
   getAccountPaths,
   parseCliCommand,
@@ -77,11 +77,11 @@ process.once("SIGINT", () => shutdown("SIGINT"));
 
 async function runOneAccount(browser, accountName, command, options = {}) {
   const paths = getAccountPaths(accountName);
-  await ensureDir(paths.accountDir);
-  await ensureDir(paths.dataDir);
-  await ensureDir(paths.alertDir);
+  await fse.ensureDir(paths.accountDir);
+  await fse.ensureDir(paths.dataDir);
+  await fse.ensureDir(paths.alertDir);
 
-  const hasStoredAuth = await fileExists(paths.storageStatePath);
+  const hasStoredAuth = await fse.pathExists(paths.storageStatePath);
   const useStoredAuth =
     typeof options.useStoredAuth === "boolean"
       ? options.useStoredAuth

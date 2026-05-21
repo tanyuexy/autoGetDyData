@@ -1,5 +1,5 @@
 const path = require("path");
-const fs = require("fs/promises");
+const fse = require("fs-extra");
 const {
   selectShopIfPicker,
   loadPreferredShopNames,
@@ -17,9 +17,9 @@ async function saveStorageState(context, paths) {
   await context.storageState({ path: paths.storageStatePath });
   try {
     const state = JSON.parse(
-      await fs.readFile(paths.storageStatePath, "utf-8")
+      await fse.readFile(paths.storageStatePath, "utf-8")
     );
-    await fs.writeFile(
+    await fse.writeFile(
       paths.cookiesPath,
       JSON.stringify(state.cookies || [], null, 2),
       "utf-8"

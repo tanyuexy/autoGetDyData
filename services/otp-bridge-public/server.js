@@ -3,7 +3,7 @@ require("dotenv").config();
 const http = require("http");
 const path = require("path");
 const crypto = require("crypto");
-const fs = require("fs/promises");
+const fse = require("fs-extra");
 
 const HOST = String(process.env.OTP_BRIDGE_HOST || "0.0.0.0").trim();
 const PORT = Number.parseInt(process.env.OTP_BRIDGE_PORT || "8787", 10) || 8787;
@@ -75,12 +75,12 @@ function buildSessionFile(requestId) {
 }
 
 async function ensureStorage() {
-  await fs.mkdir(SESSIONS_DIR, { recursive: true });
+  await fse.ensureDir(SESSIONS_DIR);
 }
 
 async function readJsonFile(filePath) {
   try {
-    const raw = await fs.readFile(filePath, "utf8");
+    const raw = await fse.readFile(filePath, "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -88,7 +88,7 @@ async function readJsonFile(filePath) {
 }
 
 async function writeJsonFile(filePath, data) {
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
+  await fse.writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
 }
 
 async function readSession(requestId) {

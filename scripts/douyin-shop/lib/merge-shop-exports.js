@@ -1,5 +1,4 @@
-const fs = require("fs/promises");
-const { existsSync } = require("fs");
+const fse = require("fs-extra");
 const path = require("path");
 const XLSX = require("xlsx");
 const { ACCOUNTS_DIR } = require("./env");
@@ -10,7 +9,7 @@ const OUTPUT_DIR = (() => {
   if (envVal) return path.resolve(process.cwd(), envVal);
   const newPath = path.resolve(process.cwd(), "storage/exports");
   const oldPath = path.resolve(process.cwd(), "data");
-  if (existsSync(oldPath) && !existsSync(newPath)) {
+  if (fse.existsSync(oldPath) && !fse.existsSync(newPath)) {
     console.warn("[migration] 正在使用旧目录 \"data/\"，建议移动到 \"storage/exports/\" 或设置 EXPORTS_DIR");
     return oldPath;
   }
@@ -114,7 +113,7 @@ async function readBackupMaxDate() {
   const backupFile = path.join(OUTPUT_DIR, BACKUP_FILE_NAME);
   let stat;
   try {
-    stat = await fs.stat(backupFile);
+    stat = await fse.stat(backupFile);
   } catch {
     return null;
   }
@@ -153,7 +152,7 @@ async function readBackupMaxDate() {
 async function ensureBackupExists() {
   const backupFile = path.join(OUTPUT_DIR, BACKUP_FILE_NAME);
   try {
-    await fs.stat(backupFile);
+    await fse.stat(backupFile);
     return;
   } catch {
     console.log("未找到飞书备份表（抖店-飞书表备份.xlsx），先执行备份…");
@@ -249,7 +248,7 @@ async function pickLatestXlsxFiles(dirPath, options = {}) {
   const exportBatchId = options.exportBatchId || null;
   let names;
   try {
-    names = await fs.readdir(dirPath);
+    names = await fse.readdir(dirPath);
   } catch {
     return [];
   }
@@ -259,7 +258,7 @@ async function pickLatestXlsxFiles(dirPath, options = {}) {
     const full = path.join(dirPath, name);
     let st;
     try {
-      st = await fs.stat(full);
+      st = await fse.stat(full);
     } catch {
       continue;
     }
@@ -440,7 +439,7 @@ async function collectShopRows(dataRoot, shopName, options = {}) {
 async function listShopNames(dataRoot) {
   let entries;
   try {
-    entries = await fs.readdir(dataRoot, { withFileTypes: true });
+    entries = await fse.readdir(dataRoot, { withFileTypes: true });
   } catch {
     return [];
   }
@@ -465,7 +464,7 @@ async function validateShopExportFiles(options = {}) {
   const candidateReports = [];
   let accountDirs;
   try {
-    accountDirs = await fs.readdir(ACCOUNTS_DIR, { withFileTypes: true });
+    accountDirs = await fse.readdir(ACCOUNTS_DIR, { withFileTypes: true });
   } catch {
     accountDirs = [];
   }
@@ -580,7 +579,7 @@ async function mergeAllShopExportsToData(options = {}) {
     : [];
   let accountDirs;
   try {
-    accountDirs = await fs.readdir(ACCOUNTS_DIR, { withFileTypes: true });
+    accountDirs = await fse.readdir(ACCOUNTS_DIR, { withFileTypes: true });
   } catch {
     accountDirs = [];
   }
@@ -628,15 +627,15 @@ async function mergeAllShopExportsToData(options = {}) {
     return 0;
   });
 
-  await fs.mkdir(OUTPUT_DIR, { recursive: true });
+  await fse.ensureDir(OUTPUT_DIR);
   const outputPath = path.join(OUTPUT_DIR, OUTPUT_FILE_NAME);
 
   try {
-    const names = await fs.readdir(OUTPUT_DIR);
+    const names = await fse.readdir(OUTPUT_DIR);
     for (const name of names) {
       if (name === OUTPUT_FILE_NAME || name === BACKUP_FILE_NAME) continue;
       if (name.startsWith("抖店-") && name.toLowerCase().endsWith(".xlsx")) {
-        await fs.unlink(path.join(OUTPUT_DIR, name)).catch(() => {});
+        await fse.unlink(path.join(OUTPUT_DIR, name)).catch(() => {});
       }
     }
   } catch {
