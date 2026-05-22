@@ -28,6 +28,12 @@ type ProductInfo = {
   copyPrompt: string;
 };
 
+/** 飞书 AI 正文生成单次 LLM 请求超时（默认 3 分钟，可用 FEISHU_AI_CONTENT_TIMEOUT_MS 覆盖） */
+const AI_CONTENT_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.FEISHU_AI_CONTENT_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 180_000;
+})();
+
 type ProductIndexes = {
   byRecordId: Map<string, ProductInfo>;
   byShopAndName: Map<string, ProductInfo>;
@@ -216,6 +222,7 @@ async function generateContent(
       },
     ],
     temperature: 0.7,
+    timeoutMs: AI_CONTENT_TIMEOUT_MS,
     validate: isGeneratedContent,
   });
 

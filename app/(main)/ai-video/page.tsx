@@ -27,6 +27,7 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   LinkOutlined,
+  HolderOutlined,
   PaperClipOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
@@ -629,6 +630,8 @@ export default function AiVideoPage() {
   const [filmUrl, setFilmUrl] = useState<string | null>(null);
   const [previewClip, setPreviewClip] = useState<ClipItem | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [draggingReferenceId, setDraggingReferenceId] = useState<string | null>(null);
+  const [dragOverReferenceId, setDragOverReferenceId] = useState<string | null>(null);
   const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
   const [promptAtIndex, setPromptAtIndex] = useState<number | null>(null);
   const [resourcePickerActiveIndex, setResourcePickerActiveIndex] = useState(0);
@@ -1285,6 +1288,53 @@ export default function AiVideoPage() {
     }
   }
 
+  function reorderReferenceResources(activeId: string, overId: string) {
+    setReferenceResources((prev) => {
+      const from = prev.findIndex((item) => item.id === activeId);
+      const to = prev.findIndex((item) => item.id === overId);
+      if (from < 0 || to < 0 || from === to) return prev;
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
+  }
+
+  function handleReferenceReorderDragStart(event: React.DragEvent, id: string) {
+    setDraggingReferenceId(id);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+  }
+
+  function handleReferenceReorderDragOver(event: React.DragEvent, id: string) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (draggingReferenceId && id !== draggingReferenceId) {
+      setDragOverReferenceId(id);
+    }
+  }
+
+  function handleReferenceReorderDragLeave(event: React.DragEvent, id: string) {
+    const related = event.relatedTarget as Node | null;
+    if (related && event.currentTarget.contains(related)) return;
+    setDragOverReferenceId((prev) => (prev === id ? null : prev));
+  }
+
+  function handleReferenceReorderDrop(event: React.DragEvent, targetId: string) {
+    event.preventDefault();
+    const activeId = draggingReferenceId || event.dataTransfer.getData("text/plain");
+    if (activeId && targetId && activeId !== targetId) {
+      reorderReferenceResources(activeId, targetId);
+    }
+    setDraggingReferenceId(null);
+    setDragOverReferenceId(null);
+  }
+
+  function handleReferenceReorderDragEnd() {
+    setDraggingReferenceId(null);
+    setDragOverReferenceId(null);
+  }
+
   function removeReferenceResource(id: string) {
     setReferenceResources((prev) => prev.filter((item) => item.id !== id));
     message.success("已移除参考资源");
@@ -1292,56 +1342,96 @@ export default function AiVideoPage() {
 
   function renderReferenceResourcesList() {
     if (!referenceResources.length) return null;
+    const canDrag = referenceResources.length > 1;
 
-    return referenceResources.map((resource) => {
-          const label = getReferenceLabel(resource);
-          const token = `@${label}`;
-          return (
-            <div key={resource.id} style={{ ...framePreviewStyle, maxWidth: 360 }}>
-              {resource.kind === "image" ? (
-                <img
-                  src={resource.url}
-                  alt={resource.name}
-                  style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 4, flexShrink: 0 }}
-                />
-              ) : (
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 4,
-                    background: "#111",
-                    color: "#fff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                    fontSize: 16,
-                  }}
-                >
-                  {resource.kind === "video" ? <PlayCircleOutlined /> : <PaperClipOutlined />}
-                </div>
-              )}
-              <Button size="small" type="link" onClick={() => insertReferenceToken(resource)}>
-                {token}
-              </Button>
-              <Typography.Text type="secondary" style={{ maxWidth: 150, fontSize: 12 }} ellipsis>
-                {resource.name}
-              </Typography.Text>
-              <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
-                {formatFileSize(resource.size)}
-              </Typography.Text>
-              <Button
-                type="text"
-                danger
-                size="small"
-                icon={<DeleteOutlined />}
-                aria-label={`删除${label}`}
-                onClick={() => removeReferenceResource(resource.id)}
-              />
+    return referenceResources.map((resource, index) => {
+      const label = getReferenceLabel(resource);
+      const token = `@${label}`;
+      const isDragging = draggingReferenceId === resource.id;
+      const isDragOver = dragOverReferenceId === resource.id;
+      return (
+        <div
+          key={resource.id}
+          draggable={canDrag}
+          onDragStart={(event) => handleReferenceReorderDragStart(event, resource.id)}
+          onDragOver={(event) => handleReferenceReorderDragOver(event, resource.id)}
+          onDragLeave={(event) => handleReferenceReorderDragLeave(event, resource.id)}
+          onDrop={(event) => handleReferenceReorderDrop(event, resource.id)}
+          onDragEnd={handleReferenceReorderDragEnd}
+          style={{
+            ...framePreviewStyle,
+            maxWidth: 520,
+            cursor: canDrag ? (isDragging ? "grabbing" : "grab") : "default",
+            opacity: isDragging ? 0.55 : 1,
+            borderColor: isDragOver ? "var(--ic-fin-orange)" : "var(--vol-hairline)",
+            boxShadow: isDragOver ? "0 0 0 1px var(--ic-fin-orange)" : undefined,
+          }}
+        >
+          <Tooltip title={canDrag ? "拖动调整顺序" : undefined}>
+            <HolderOutlined
+              aria-hidden
+              style={{
+                color: "var(--vol-mute)",
+                fontSize: 14,
+                flexShrink: 0,
+                cursor: canDrag ? "grab" : "default",
+              }}
+            />
+          </Tooltip>
+          <Typography.Text type="secondary" style={{ width: 18, flexShrink: 0, fontSize: 12 }}>
+            {index + 1}
+          </Typography.Text>
+          {resource.kind === "image" ? (
+            <img
+              draggable={false}
+              src={resource.url}
+              alt={resource.name}
+              style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 4, flexShrink: 0 }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 4,
+                background: "#111",
+                color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                fontSize: 16,
+              }}
+            >
+              {resource.kind === "video" ? <PlayCircleOutlined /> : <PaperClipOutlined />}
             </div>
-          );
-        });
+          )}
+          <Button
+            size="small"
+            type="link"
+            draggable={false}
+            onClick={() => insertReferenceToken(resource)}
+          >
+            {token}
+          </Button>
+          <Typography.Text type="secondary" style={{ flex: 1, minWidth: 0, fontSize: 12 }} ellipsis>
+            {resource.name}
+          </Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+            {formatFileSize(resource.size)}
+          </Typography.Text>
+          <Button
+            type="text"
+            danger
+            size="small"
+            icon={<DeleteOutlined />}
+            aria-label={`删除${label}`}
+            draggable={false}
+            onClick={() => removeReferenceResource(resource.id)}
+          />
+        </div>
+      );
+    });
   }
 
 
@@ -2049,11 +2139,11 @@ export default function AiVideoPage() {
                     </Button>
                   </Upload>
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    支持拖拽到上方表单区域上传；仅一张图片时用首帧模式，多张或含视频/音频时用参考模式（提示词中用 @图片1 指定首帧）
+                    支持拖拽到上方表单区域上传；拖动资源项可调整顺序（影响 @图片1 编号及提交顺序）；多张或含视频/音频时用参考模式（提示词中用 @图片1 指定首帧）
                   </Typography.Text>
                 </Space>
                 {referenceResources.length ? (
-                  <Space wrap size={12} align="start">
+                  <Space orientation="vertical" size={8} style={{ width: "100%" }}>
                     {renderReferenceResourcesList()}
                   </Space>
                 ) : null}
