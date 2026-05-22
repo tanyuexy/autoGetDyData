@@ -129,17 +129,8 @@ async function uploadVideo(page, videoKey, accountName, options = {}) {
   }
 
   console.log("等待视频上传完成...");
-  try {
-    await page.waitForFunction(
-      () => {
-        const video = document.querySelector("video");
-        const blobImg = document.querySelector('img[src^="blob:"]');
-        return video || blobImg;
-      },
-      { timeout: scaledMs(120000) }
-    );
-  } catch {}
-  await page.waitForTimeout(scaledMs(2000));
+  await checkVideoUploaded(page, { timeoutMs: 120000 });
+  await page.waitForTimeout(scaledMs(1000));
 }
 
 async function selectFirstFrameAsCover(page) {

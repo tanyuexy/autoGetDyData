@@ -625,21 +625,107 @@ async function checkPublishSubmitted(page) {
 
 // ===== 单步校验函数：每个填写步骤完成后立即调用，失败则抛错 =====
 
-async function checkVideoUploaded(page) {
-  const selectors = [
-    "video",
-    '[class*="cover-"]',
-    'img[src*="creator-media-private.douyin.com"]',
-    'img[src^="blob:"]'
-  ];
-  for (const sel of selectors) {
-    const el = page.locator(sel).first();
-    if (await el.isVisible({ timeout: 3000 }).catch(() => false)) {
-      checkOk(`视频素材校验通过 (${sel})`);
+async function readVideoUploadState(page) {
+  return page
+    .evaluate(() => {
+      const normalizeText = (value) =>
+        String(value || "")
+          .replace(/\s+/g, " ")
+          .trim();
+      const isVisible = (el) => {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        if (
+          style.display === "none" ||
+          style.visibility === "hidden" ||
+          Number(style.opacity) === 0
+        ) {
+          return false;
+        }
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+      const srcOf = (el) =>
+        String(el.currentSrc || el.src || el.getAttribute("src") || "");
+      const allText = normalizeText(document.body?.innerText || "");
+      const uploadEmptyVisible = Array.from(
+        document.querySelectorAll("p, div, span")
+      ).some((el) => {
+        if (!isVisible(el)) return false;
+        const text = normalizeText(el.textContent);
+        return (
+          text.includes("点击上传") &&
+          text.includes("或直接将视频文件拖入此区域")
+        );
+      });
+      const failureMatch = allText.match(
+        /(视频上传失败|上传视频失败|上传失败|上传出错|上传异常|上传错误|文件上传失败|视频处理失败|转码失败|解析失败|格式不支持|不支持该格式|视频大小超过|文件大小超过|视频时长不符合|上传超时)[^。！？\n]{0,80}/
+      );
+      const videos = Array.from(document.querySelectorAll("video"))
+        .filter(isVisible)
+        .map(srcOf)
+        .filter(Boolean);
+      const previewImages = Array.from(document.querySelectorAll("img"))
+        .filter(isVisible)
+        .map(srcOf)
+        .filter((src) =>
+          /^(blob:)|creator-media-private\.douyin\.com|video-cn\.douyin\.com/.test(src)
+        );
+      const generatingCover = /Ai智能推荐封面生成中|AI智能推荐封面生成中|生成中/.test(
+        allText
+      );
+
+      return {
+        hasVideoPreview: videos.length > 0,
+        hasGeneratedPreviewImage: previewImages.length > 0,
+        uploadEmptyVisible,
+        failureText: failureMatch ? failureMatch[0] : "",
+        generatingCover
+      };
+    })
+    .catch((error) => ({
+      hasVideoPreview: false,
+      hasGeneratedPreviewImage: false,
+      uploadEmptyVisible: false,
+      failureText: "",
+      generatingCover: false,
+      readError: error?.message || String(error)
+    }));
+}
+
+async function checkVideoUploaded(page, options = {}) {
+  const timeoutMs = scaledMs(options.timeoutMs || 120000);
+  const deadline = Date.now() + timeoutMs;
+  let lastState = null;
+
+  while (Date.now() < deadline) {
+    const state = await readVideoUploadState(page);
+    lastState = state;
+
+    if (state.failureText) {
+      throw new Error(`视频素材校验失败：${state.failureText}`);
+    }
+    if (state.hasVideoPreview) {
+      checkOk("视频素材校验通过 (video preview)");
       return;
     }
+    if (state.hasGeneratedPreviewImage && !state.uploadEmptyVisible) {
+      checkOk("视频素材校验通过 (generated preview image)");
+      return;
+    }
+    if (state.uploadEmptyVisible && !state.generatingCover) {
+      throw new Error(
+        "视频素材校验失败：页面仍显示上传入口，未检测到视频预览"
+      );
+    }
+
+    await page.waitForTimeout(scaledMs(1000));
   }
-  throw new Error("视频素材校验失败：未检测到视频预览或封面渲染");
+
+  const stateNote = lastState
+    ? `（uploadEmptyVisible=${lastState.uploadEmptyVisible}, hasVideoPreview=${lastState.hasVideoPreview}, hasGeneratedPreviewImage=${lastState.hasGeneratedPreviewImage}）`
+    : "";
+  throw new Error(`视频素材校验失败：等待视频预览超时${stateNote}`);
 }
 
 async function checkImagesUploaded(page, expectedCount) {
