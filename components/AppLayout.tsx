@@ -16,6 +16,7 @@ import {
   MessageOutlined,
   ThunderboltOutlined,
   CoffeeOutlined,
+  PlayCircleOutlined,
 } from "@ant-design/icons";
 import { useRouter, usePathname } from "next/navigation";
 import TaskPanel from "@/components/TaskPanel";
@@ -39,6 +40,11 @@ const menuItems = [
     key: "/creator/publish",
     icon: <VideoCameraOutlined />,
     label: "定时发布",
+  },
+  {
+    key: "/ai-video",
+    icon: <PlayCircleOutlined />,
+    label: "AI视频生成",
   },
   {
     key: "/review",
