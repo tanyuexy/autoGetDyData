@@ -1,4 +1,12 @@
 export type SeedanceGenerationMode = "text" | "first-frame" | "first-last-frame";
+export type SeedanceReferenceKind = "image" | "video" | "audio";
+
+export interface SeedanceReferenceResource {
+  id?: string;
+  name?: string;
+  kind: SeedanceReferenceKind;
+  url: string;
+}
 
 export interface SeedanceModelOption {
   label: string;
@@ -58,6 +66,7 @@ export interface CreateSeedanceTaskInput {
   mode: SeedanceGenerationMode;
   firstFrameUrl?: string;
   lastFrameUrl?: string;
+  referenceResources?: SeedanceReferenceResource[];
   ratio?: string;
   resolution?: string;
   duration?: number;
@@ -179,6 +188,51 @@ export async function resolveSeedanceImageUrl(url?: string) {
   return cleaned;
 }
 
+function isProbablyLocalUrl(url: string) {
+  if (url.startsWith("/")) return true;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "0.0.0.0" ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    );
+  } catch {
+    return true;
+  }
+}
+
+async function resolveSeedanceReferenceResource(resource: SeedanceReferenceResource) {
+  const url = cleanUrl(resource.url);
+  if (!url) throw new Error("参考资源缺少 URL");
+
+  if (resource.kind === "image") {
+    const resolvedUrl = await resolveSeedanceImageUrl(url);
+    if (!resolvedUrl) throw new Error("图片参考资源缺少 URL");
+    return { ...resource, url: resolvedUrl };
+  }
+
+  if (isProbablyLocalUrl(url)) {
+    throw new Error(
+      `${resource.kind === "video" ? "视频" : "音频"}参考资源需要公网可访问 URL。请配置 PUBLIC_BASE_URL，或先上传到 TOS/公网存储后再使用。`
+    );
+  }
+
+  return { ...resource, url };
+}
+
+async function resolveSeedanceReferenceResources(resources?: SeedanceReferenceResource[]) {
+  if (!Array.isArray(resources)) return [];
+  const filtered = resources
+    .filter((item) => item && item.kind && cleanUrl(item.url))
+    .slice(0, 20);
+  return Promise.all(filtered.map((item) => resolveSeedanceReferenceResource(item)));
+}
+
 function buildContent(input: CreateSeedanceTaskInput) {
   const content: Array<Record<string, unknown>> = [
     { type: "text", text: input.prompt.trim() },
@@ -203,6 +257,28 @@ function buildContent(input: CreateSeedanceTaskInput) {
       image_url: { url: lastFrameUrl },
       role: "last_frame",
     });
+  }
+
+  for (const resource of input.referenceResources || []) {
+    if (resource.kind === "image") {
+      content.push({
+        type: "image_url",
+        image_url: { url: resource.url },
+        role: "reference_image",
+      });
+    } else if (resource.kind === "video") {
+      content.push({
+        type: "video_url",
+        video_url: { url: resource.url },
+        role: "reference_video",
+      });
+    } else if (resource.kind === "audio") {
+      content.push({
+        type: "audio_url",
+        audio_url: { url: resource.url },
+        role: "reference_audio",
+      });
+    }
   }
 
   return content;
@@ -249,6 +325,7 @@ export async function createSeedanceTask(input: CreateSeedanceTaskInput, apiKey:
     ...input,
     firstFrameUrl: await resolveSeedanceImageUrl(input.firstFrameUrl),
     lastFrameUrl: await resolveSeedanceImageUrl(input.lastFrameUrl),
+    referenceResources: await resolveSeedanceReferenceResources(input.referenceResources),
   };
   const payload = buildSeedanceTaskPayload(resolvedInput);
   const res = await fetch(getCreateTaskUrl(), {

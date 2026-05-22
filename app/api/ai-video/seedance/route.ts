@@ -31,6 +31,14 @@ export async function POST(request: NextRequest) {
       mode: body.mode,
       firstFrameUrl: toAbsoluteUrl(request, body.firstFrameUrl),
       lastFrameUrl: toAbsoluteUrl(request, body.lastFrameUrl),
+      referenceResources: Array.isArray(body.referenceResources)
+        ? body.referenceResources.map((item: any) => ({
+            id: item.id,
+            name: item.name,
+            kind: item.kind,
+            url: toAbsoluteUrl(request, item.url),
+          }))
+        : [],
       ratio: body.ratio,
       resolution: body.resolution,
       duration: body.duration,

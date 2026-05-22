@@ -29,6 +29,7 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   LinkOutlined,
+  PaperClipOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   ScissorOutlined,
@@ -38,6 +39,7 @@ import type { UploadFile, UploadProps } from "antd/es/upload/interface";
 import { antdTagPresetStyle, type SemanticTagPreset } from "@/lib/semanticTagStyles";
 
 type GenerationMode = "text" | "first-frame" | "first-last-frame";
+type ReferenceKind = "image" | "video" | "audio";
 
 interface SeedanceModelOption {
   label: string;
@@ -61,6 +63,14 @@ interface ClipItem {
   resolution: string;
   createdAt: string;
   raw?: unknown;
+}
+
+interface ReferenceResource {
+  id: string;
+  name: string;
+  kind: ReferenceKind;
+  url: string;
+  size?: number;
 }
 
 const FALLBACK_MODELS: SeedanceModelOption[] = [
@@ -124,6 +134,25 @@ const DURATION_OPTIONS = [5, 6, 8, 10].map((value) => ({
 }));
 
 const CLIP_CACHE_KEY = "ai-video:seedance-clips";
+const REFERENCE_CACHE_KEY = "ai-video:seedance-reference-resources";
+const CONFIG_CACHE_KEY = "ai-video:seedance-config";
+
+interface AiVideoCachedConfig {
+  model?: string;
+  mode?: GenerationMode;
+  prompt?: string;
+  firstFrameUrl?: string;
+  lastFrameUrl?: string;
+  firstFrameFiles?: UploadFile[];
+  lastFrameFiles?: UploadFile[];
+  ratio?: string;
+  resolution?: string;
+  duration?: number;
+  generateAudio?: boolean;
+  watermark?: boolean;
+  seed?: number | null;
+  callbackUrl?: string;
+}
 
 function resolveMediaUrl(url?: string | null) {
   if (!url) return "";
@@ -265,6 +294,88 @@ function readCachedClips(): ClipItem[] {
   }
 }
 
+function readCachedReferenceResources(): ReferenceResource[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(REFERENCE_CACHE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function readCachedConfig(): AiVideoCachedConfig {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(CONFIG_CACHE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isGenerationMode(value: unknown): value is GenerationMode {
+  return value === "text" || value === "first-frame" || value === "first-last-frame";
+}
+
+function readCachedUploadFiles(value: unknown): UploadFile[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item) => item && typeof item === "object" && typeof item.uid === "string")
+    .slice(0, 1)
+    .map((item: any) => ({
+      uid: item.uid,
+      name: String(item.name || "已上传文件"),
+      status: item.status === "done" ? "done" : undefined,
+      url: typeof item.url === "string" ? item.url : undefined,
+      thumbUrl: typeof item.thumbUrl === "string" ? item.thumbUrl : undefined,
+    }));
+}
+
+function createReferenceId() {
+  return `ref-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function getReferenceKind(file: File): ReferenceKind | null {
+  const ext = file.name.toLowerCase();
+  if (["image/jpeg", "image/png", "image/webp"].includes(file.type) || /\.(jpe?g|png|webp)$/.test(ext)) {
+    return "image";
+  }
+  if (
+    ["video/mp4", "video/quicktime", "video/webm"].includes(file.type) ||
+    /\.(mp4|mov|webm)$/.test(ext)
+  ) {
+    return "video";
+  }
+  if (
+    ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/mp4", "audio/aac"].includes(file.type) ||
+    /\.(mp3|wav|m4a|aac)$/.test(ext)
+  ) {
+    return "audio";
+  }
+  return null;
+}
+
+function getReferenceKindLabel(kind: ReferenceKind) {
+  if (kind === "image") return "图片";
+  if (kind === "video") return "视频";
+  return "音频";
+}
+
+function formatFileSize(size?: number) {
+  if (!size) return "";
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)}KB`;
+  return `${(size / 1024 / 1024).toFixed(1)}MB`;
+}
+
+function normalizeReferencePrompt(value: string) {
+  return value.replace(/@(图片|视频|音频)\s*(\d+)/g, "$1$2");
+}
+
+function getFirstImageReference(resources: ReferenceResource[]) {
+  return resources.find((item) => item.kind === "image");
+}
+
 function getStatusPreset(status: string): SemanticTagPreset {
   const normalized = status.toLowerCase();
   if (["succeeded", "success", "completed", "done"].includes(normalized)) return "success";
@@ -309,33 +420,49 @@ function createClipId() {
 
 export default function AiVideoPage() {
   const { message } = App.useApp();
+  const cachedConfig = useMemo(() => readCachedConfig(), []);
   const [models, setModels] = useState<SeedanceModelOption[]>(FALLBACK_MODELS);
   const [hasServerApiKey, setHasServerApiKey] = useState(false);
   const [showCallbackUrl, setShowCallbackUrl] = useState(false);
-  const [model, setModel] = useState(FALLBACK_MODELS[0].value);
-  const [mode, setMode] = useState<GenerationMode>("first-frame");
-  const [prompt, setPrompt] = useState("");
-  const [firstFrameUrl, setFirstFrameUrl] = useState("");
-  const [lastFrameUrl, setLastFrameUrl] = useState("");
-  const [firstFrameFiles, setFirstFrameFiles] = useState<UploadFile[]>([]);
-  const [lastFrameFiles, setLastFrameFiles] = useState<UploadFile[]>([]);
-  const [ratio, setRatio] = useState("9:16");
-  const [resolution, setResolution] = useState("720p");
-  const [duration, setDuration] = useState(5);
-  const [generateAudio, setGenerateAudio] = useState(false);
-  const [watermark, setWatermark] = useState(false);
-  const [seed, setSeed] = useState<number | null>(null);
-  const [callbackUrl, setCallbackUrl] = useState("");
+  const [model, setModel] = useState(cachedConfig.model || FALLBACK_MODELS[0].value);
+  const [mode, setMode] = useState<GenerationMode>(
+    isGenerationMode(cachedConfig.mode) ? cachedConfig.mode : "first-frame"
+  );
+  const [prompt, setPrompt] = useState(cachedConfig.prompt || "");
+  const [firstFrameUrl, setFirstFrameUrl] = useState(cachedConfig.firstFrameUrl || "");
+  const [lastFrameUrl, setLastFrameUrl] = useState(cachedConfig.lastFrameUrl || "");
+  const [firstFrameFiles, setFirstFrameFiles] = useState<UploadFile[]>(() =>
+    readCachedUploadFiles(cachedConfig.firstFrameFiles)
+  );
+  const [lastFrameFiles, setLastFrameFiles] = useState<UploadFile[]>(() =>
+    readCachedUploadFiles(cachedConfig.lastFrameFiles)
+  );
+  const [referenceResources, setReferenceResources] = useState<ReferenceResource[]>(() =>
+    readCachedReferenceResources()
+  );
+  const [ratio, setRatio] = useState(cachedConfig.ratio || "9:16");
+  const [resolution, setResolution] = useState(cachedConfig.resolution || "720p");
+  const [duration, setDuration] = useState(cachedConfig.duration || 5);
+  const [generateAudio, setGenerateAudio] = useState(cachedConfig.generateAudio ?? false);
+  const [watermark, setWatermark] = useState(cachedConfig.watermark ?? false);
+  const [seed, setSeed] = useState<number | null>(
+    typeof cachedConfig.seed === "number" ? cachedConfig.seed : null
+  );
+  const [callbackUrl, setCallbackUrl] = useState(cachedConfig.callbackUrl || "");
   const [clips, setClips] = useState<ClipItem[]>(() => readCachedClips());
   const [selectedClipIds, setSelectedClipIds] = useState<React.Key[]>([]);
   const [pageReady, setPageReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [pollingTaskIds, setPollingTaskIds] = useState<Set<string>>(new Set());
   const [uploadingClip, setUploadingClip] = useState(false);
+  const [uploadingReference, setUploadingReference] = useState(false);
   const [composing, setComposing] = useState(false);
   const [filmUrl, setFilmUrl] = useState<string | null>(null);
   const [previewClip, setPreviewClip] = useState<ClipItem | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
+  const [promptAtIndex, setPromptAtIndex] = useState<number | null>(null);
+  const promptTextAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const dragCounterRef = useRef(0);
   const clipsRef = useRef<ClipItem[]>([]);
 
@@ -349,7 +476,7 @@ export default function AiVideoPage() {
         setHasServerApiKey(Boolean(data.hasServerApiKey));
         if (Boolean(data.showCallbackUrl)) {
           setShowCallbackUrl(true);
-          if (typeof data.defaultCallbackUrl === "string" && data.defaultCallbackUrl.trim()) {
+          if (!cachedConfig.callbackUrl && typeof data.defaultCallbackUrl === "string" && data.defaultCallbackUrl.trim()) {
             setCallbackUrl(data.defaultCallbackUrl.trim());
           }
         }
@@ -361,7 +488,7 @@ export default function AiVideoPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [cachedConfig.callbackUrl]);
 
   useEffect(() => {
     clipsRef.current = clips;
@@ -369,6 +496,61 @@ export default function AiVideoPage() {
       window.localStorage.setItem(CLIP_CACHE_KEY, JSON.stringify(clips));
     } catch {}
   }, [clips]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(REFERENCE_CACHE_KEY, JSON.stringify(referenceResources));
+    } catch {}
+  }, [referenceResources]);
+
+  useEffect(() => {
+    const config: AiVideoCachedConfig = {
+      model,
+      mode,
+      prompt,
+      firstFrameUrl,
+      lastFrameUrl,
+      firstFrameFiles: firstFrameFiles.map((file) => ({
+        uid: file.uid,
+        name: file.name,
+        status: file.status,
+        url: file.url,
+        thumbUrl: file.thumbUrl,
+      })),
+      lastFrameFiles: lastFrameFiles.map((file) => ({
+        uid: file.uid,
+        name: file.name,
+        status: file.status,
+        url: file.url,
+        thumbUrl: file.thumbUrl,
+      })),
+      ratio,
+      resolution,
+      duration,
+      generateAudio,
+      watermark,
+      seed,
+      callbackUrl,
+    };
+    try {
+      window.localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(config));
+    } catch {}
+  }, [
+    callbackUrl,
+    duration,
+    firstFrameFiles,
+    firstFrameUrl,
+    generateAudio,
+    lastFrameFiles,
+    lastFrameUrl,
+    mode,
+    model,
+    prompt,
+    ratio,
+    resolution,
+    seed,
+    watermark,
+  ]);
 
   const selectedModel = useMemo(
     () => models.find((item) => item.value === model) || models[0],
@@ -449,12 +631,21 @@ export default function AiVideoPage() {
       message.warning("请先输入提示词");
       return;
     }
-    if ((mode === "first-frame" || mode === "first-last-frame") && !firstFrameUrl.trim()) {
-      message.warning("请填写首帧图片 URL");
+    const firstFrameReference = mode === "first-frame" ? getFirstImageReference(referenceResources) : null;
+    const resolvedFirstFrameUrl = mode === "first-frame" ? firstFrameReference?.url || "" : firstFrameUrl;
+    const requestMode = mode === "first-frame" && !resolvedFirstFrameUrl ? "text" : mode;
+    const resolvedReferenceResources = mode === "first-last-frame" ? [] : referenceResources;
+
+    if (mode === "first-frame" && !referenceResources.length) {
+      message.warning("请先上传图片、视频或音频资源");
+      return;
+    }
+    if (mode === "first-last-frame" && !firstFrameUrl.trim()) {
+      message.warning("请上传首帧图片");
       return;
     }
     if (mode === "first-last-frame" && !lastFrameUrl.trim()) {
-      message.warning("请填写尾帧图片 URL");
+      message.warning("请上传尾帧图片");
       return;
     }
 
@@ -465,10 +656,18 @@ export default function AiVideoPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model,
-          prompt,
-          mode,
-          firstFrameUrl,
+          prompt: normalizeReferencePrompt(prompt),
+          mode: requestMode,
+          firstFrameUrl: resolvedFirstFrameUrl,
           lastFrameUrl,
+          referenceResources: resolvedReferenceResources
+            .filter((resource) => !(mode === "first-frame" && resource.id === firstFrameReference?.id))
+            .map((resource) => ({
+              id: resource.id,
+              name: resource.name,
+              kind: resource.kind,
+              url: resource.url,
+            })),
           ratio,
           resolution,
           duration,
@@ -571,6 +770,204 @@ export default function AiVideoPage() {
     },
   };
 
+  const uploadReferenceResource = useCallback(
+    async (file: File) => {
+      const kind = getReferenceKind(file);
+      if (!kind) {
+        message.error("仅支持 JPG、PNG、WebP 图片，MP4、MOV、WebM 视频，或 MP3、WAV、M4A、AAC 音频");
+        return;
+      }
+
+      const maxMb = kind === "video" ? 200 : kind === "audio" ? 80 : 12;
+      if (file.size / 1024 / 1024 > maxMb) {
+        message.error(`${getReferenceKindLabel(kind)}不能超过 ${maxMb}MB`);
+        return;
+      }
+
+      setUploadingReference(true);
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch("/api/ai-video/upload", { method: "POST", body: formData });
+        const data = (await res.json()) as {
+          url?: string;
+          name?: string;
+          size?: number;
+          kind?: ReferenceKind;
+          error?: string;
+        };
+        if (!res.ok || !data.url) throw new Error(data.error || "上传参考资源失败");
+        const uploadedUrl = data.url;
+
+        setReferenceResources((prev) => [
+          ...prev,
+          {
+            id: createReferenceId(),
+            name: data.name || file.name,
+            kind: (data.kind || kind) as ReferenceKind,
+            url: uploadedUrl,
+            size: data.size || file.size,
+          },
+        ]);
+        message.success("参考资源已上传");
+      } catch (e: any) {
+        message.error(e.message || "上传参考资源失败");
+      } finally {
+        setUploadingReference(false);
+      }
+    },
+    [message]
+  );
+
+  const referenceUploadProps: UploadProps = {
+    accept:
+      "image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,.mp3,.wav,.m4a,.aac",
+    multiple: true,
+    showUploadList: false,
+    disabled: uploadingReference,
+    beforeUpload(file) {
+      void uploadReferenceResource(file);
+      return false;
+    },
+  };
+
+  const firstFrameUnifiedUploadProps: UploadProps = {
+    ...referenceUploadProps,
+    maxCount: 1,
+    multiple: false,
+  };
+
+  function getReferenceLabel(resource: ReferenceResource) {
+    const sameKindResources = referenceResources.filter((item) => item.kind === resource.kind);
+    const index = sameKindResources.findIndex((item) => item.id === resource.id) + 1;
+    return `${getReferenceKindLabel(resource.kind)}${Math.max(1, index)}`;
+  }
+
+  function insertReferenceToken(resource: ReferenceResource) {
+    const token = `@${getReferenceLabel(resource)}`;
+    setPrompt((prev) => {
+      const base = prev.trimEnd();
+      return base ? `${base} ${token}` : token;
+    });
+    message.success(`已插入 ${token}`);
+  }
+
+  function insertReferenceTokenAtPrompt(resource: ReferenceResource) {
+    const token = `@${getReferenceLabel(resource)}`;
+    const textarea = promptTextAreaRef.current;
+    const selectionStart = textarea?.selectionStart ?? prompt.length;
+    const atIndex = promptAtIndex ?? Math.max(0, selectionStart - 1);
+    const before = prompt.slice(0, atIndex);
+    const afterRaw = prompt.slice(selectionStart);
+    const after = afterRaw.startsWith(" ") || !afterRaw ? afterRaw : ` ${afterRaw}`;
+    const nextPrompt = `${before}${token}${after}`;
+    setPrompt(nextPrompt);
+    setResourcePickerOpen(false);
+    setPromptAtIndex(null);
+
+    window.requestAnimationFrame(() => {
+      const caret = before.length + token.length;
+      promptTextAreaRef.current?.focus();
+      promptTextAreaRef.current?.setSelectionRange(caret, caret);
+    });
+  }
+
+  function handlePromptChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
+    const nextValue = event.target.value;
+    const cursor = event.target.selectionStart ?? nextValue.length;
+    setPrompt(nextValue);
+
+    const charBeforeCursor = nextValue[cursor - 1];
+    if (charBeforeCursor === "@" && referenceResources.length) {
+      setPromptAtIndex(cursor - 1);
+      setResourcePickerOpen(true);
+      return;
+    }
+
+    if (resourcePickerOpen && promptAtIndex != null) {
+      const activeToken = nextValue.slice(promptAtIndex, cursor);
+      if (!activeToken.startsWith("@") || /\s/.test(activeToken.slice(1))) {
+        setResourcePickerOpen(false);
+        setPromptAtIndex(null);
+      }
+    }
+  }
+
+  function removeReferenceResource(id: string) {
+    setReferenceResources((prev) => prev.filter((item) => item.id !== id));
+    message.success("已移除参考资源");
+  }
+
+  function renderReferenceResourcesList() {
+    if (!referenceResources.length) return null;
+
+    return (
+      <Space wrap size={8}>
+        {referenceResources.map((resource) => {
+          const label = getReferenceLabel(resource);
+          const token = `@${label}`;
+          return (
+            <div
+              key={resource.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                maxWidth: 360,
+                padding: "6px 8px",
+                border: "1px solid var(--vol-hairline)",
+                borderRadius: 8,
+                background: "var(--vol-canvas)",
+              }}
+            >
+              {resource.kind === "image" ? (
+                <img
+                  src={resource.url}
+                  alt={resource.name}
+                  style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 4, flexShrink: 0 }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 4,
+                    background: "#111",
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                    fontSize: 16,
+                  }}
+                >
+                  {resource.kind === "video" ? <PlayCircleOutlined /> : <PaperClipOutlined />}
+                </div>
+              )}
+              <Button size="small" type="link" onClick={() => insertReferenceToken(resource)}>
+                {token}
+              </Button>
+              <Typography.Text type="secondary" style={{ maxWidth: 150, fontSize: 12 }} ellipsis>
+                {resource.name}
+              </Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+                {formatFileSize(resource.size)}
+              </Typography.Text>
+              <Button
+                type="text"
+                danger
+                size="small"
+                icon={<DeleteOutlined />}
+                aria-label={`删除${label}`}
+                onClick={() => removeReferenceResource(resource.id)}
+              />
+            </div>
+          );
+        })}
+      </Space>
+    );
+  }
+
   function moveClip(id: string, direction: -1 | 1) {
     setClips((prev) => {
       const index = prev.findIndex((clip) => clip.id === id);
@@ -641,6 +1038,15 @@ export default function AiVideoPage() {
     const lines = selectedClips.map((clip, index) => `${index + 1}. ${clip.name} ${clip.videoUrl}`);
     await navigator.clipboard.writeText(lines.join("\n"));
     message.success("已复制成片清单");
+  }
+
+  async function copyPrompt(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      message.success("已复制提示词");
+    } catch {
+      message.error("复制失败，请手动选择复制");
+    }
   }
 
   const validateFrameFile = useCallback(
@@ -873,8 +1279,21 @@ export default function AiVideoPage() {
           );
         }
         return (
-          <Tooltip title={<span style={{ whiteSpace: "pre-wrap" }}>{prompt}</span>} styles={{ root: { maxWidth: 480 } }}>
-            <Typography.Text style={{ fontSize: 12, maxWidth: 240 }} ellipsis>
+          <Tooltip
+            title={
+              <span style={{ whiteSpace: "pre-wrap" }}>
+                {prompt}
+                <br />
+                （点击复制）
+              </span>
+            }
+            styles={{ root: { maxWidth: 480 } }}
+          >
+            <Typography.Text
+              style={{ fontSize: 12, maxWidth: 240, cursor: "copy" }}
+              ellipsis
+              onClick={() => void copyPrompt(prompt)}
+            >
               {prompt}
             </Typography.Text>
           </Tooltip>
@@ -1006,11 +1425,11 @@ export default function AiVideoPage() {
 
         <section
           style={{ ...sectionStyle, position: "relative" }}
-          onDragEnter={mode !== "text" ? handleFrameDragEnter : undefined}
-          onDragLeave={mode !== "text" ? handleFrameDragLeave : undefined}
-          onDragOver={mode !== "text" ? handleFrameDragOver : undefined}
+          onDragEnter={mode === "first-last-frame" ? handleFrameDragEnter : undefined}
+          onDragLeave={mode === "first-last-frame" ? handleFrameDragLeave : undefined}
+          onDragOver={mode === "first-last-frame" ? handleFrameDragOver : undefined}
         >
-          {dragActive && mode !== "text" ? (
+          {dragActive && mode === "first-last-frame" ? (
             <div
               style={{
                 position: "absolute",
@@ -1024,47 +1443,26 @@ export default function AiVideoPage() {
                 pointerEvents: "none",
               }}
             >
-              {mode === "first-last-frame" ? (
-                <>
-                  <div
-                    style={{
-                      flex: 1,
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 8,
-                      borderRight: "1px dashed rgba(22, 119, 255, 0.45)",
-                      pointerEvents: "auto",
-                    }}
-                    onDragOver={handleFrameDragOver}
-                    onDrop={(event) => handleFrameDrop(event, "first")}
-                  >
-                    <UploadOutlined style={{ fontSize: 28, color: "#1677ff" }} />
-                    <Typography.Text strong style={{ color: "#1677ff" }}>
-                      松开上传首帧图片
-                    </Typography.Text>
-                  </div>
-                  <div
-                    style={{
-                      flex: 1,
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 8,
-                      pointerEvents: "auto",
-                    }}
-                    onDragOver={handleFrameDragOver}
-                    onDrop={(event) => handleFrameDrop(event, "last")}
-                  >
-                    <UploadOutlined style={{ fontSize: 28, color: "#1677ff" }} />
-                    <Typography.Text strong style={{ color: "#1677ff" }}>
-                      松开上传尾帧图片
-                    </Typography.Text>
-                  </div>
-                </>
-              ) : (
+              <>
+                <div
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    borderRight: "1px dashed rgba(22, 119, 255, 0.45)",
+                    pointerEvents: "auto",
+                  }}
+                  onDragOver={handleFrameDragOver}
+                  onDrop={(event) => handleFrameDrop(event, "first")}
+                >
+                  <UploadOutlined style={{ fontSize: 28, color: "#1677ff" }} />
+                  <Typography.Text strong style={{ color: "#1677ff" }}>
+                    松开上传首帧图片
+                  </Typography.Text>
+                </div>
                 <div
                   style={{
                     flex: 1,
@@ -1076,17 +1474,14 @@ export default function AiVideoPage() {
                     pointerEvents: "auto",
                   }}
                   onDragOver={handleFrameDragOver}
-                  onDrop={(event) => handleFrameDrop(event, "first")}
+                  onDrop={(event) => handleFrameDrop(event, "last")}
                 >
                   <UploadOutlined style={{ fontSize: 28, color: "#1677ff" }} />
                   <Typography.Text strong style={{ color: "#1677ff" }}>
-                    松开鼠标上传首帧图片
-                  </Typography.Text>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    支持 JPG、PNG、WebP，最大 12MB
+                    松开上传尾帧图片
                   </Typography.Text>
                 </div>
-              )}
+              </>
             </div>
           ) : null}
 
@@ -1120,13 +1515,101 @@ export default function AiVideoPage() {
             ) : null}
 
             <Space orientation="vertical" size={4} style={{ width: "100%" }}>
-              <Input.TextArea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="输入画面、运镜、主体动作、风格、镜头衔接要求"
-                autoSize={{ minRows: 4, maxRows: 8 }}
-                maxLength={1800}
-              />
+              <div style={{ position: "relative", width: "100%" }}>
+                <Input.TextArea
+                  ref={(node) => {
+                    promptTextAreaRef.current = node?.resizableTextArea?.textArea || null;
+                  }}
+                  value={prompt}
+                  onChange={handlePromptChange}
+                  onBlur={() => {
+                    window.setTimeout(() => setResourcePickerOpen(false), 160);
+                  }}
+                  placeholder="输入画面、运镜、主体动作、风格、镜头衔接要求"
+                  autoSize={{ minRows: 4, maxRows: 8 }}
+                  maxLength={1800}
+                />
+                {resourcePickerOpen && referenceResources.length ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: "100%",
+                      zIndex: 30,
+                      width: 360,
+                      maxWidth: "min(360px, 100%)",
+                      marginTop: 6,
+                      padding: 6,
+                      border: "1px solid var(--vol-hairline)",
+                      borderRadius: 8,
+                      background: "var(--vol-canvas-soft)",
+                      boxShadow: "0 10px 30px rgba(17, 17, 17, 0.12)",
+                    }}
+                  >
+                    <Space orientation="vertical" size={4} style={{ width: "100%" }}>
+                      {referenceResources.map((resource) => {
+                        const label = getReferenceLabel(resource);
+                        return (
+                          <button
+                            key={resource.id}
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => insertReferenceTokenAtPrompt(resource)}
+                            style={{
+                              width: "100%",
+                              border: 0,
+                              borderRadius: 6,
+                              padding: "7px 8px",
+                              background: "transparent",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              textAlign: "left",
+                            }}
+                          >
+                            {resource.kind === "image" ? (
+                              <img
+                                src={resource.url}
+                                alt={resource.name}
+                                style={{
+                                  width: 28,
+                                  height: 28,
+                                  objectFit: "cover",
+                                  borderRadius: 4,
+                                  flexShrink: 0,
+                                }}
+                              />
+                            ) : (
+                              <span
+                                style={{
+                                  width: 28,
+                                  height: 28,
+                                  borderRadius: 4,
+                                  background: "#111",
+                                  color: "#fff",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {resource.kind === "video" ? <PlayCircleOutlined /> : <PaperClipOutlined />}
+                              </span>
+                            )}
+                            <Typography.Text strong style={{ width: 58, flexShrink: 0 }}>
+                              @{label}
+                            </Typography.Text>
+                            <Typography.Text type="secondary" ellipsis style={{ flex: 1, minWidth: 0 }}>
+                              {resource.name}
+                            </Typography.Text>
+                          </button>
+                        );
+                      })}
+                    </Space>
+                  </div>
+                ) : null}
+              </div>
               <Typography.Text
                 type="secondary"
                 style={{ alignSelf: "flex-end", fontSize: 12, lineHeight: "18px" }}
@@ -1135,7 +1618,23 @@ export default function AiVideoPage() {
               </Typography.Text>
             </Space>
 
-            {mode !== "text" ? (
+            {mode === "first-frame" ? (
+              <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+                <Space wrap align="center" size={8}>
+                  <Upload {...firstFrameUnifiedUploadProps}>
+                    <Button icon={<PaperClipOutlined />} loading={uploadingReference}>
+                      上传资源
+                    </Button>
+                  </Upload>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    支持图片、视频、音频；第一张图片会作为首帧，点击资源标签可插入 @图片1、@视频1、@音频1
+                  </Typography.Text>
+                </Space>
+                {renderReferenceResourcesList()}
+              </Space>
+            ) : null}
+
+            {mode === "first-last-frame" ? (
               <Space orientation="vertical" size={8} style={{ width: "100%" }}>
                 <Space wrap size={8} align="center">
                   {renderFrameUploadButton(
@@ -1146,26 +1645,22 @@ export default function AiVideoPage() {
                     setFirstFrameFiles,
                     setFirstFrameUrl
                   )}
-                  {mode === "first-last-frame"
-                    ? renderFrameUploadButton(
-                        "last",
-                        "尾帧图片",
-                        lastFrameUrl,
-                        lastFrameFiles,
-                        setLastFrameFiles,
-                        setLastFrameUrl
-                      )
-                    : null}
+                  {renderFrameUploadButton(
+                    "last",
+                    "尾帧图片",
+                    lastFrameUrl,
+                    lastFrameFiles,
+                    setLastFrameFiles,
+                    setLastFrameUrl
+                  )}
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    或将图片拖拽到此区域上传
+                    首尾帧模式仅支持上传首帧图和尾帧图
                   </Typography.Text>
                 </Space>
                 {firstFrameUrl || lastFrameUrl ? (
                   <Space wrap size={12} align="start">
                     {renderFramePreview("first", "首帧图片", firstFrameUrl, firstFrameFiles)}
-                    {mode === "first-last-frame"
-                      ? renderFramePreview("last", "尾帧图片", lastFrameUrl, lastFrameFiles)
-                      : null}
+                    {renderFramePreview("last", "尾帧图片", lastFrameUrl, lastFrameFiles)}
                   </Space>
                 ) : null}
               </Space>
