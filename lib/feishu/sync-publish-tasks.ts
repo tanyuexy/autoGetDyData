@@ -1,6 +1,6 @@
 // @ts-nocheck
 import fse from "fs-extra";
-import "dotenv/config";
+import dotenv from "dotenv";
 import path from "node:path";
 import crypto from "node:crypto";
 import { MongoClient } from "mongodb";
@@ -8,6 +8,8 @@ import { readBitable } from "./core/readBitable";
 import { downloadAttachment, updateBitableRecord } from "./core/bitable";
 import { loadFeishuBitableConfigForProfile } from "./core/config";
 import { getValidAccessToken } from "./core/oauth";
+
+dotenv.config({ quiet: true });
 
 const MATERIALS_DIR = path.resolve(
   process.cwd(),
@@ -273,6 +275,32 @@ function buildSnapshotComparableInput(snapshot) {
   };
 }
 
+function taskMaterialFileNames(task) {
+  const payload = task?.payload || {};
+  if (payload.type === "video") {
+    return payload.videoFileKey ? [String(payload.videoFileKey)] : [];
+  }
+  if (payload.type === "article") {
+    return Array.isArray(payload.imagesFileKeys)
+      ? payload.imagesFileKeys.map((key) => String(key || "")).filter(Boolean)
+      : [];
+  }
+  return [];
+}
+
+function snapshotAttachmentNames(snapshot) {
+  return normalizeAttachmentSignature(snapshot.attachments)
+    .map((att) => String(att.name || "").trim())
+    .filter(Boolean);
+}
+
+function materialNamesMatch(existingTask, snapshot) {
+  const currentNames = taskMaterialFileNames(existingTask);
+  const nextNames = snapshotAttachmentNames(snapshot);
+  if (currentNames.length !== nextNames.length) return false;
+  return currentNames.every((name, index) => name === nextNames[index]);
+}
+
 function getExistingTaskSyncState(existingTask, snapshot, contentHash) {
   if (!existingTask) return { action: "create" };
   if (existingTask.status === "running") return { action: "skip-running" };
@@ -282,9 +310,16 @@ function getExistingTaskSyncState(existingTask, snapshot, contentHash) {
   const snapshotContentHash = buildCoreContentHash(buildSnapshotComparableInput(snapshot));
 
   if (taskContentHash === snapshotContentHash) {
-    return existingTask.feishuContentHash === contentHash
-      ? { action: "skip-unchanged" }
-      : { action: "backfill-hash-only" };
+    if (existingTask.feishuContentHash === contentHash) {
+      if (existingTask.status === "failed" && !materialNamesMatch(existingTask, snapshot)) {
+        return { action: "update" };
+      }
+      return { action: "skip-unchanged" };
+    }
+    if (existingTask.feishuContentHash) {
+      return { action: "update" };
+    }
+    return { action: "backfill-hash-only" };
   }
 
   return { action: "update" };
@@ -525,26 +560,30 @@ async function syncPublishTasks(options = {}) {
     allowCreate = true,
     logger = console.log,
     summaryPrefix = "[sync-publish-tasks]",
+    verbose = false,
   } = options;
 
   const log = (...args) => logger(...args);
+  const debug = (...args) => {
+    if (verbose) log(...args);
+  };
 
   const { client, db } = await getMongoDb();
   try {
-    log(`${summaryPrefix} 开始从飞书读取任务表...`);
+    log(`${summaryPrefix} 开始导入发布任务...`);
     if (autoStart && allowCreate) {
-      log(`${summaryPrefix} 已启用 auto-start，新导入任务将直接进入队列`);
+      log(`  模式：导入后自动加入队列`);
     }
 
     const existingTasksByRecordId = await loadExistingTasksByFeishuRecordId(db);
     if (existingTasksByRecordId.size > 0) {
-      log(`  Mongo 已有 ${existingTasksByRecordId.size} 个飞书导入任务，将执行增量同步`);
+      debug(`  Mongo 已有 ${existingTasksByRecordId.size} 个飞书导入任务，将执行增量同步`);
     }
 
     const { records } = await readBitable("task");
-    log(`  找到 ${records.length} 条任务表记录`);
+    debug(`  找到 ${records.length} 条任务表记录`);
 
-    log(`${summaryPrefix} 读取店铺信息表（按店铺名匹配是否需要自动化）...`);
+    debug(`${summaryPrefix} 读取店铺信息表（按店铺名匹配是否需要自动化）...`);
     const { records: shopInfoRecords } = await readBitable("shopInfo", { recordsOnly: true });
     const shopAutomationByName = buildShopAutomationByNameMap(shopInfoRecords);
     const disabledShopNames = [];
@@ -554,7 +593,7 @@ async function syncPublishTasks(options = {}) {
         disabledShopNames.push(shopName);
       }
     }
-    log(
+    debug(
       `  店铺信息表 ${shopInfoRecords.length} 条，其中是否需要自动化=否 的店铺 ${disabledShopNames.length} 个` +
         (disabledShopNames.length ? `：${disabledShopNames.join("、")}` : "")
     );
@@ -600,15 +639,15 @@ async function syncPublishTasks(options = {}) {
       (r) => !getRecordEligibilityIssue(r, shopAutomationByName)
     );
 
-    log(
+    debug(
       `  同步规则：任务表「所属店铺」与店铺信息表「店铺名」一致且该店是否需要自动化=否 则跳过；另需审批=通过、非示例、已填所属店铺、已上传视频/图文内容`
     );
-    log(`  其中 ${syncCandidates.length} 条满足同步条件`);
+    log(`  候选：待处理 ${syncCandidates.length} 条 / 总 ${records.length} 条`);
     if (eligibility.skippedByIssue.size > 0) {
       const skippedText = Array.from(eligibility.skippedByIssue.entries())
         .map(([issue, count]) => `${issue} ${count} 条`)
         .join("，");
-      log(`  已跳过 ${records.length - syncCandidates.length} 条：${skippedText}`);
+      debug(`  已跳过 ${records.length - syncCandidates.length} 条：${skippedText}`);
     }
 
     if (syncCandidates.length === 0) {
@@ -875,7 +914,9 @@ async function syncPublishTasks(options = {}) {
     };
 
     log(
-      `\n${summaryPrefix} 完成: 创建 ${createdCount}，更新 ${updatedCount}，无变化跳过 ${unchangedCount}（其中补摘要 ${backfilledHashCount}），远端已创建跳过 ${skippedRemoteCreatedCount}，运行中跳过 ${skippedRunningCount}，飞书行更新 ${rowUpdatedCount}，失败 ${failedCount}`
+      `${summaryPrefix} 完成：创建 ${createdCount}，更新 ${updatedCount}，入队/无变化 ${unchangedCount}，飞书已创建跳过 ${skippedRemoteCreatedCount}，运行中跳过 ${skippedRunningCount}，失败 ${failedCount}` +
+        (backfilledHashCount ? `，补摘要 ${backfilledHashCount}` : "") +
+        (rowUpdatedCount ? `，行号更新 ${rowUpdatedCount}` : "")
     );
 
     return summary;

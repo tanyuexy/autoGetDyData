@@ -116,7 +116,7 @@ export function startApiTask(
   ensureTaskLogMeta(taskId, { namespace, ...meta }, new Date(startedAt).toISOString());
   appendTaskLog(taskId, {
     level: "info",
-    text: `API 任务已启动 namespace=${namespace}`,
+    text: `任务已启动：${namespace}`,
     timestamp: new Date(startedAt).toISOString(),
   });
 
@@ -134,7 +134,7 @@ export function startApiTask(
         await fn(helpers);
       });
       const cancelled = isApiTaskCancelled(taskId);
-      appendTaskDone(taskId, cancelled ? 143 : 0, cancelled ? "API task cancelled" : "API task completed");
+      appendTaskDone(taskId, cancelled ? 143 : 0, cancelled ? "任务已取消" : "任务完成");
     } catch (error: any) {
       helpers.error(error?.message || error);
       appendTaskDone(taskId, 1, error?.message || "API task failed");

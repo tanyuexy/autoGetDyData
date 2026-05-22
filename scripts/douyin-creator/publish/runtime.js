@@ -697,6 +697,7 @@ async function checkVideoUploaded(page, options = {}) {
   const timeoutMs = scaledMs(options.timeoutMs || 120000);
   const deadline = Date.now() + timeoutMs;
   let lastState = null;
+  let sawEmptyUploadAt = 0;
 
   while (Date.now() < deadline) {
     const state = await readVideoUploadState(page);
@@ -714,9 +715,9 @@ async function checkVideoUploaded(page, options = {}) {
       return;
     }
     if (state.uploadEmptyVisible && !state.generatingCover) {
-      throw new Error(
-        "视频素材校验失败：页面仍显示上传入口，未检测到视频预览"
-      );
+      if (!sawEmptyUploadAt) sawEmptyUploadAt = Date.now();
+    } else {
+      sawEmptyUploadAt = 0;
     }
 
     await page.waitForTimeout(scaledMs(1000));

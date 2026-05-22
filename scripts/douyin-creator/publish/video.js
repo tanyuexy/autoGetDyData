@@ -80,6 +80,68 @@ function resolveVideoPublishControls(options) {
   };
 }
 
+function createVideoUploadNetworkMonitor(page) {
+  const signals = [];
+  const uploadUrlPattern =
+    /(upload|material|media|video|aweme|post|publish|creator-micro)/i;
+  const failureTextPattern =
+    /(上传失败|上传出错|上传异常|上传错误|视频处理失败|转码失败|解析失败|格式不支持|不支持该格式|视频大小超过|文件大小超过|视频时长不符合|upload failed|error)/i;
+  const successTextPattern =
+    /(success|成功|ok|file[_-]?token|vid|uri|video_id|media_id)/i;
+
+  const onResponse = async (response) => {
+    const request = response.request();
+    const method = request.method();
+    const url = response.url();
+    if (!/^(POST|PUT|PATCH)$/i.test(method)) return;
+    if (!uploadUrlPattern.test(url)) return;
+
+    const status = response.status();
+    const signal = {
+      method,
+      url,
+      status,
+      ok: response.ok(),
+      success: false,
+      failure: status >= 400,
+      message: ""
+    };
+
+    const contentType = String(response.headers()["content-type"] || "");
+    if (/json|text|javascript/i.test(contentType)) {
+      const text = await response.text().catch(() => "");
+      const compact = text.replace(/\s+/g, " ").trim().slice(0, 500);
+      signal.message = compact;
+      if (failureTextPattern.test(compact)) signal.failure = true;
+      if (response.ok() && successTextPattern.test(compact)) signal.success = true;
+    } else if (response.ok()) {
+      signal.success = true;
+    }
+
+    signals.push(signal);
+  };
+
+  page.on("response", onResponse);
+
+  return {
+    dispose() {
+      page.off("response", onResponse);
+    },
+    latestFailure() {
+      return signals.find((signal) => signal.failure) || null;
+    },
+    latestSuccess() {
+      return [...signals].reverse().find((signal) => signal.success) || null;
+    },
+    summary() {
+      return signals
+        .slice(-5)
+        .map((signal) => `${signal.method} ${signal.status} ${signal.url}`)
+        .join(" | ");
+    }
+  };
+}
+
 let activeBrowser = null;
 let activeContext = null;
 let shuttingDown = false;
@@ -116,6 +178,7 @@ async function uploadVideo(page, videoKey, accountName, options = {}) {
     .locator('input[type="file"][accept*="video"]')
     .first();
   if ((await videoInput.count()) > 0) {
+    var uploadNetwork = createVideoUploadNetworkMonitor(page);
     await videoInput.setInputFiles(filePath);
     console.log(`已选择视频文件: ${videoKey}`);
   } else {
@@ -129,8 +192,29 @@ async function uploadVideo(page, videoKey, accountName, options = {}) {
   }
 
   console.log("等待视频上传完成...");
-  await checkVideoUploaded(page, { timeoutMs: 120000 });
-  await page.waitForTimeout(scaledMs(1000));
+  try {
+    await checkVideoUploaded(page, { timeoutMs: 120000 });
+    const success = uploadNetwork?.latestSuccess();
+    if (success) {
+      console.log(`上传网络响应已确认: ${success.status} ${success.url}`);
+    }
+    await page.waitForTimeout(scaledMs(1000));
+  } catch (error) {
+    const failure = uploadNetwork?.latestFailure();
+    if (failure) {
+      throw new Error(
+        `视频上传接口返回异常: ${failure.status} ${failure.url}` +
+          (failure.message ? ` | ${failure.message.slice(0, 200)}` : "")
+      );
+    }
+    const networkSummary = uploadNetwork?.summary();
+    if (networkSummary) {
+      error.message = `${error.message}；上传网络响应: ${networkSummary}`;
+    }
+    throw error;
+  } finally {
+    uploadNetwork?.dispose();
+  }
 }
 
 async function selectFirstFrameAsCover(page) {

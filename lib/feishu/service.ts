@@ -19,7 +19,7 @@ import {
 type FeishuSyncProfile = "creator" | "shop";
 
 async function prepareProjectConfigEnv(profile?: string) {
-  dotenv.config();
+  dotenv.config({ quiet: true });
   process.env.PROJECT_CONFIG_JSON = JSON.stringify(await getConfig());
   if (profile) process.env.FEISHU_BITABLE_PROFILE = profile;
 }
@@ -78,12 +78,14 @@ export async function importPublishTasksFromFeishu(options: {
   autoStart?: boolean;
   allowCreate?: boolean;
   logger?: (...args: unknown[]) => void;
+  verbose?: boolean;
 } = {}) {
   await prepareProjectConfigEnv("task");
   return await syncPublishTasks({
     autoStart: options.autoStart === true,
     allowCreate: options.allowCreate !== false,
     logger: options.logger || console.log,
+    verbose: options.verbose === true,
     summaryPrefix: "[import-publish-tasks-api]",
   });
 }
@@ -123,13 +125,13 @@ export async function runFeishuPublishImportPipeline(options: {
 
   log(`${summaryPrefix} 扫描并从飞书导入任务`);
   const peek = await peekFeishuPublishImportCandidates({
-    logger: log,
+    logger: () => {},
     summaryPrefix: `${summaryPrefix}-import-peek`,
   });
   log(
-    `  导入预检：任务表 ${peek.totalRecords} 条，待导入 ${peek.syncCandidateCount} 条` +
+    `  预检：待导入 ${peek.syncCandidateCount} 条 / 可同步 ${peek.eligibleCount} 条 / 总 ${peek.totalRecords} 条` +
       (peek.remoteCreatedSkipCount
-        ? `（已排除飞书已创建任务=是 ${peek.remoteCreatedSkipCount} 条）`
+        ? `，飞书已创建跳过 ${peek.remoteCreatedSkipCount} 条`
         : "")
   );
 
@@ -149,6 +151,7 @@ export async function runFeishuPublishImportPipeline(options: {
     autoStart: options.autoStart === true,
     allowCreate: options.allowCreate !== false,
     logger: log,
+    verbose: false,
   });
 
   return { peek, targetedAiSummary, importSummary, earlyAutoRetrySummary };

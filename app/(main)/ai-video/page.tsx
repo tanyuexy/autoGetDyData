@@ -13,6 +13,7 @@ import {
   Select,
   Segmented,
   Space,
+  Spin,
   Switch,
   Table,
   Tag,
@@ -254,6 +255,7 @@ const sectionStyle: React.CSSProperties = {
 };
 
 function readCachedClips(): ClipItem[] {
+  if (typeof window === "undefined") return [];
   try {
     const parsed = JSON.parse(window.localStorage.getItem(CLIP_CACHE_KEY) || "[]");
     return Array.isArray(parsed) ? parsed : [];
@@ -299,8 +301,9 @@ export default function AiVideoPage() {
   const [watermark, setWatermark] = useState(false);
   const [seed, setSeed] = useState<number | null>(null);
   const [callbackUrl, setCallbackUrl] = useState("");
-  const [clips, setClips] = useState<ClipItem[]>([]);
+  const [clips, setClips] = useState<ClipItem[]>(() => readCachedClips());
   const [selectedClipIds, setSelectedClipIds] = useState<React.Key[]>([]);
+  const [pageReady, setPageReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [pollingTaskIds, setPollingTaskIds] = useState<Set<string>>(new Set());
   const [uploadingClip, setUploadingClip] = useState(false);
@@ -312,10 +315,11 @@ export default function AiVideoPage() {
   const clipsRef = useRef<ClipItem[]>([]);
 
   useEffect(() => {
-    setClips(readCachedClips());
+    let cancelled = false;
     fetch("/api/ai-video/seedance", { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => {
+        if (cancelled) return;
         if (Array.isArray(data.models) && data.models.length) setModels(data.models);
         setHasServerApiKey(Boolean(data.hasServerApiKey));
         if (Boolean(data.showCallbackUrl)) {
@@ -325,7 +329,13 @@ export default function AiVideoPage() {
           }
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setPageReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -939,7 +949,20 @@ export default function AiVideoPage() {
 
   return (
     <div style={pageWrapStyle}>
-      <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+      {!pageReady ? (
+        <div
+          style={{
+            width: "100%",
+            minHeight: 560,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Spin size="large" description="加载中..." />
+        </div>
+      ) : (
+        <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
         <div>
           <Typography.Title level={3} style={{ margin: 0, fontSize: 18 }}>
             AI 视频生成
@@ -1284,7 +1307,8 @@ export default function AiVideoPage() {
             ) : null}
           </Space>
         </section>
-      </Space>
+        </Space>
+      )}
 
       <Modal
         open={Boolean(previewClip)}

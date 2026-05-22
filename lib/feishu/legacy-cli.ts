@@ -1,6 +1,6 @@
 // @ts-nocheck
 import fse from "fs-extra";
-import "dotenv/config";
+import dotenv from "dotenv";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import XLSX from "xlsx";
@@ -28,6 +28,8 @@ import {
 } from "./core/bitable";
 import { readProjectConfigFromEnv } from "@/scripts/common/project-config";
 import { fileURLToPath } from "node:url";
+
+dotenv.config({ quiet: true });
 
 const DEFAULT_XLSX_FIELD_ALIASES = {
   作品名称: "作品名",

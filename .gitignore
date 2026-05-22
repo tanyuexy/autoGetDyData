@@ -69,3 +69,4 @@ scripts/feishu/token-cache.json
 .cursor/
 
 data/
+public/
