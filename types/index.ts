@@ -125,3 +125,59 @@ export interface CommentItem {
   workCreateTime: string;
   fetchedAt: string;
 }
+
+
+export type AiVideoGenerationMode = "text" | "first-frame" | "first-last-frame";
+
+export interface AiVideoUploadFileSnapshot {
+  uid: string;
+  name?: string;
+  status?: string;
+  url?: string;
+  thumbUrl?: string;
+}
+
+export interface AiVideoReferenceResource {
+  id: string;
+  name: string;
+  kind: "image" | "video" | "audio";
+  url: string;
+  size?: number;
+}
+
+export interface AiVideoClipFormSnapshot {
+  model: string;
+  mode: AiVideoGenerationMode;
+  prompt: string;
+  firstFrameUrl: string;
+  lastFrameUrl: string;
+  firstFrameFiles: AiVideoUploadFileSnapshot[];
+  lastFrameFiles: AiVideoUploadFileSnapshot[];
+  referenceResources: AiVideoReferenceResource[];
+  ratio: string;
+  resolution: string;
+  duration: number;
+  generateAudio: boolean;
+  watermark: boolean;
+  seed: number | null;
+  callbackUrl: string;
+}
+
+export interface AiVideoClip {
+  id: string;
+  name: string;
+  model: string;
+  prompt: string;
+  mode: AiVideoGenerationMode;
+  status: string;
+  taskId?: string;
+  videoUrl?: string | null;
+  remoteVideoUrl?: string | null;
+  coverUrl?: string | null;
+  duration: number;
+  ratio: string;
+  resolution: string;
+  createdAt: string;
+  updatedAt: string;
+  formSnapshot?: AiVideoClipFormSnapshot;
+}

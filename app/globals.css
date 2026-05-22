@@ -48,6 +48,15 @@ body {
   height: 100%;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
+/* Modal 打开时 rc-portal 会注入 body width: calc(100% - 滚动条宽)，导致页面左右抖动 */
+html body {
+  width: 100% !important;
+}
+
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

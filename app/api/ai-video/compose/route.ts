@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile, copyFile } from "fs/promises";
 import { existsSync } from "fs";
 import os from "os";
 import path from "path";
+import { getFfmpegPath } from "@/lib/ffmpeg";
 
 export const runtime = "nodejs";
 
@@ -84,8 +85,10 @@ export async function POST(request: NextRequest) {
     const filename = `seedance-film-${Date.now()}.mp4`;
     const outputPath = path.join(publicDir, filename);
 
+    const ffmpegPath = getFfmpegPath();
+
     await runCommand(
-      "ffmpeg",
+      ffmpegPath,
       [
         "-y",
         "-f",
@@ -101,7 +104,7 @@ export async function POST(request: NextRequest) {
       process.cwd()
     ).catch(async () => {
       await runCommand(
-        "ffmpeg",
+        ffmpegPath,
         [
           "-y",
           "-f",

@@ -23,8 +23,6 @@ import {
   type TableProps,
 } from "antd";
 import {
-  ArrowDownOutlined,
-  ArrowUpOutlined,
   CopyOutlined,
   DeleteOutlined,
   DownloadOutlined,
@@ -32,11 +30,13 @@ import {
   PaperClipOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
+  RedoOutlined,
   ScissorOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import type { UploadFile, UploadProps } from "antd/es/upload/interface";
 import { antdTagPresetStyle, type SemanticTagPreset } from "@/lib/semanticTagStyles";
+import type { AiVideoClip, AiVideoClipFormSnapshot, AiVideoReferenceResource } from "@/types";
 import {
   getSeedanceDurationConfig,
   normalizeSeedanceDuration,
@@ -52,30 +52,9 @@ interface SeedanceModelOption {
   note: string;
 }
 
-interface ClipItem {
-  id: string;
-  name: string;
-  model: string;
-  prompt: string;
-  mode: GenerationMode;
-  status: string;
-  taskId?: string;
-  videoUrl?: string | null;
-  coverUrl?: string | null;
-  duration: number;
-  ratio: string;
-  resolution: string;
-  createdAt: string;
-  raw?: unknown;
-}
-
-interface ReferenceResource {
-  id: string;
-  name: string;
-  kind: ReferenceKind;
-  url: string;
-  size?: number;
-}
+type ClipItem = AiVideoClip;
+type ClipFormSnapshot = AiVideoClipFormSnapshot;
+type ReferenceResource = AiVideoReferenceResource;
 
 const FALLBACK_MODELS: SeedanceModelOption[] = [
   {
@@ -133,7 +112,6 @@ const RESOLUTION_OPTIONS = ["480p", "720p", "1080p"].map((value) => ({
 }));
 
 
-const CLIP_CACHE_KEY = "ai-video:seedance-clips";
 const REFERENCE_CACHE_KEY = "ai-video:seedance-reference-resources";
 const CONFIG_CACHE_KEY = "ai-video:seedance-config";
 
@@ -295,11 +273,38 @@ const framePreviewStyle: React.CSSProperties = {
   background: "var(--vol-canvas)",
 };
 
-function readCachedClips(): ClipItem[] {
+
+
+async function fetchClipsFromServer(): Promise<ClipItem[]> {
+  const res = await fetch("/api/ai-video/clips", { cache: "no-store" });
+  const data = (await res.json()) as { items?: ClipItem[]; error?: string };
+  if (!res.ok) throw new Error(data.error || "读取片段列表失败");
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+async function saveClipToServer(clip: ClipItem): Promise<ClipItem> {
+  const res = await fetch("/api/ai-video/clips", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clip }),
+  });
+  const data = (await res.json()) as { clip?: ClipItem; error?: string };
+  if (!res.ok || !data.clip) throw new Error(data.error || "保存片段失败");
+  return data.clip;
+}
+
+async function deleteClipFromServer(id: string) {
+  const res = await fetch(`/api/ai-video/clips?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  const data = (await res.json()) as { error?: string };
+  if (!res.ok) throw new Error(data.error || "删除片段失败");
+}
+
+function readLegacyCachedClips(): ClipItem[] {
   if (typeof window === "undefined") return [];
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(CLIP_CACHE_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(window.localStorage.getItem("ai-video:seedance-clips") || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item) => item && typeof item.id === "string");
   } catch {
     return [];
   }
@@ -351,6 +356,116 @@ function serializeUploadFiles(files: UploadFile[]): UploadFile[] {
     url: file.url,
     thumbUrl: file.thumbUrl,
   }));
+}
+
+function buildClipFormSnapshot(input: {
+  model: string;
+  mode: GenerationMode;
+  prompt: string;
+  firstFrameUrl: string;
+  lastFrameUrl: string;
+  firstFrameFiles: UploadFile[];
+  lastFrameFiles: UploadFile[];
+  referenceResources: ReferenceResource[];
+  ratio: string;
+  resolution: string;
+  duration: number;
+  generateAudio: boolean;
+  watermark: boolean;
+  seed: number | null;
+  callbackUrl: string;
+}): ClipFormSnapshot {
+  return {
+    model: input.model,
+    mode: input.mode,
+    prompt: input.prompt,
+    firstFrameUrl: input.firstFrameUrl,
+    lastFrameUrl: input.lastFrameUrl,
+    firstFrameFiles: serializeUploadFiles(input.firstFrameFiles),
+    lastFrameFiles: serializeUploadFiles(input.lastFrameFiles),
+    referenceResources: input.referenceResources.map((item) => ({ ...item })),
+    ratio: input.ratio,
+    resolution: input.resolution,
+    duration: input.duration,
+    generateAudio: input.generateAudio,
+    watermark: input.watermark,
+    seed: input.seed,
+    callbackUrl: input.callbackUrl,
+  };
+}
+
+function inferMediaNameFromUrl(url: string, fallbackPrefix: string) {
+  try {
+    const pathname = new URL(url, window.location.origin).pathname;
+    const basename = pathname.split("/").filter(Boolean).pop();
+    if (basename) return decodeURIComponent(basename);
+  } catch {}
+  return `${fallbackPrefix}资源`;
+}
+
+function createRestoredResourceId(kind: ReferenceKind, url: string, index: number) {
+  const hash = Array.from(url).reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  return `restored-${kind}-${index}-${hash.toString(36)}`;
+}
+
+function ensureUploadFilesFromUrl(url: string, files: unknown, defaultName: string): UploadFile[] {
+  const restored = readCachedUploadFiles(files);
+  if (restored.length) return restored;
+  const normalizedUrl = String(url || "").trim();
+  if (!normalizedUrl) return [];
+  const name = inferMediaNameFromUrl(normalizedUrl, defaultName);
+  const uid = `restored-${defaultName}-${normalizedUrl}`;
+  return [
+    {
+      uid,
+      name,
+      status: "done",
+      url: normalizedUrl,
+      thumbUrl: normalizedUrl,
+    },
+  ];
+}
+
+function resolveClipRestoreSnapshot(record: ClipItem): ClipFormSnapshot | null {
+  if (record.model === "manual") return null;
+
+  const base =
+    record.formSnapshot ??
+    ({
+      model: record.model,
+      mode: record.mode,
+      prompt: record.prompt,
+      firstFrameUrl: "",
+      lastFrameUrl: "",
+      firstFrameFiles: [],
+      lastFrameFiles: [],
+      referenceResources: [],
+      ratio: record.ratio,
+      resolution: record.resolution,
+      duration: record.duration,
+      generateAudio: false,
+      watermark: false,
+      seed: null,
+      callbackUrl: "",
+    } satisfies ClipFormSnapshot);
+
+  const referenceResources = base.referenceResources?.length ? base.referenceResources : [];
+
+  const firstFrameUrl = base.firstFrameUrl || "";
+  const lastFrameUrl = base.lastFrameUrl || "";
+
+  return {
+    ...base,
+    firstFrameUrl,
+    lastFrameUrl,
+    referenceResources: referenceResources.map((item) => ({ ...item })),
+    firstFrameFiles: ensureUploadFilesFromUrl(firstFrameUrl, base.firstFrameFiles, "首帧图片"),
+    lastFrameFiles: ensureUploadFilesFromUrl(lastFrameUrl, base.lastFrameFiles, "尾帧图片"),
+  };
+}
+
+function buildFallbackFormSnapshot(record: ClipItem): ClipFormSnapshot | null {
+  return resolveClipRestoreSnapshot(record);
 }
 
 function readStoredConfig(): AiVideoCachedConfig {
@@ -502,7 +617,8 @@ export default function AiVideoPage() {
     typeof cachedConfig.seed === "number" ? cachedConfig.seed : null
   );
   const [callbackUrl, setCallbackUrl] = useState(cachedConfig.callbackUrl || "");
-  const [clips, setClips] = useState<ClipItem[]>(() => readCachedClips());
+  const [clips, setClips] = useState<ClipItem[]>([]);
+  const [clipsHydrated, setClipsHydrated] = useState(false);
   const [selectedClipIds, setSelectedClipIds] = useState<React.Key[]>([]);
   const [pageReady, setPageReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -561,10 +677,48 @@ export default function AiVideoPage() {
 
   useEffect(() => {
     clipsRef.current = clips;
-    try {
-      window.localStorage.setItem(CLIP_CACHE_KEY, JSON.stringify(clips));
-    } catch {}
   }, [clips]);
+
+  useEffect(() => {
+    if (!pageReady || clipsHydrated) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        let items = await fetchClipsFromServer();
+        if (!items.length) {
+          const legacy = readLegacyCachedClips();
+          if (legacy.length) {
+            const migrateRes = await fetch("/api/ai-video/clips", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                clips: legacy.map((clip) => ({
+                  ...clip,
+                  updatedAt: clip.updatedAt || clip.createdAt || new Date().toISOString(),
+                })),
+              }),
+            });
+            const migrateData = (await migrateRes.json()) as { items?: ClipItem[]; error?: string };
+            if (migrateRes.ok) {
+              items = migrateData.items || [];
+              try {
+                window.localStorage.removeItem("ai-video:seedance-clips");
+              } catch {}
+            }
+          }
+        }
+        if (!cancelled) setClips(items);
+      } catch (error: any) {
+        if (!cancelled) message.error(error.message || "加载片段列表失败");
+      } finally {
+        if (!cancelled) setClipsHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clipsHydrated, message, pageReady]);
+
 
   useEffect(() => {
     try {
@@ -627,9 +781,30 @@ export default function AiVideoPage() {
   );
 
   const selectedClips = useMemo(() => {
-    const selected = new Set(selectedClipIds.map(String));
-    return clips.filter((clip) => selected.has(clip.id) && clip.videoUrl);
+    const clipMap = new Map(clips.map((clip) => [clip.id, clip]));
+    return selectedClipIds
+      .map((id) => clipMap.get(String(id)))
+      .filter((clip): clip is ClipItem => Boolean(clip?.videoUrl));
   }, [clips, selectedClipIds]);
+
+  const composeOrderMap = useMemo(() => {
+    const orderMap = new Map<string, number>();
+    selectedClips.forEach((clip, index) => {
+      orderMap.set(clip.id, index + 1);
+    });
+    return orderMap;
+  }, [selectedClips]);
+
+  const handleClipSelectionChange = useCallback((keys: React.Key[]) => {
+    setSelectedClipIds((prev) => {
+      const keySet = new Set(keys.map(String));
+      const kept = prev.filter((id) => keySet.has(String(id)));
+      const keptSet = new Set(kept.map(String));
+      const added = keys.filter((id) => !keptSet.has(String(id)));
+      return [...kept, ...added];
+    });
+  }, []);
+
 
   const selectedDuration = selectedClips.reduce((sum, item) => sum + (item.duration || 0), 0);
 
@@ -643,19 +818,24 @@ export default function AiVideoPage() {
         const res = await fetch(`/api/ai-video/seedance/${encodeURIComponent(taskId)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clipId }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "查询任务失败");
 
-        const task = data.task || {};
-        updateClip(clipId, {
-          status: task.status || "unknown",
-          videoUrl: task.videoUrl || undefined,
-          coverUrl: task.coverUrl || undefined,
-          raw: task.raw,
-        });
+        if (data.clip) {
+          updateClip(clipId, data.clip);
+        } else {
+          const task = data.task || {};
+          updateClip(clipId, {
+            status: task.status || "unknown",
+            videoUrl: task.videoUrl || undefined,
+            coverUrl: task.coverUrl || undefined,
+          });
+        }
 
-        if (isFinished(task.status || "")) {
+        const status = String(data.clip?.status || data.task?.status || "");
+        if (isFinished(status)) {
           setPollingTaskIds((prev) => {
             const next = new Set(prev);
             next.delete(taskId);
@@ -670,7 +850,7 @@ export default function AiVideoPage() {
   );
 
   useEffect(() => {
-    if (!pageReady || !hasServerApiKey || hasRestoredPollingRef.current) return;
+    if (!pageReady || !hasServerApiKey || !clipsHydrated || hasRestoredPollingRef.current) return;
     hasRestoredPollingRef.current = true;
 
     const pendingClips = clipsRef.current.filter(
@@ -689,7 +869,7 @@ export default function AiVideoPage() {
     pendingClips.forEach((clip) => {
       if (clip.taskId) void pollTask(clip.id, clip.taskId);
     });
-  }, [hasServerApiKey, pageReady, pollTask]);
+  }, [clipsHydrated, hasServerApiKey, pageReady, pollTask]);
 
   useEffect(() => {
     if (!pollingTaskIds.size) return;
@@ -703,6 +883,57 @@ export default function AiVideoPage() {
 
     return () => window.clearInterval(timer);
   }, [pollTask, pollingTaskIds]);
+
+
+  const restoreFormFromClip = useCallback(
+    (record: ClipItem) => {
+      const snapshot = resolveClipRestoreSnapshot(record);
+      if (!snapshot) {
+        message.warning("手动上传的片段无法回填配置");
+        return;
+      }
+
+      setModel(snapshot.model);
+      setMode(snapshot.mode);
+      setPrompt(snapshot.prompt);
+      setFirstFrameUrl(snapshot.firstFrameUrl);
+      setLastFrameUrl(snapshot.lastFrameUrl);
+      setFirstFrameFiles(ensureUploadFilesFromUrl(snapshot.firstFrameUrl, snapshot.firstFrameFiles, "首帧图片"));
+      setLastFrameFiles(ensureUploadFilesFromUrl(snapshot.lastFrameUrl, snapshot.lastFrameFiles, "尾帧图片"));
+      setReferenceResources(snapshot.referenceResources.map((item) => ({ ...item })));
+      setRatio(snapshot.ratio);
+      setResolution(snapshot.resolution);
+      setDuration(normalizeSeedanceDuration(snapshot.model, snapshot.duration));
+      setGenerateAudio(snapshot.generateAudio);
+      setWatermark(snapshot.watermark);
+      setSeed(snapshot.seed);
+      setCallbackUrl(snapshot.callbackUrl);
+
+      writeStoredConfig({
+        model: snapshot.model,
+        mode: snapshot.mode,
+        prompt: snapshot.prompt,
+        firstFrameUrl: snapshot.firstFrameUrl,
+        lastFrameUrl: snapshot.lastFrameUrl,
+        firstFrameFiles: serializeUploadFiles(readCachedUploadFiles(snapshot.firstFrameFiles)),
+        lastFrameFiles: serializeUploadFiles(readCachedUploadFiles(snapshot.lastFrameFiles)),
+        ratio: snapshot.ratio,
+        resolution: snapshot.resolution,
+        duration: snapshot.duration,
+        generateAudio: snapshot.generateAudio,
+        watermark: snapshot.watermark,
+        seed: snapshot.seed,
+        callbackUrl: snapshot.callbackUrl,
+      });
+      try {
+        window.localStorage.setItem(REFERENCE_CACHE_KEY, JSON.stringify(snapshot.referenceResources));
+      } catch {}
+
+      message.success("已回填生成配置，可修改后重新提交");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    },
+    [message]
+  );
 
   async function submitTask() {
     if (!hasServerApiKey) {
@@ -764,6 +995,30 @@ export default function AiVideoPage() {
 
       const task = data.task || {};
       const taskId = task.id || data.raw?.id || data.raw?.task_id;
+      const snapshotFirstFrameUrl =
+        mode === "first-frame" ? firstFrameReference?.url || firstFrameUrl : firstFrameUrl;
+      const snapshotFirstFrameFiles =
+        mode === "first-frame" && firstFrameReference && !firstFrameFiles.length
+          ? ensureUploadFilesFromUrl(snapshotFirstFrameUrl, firstFrameFiles, "首帧图片")
+          : firstFrameFiles;
+      const formSnapshot = buildClipFormSnapshot({
+        model,
+        mode,
+        prompt,
+        firstFrameUrl: snapshotFirstFrameUrl,
+        lastFrameUrl,
+        firstFrameFiles: snapshotFirstFrameFiles,
+        lastFrameFiles,
+        referenceResources,
+        ratio,
+        resolution,
+        duration,
+        generateAudio,
+        watermark,
+        seed,
+        callbackUrl,
+      });
+      const now = new Date().toISOString();
       const clip: ClipItem = {
         id: createClipId(),
         name: prompt.trim().slice(0, 24) || "未命名片段",
@@ -777,11 +1032,13 @@ export default function AiVideoPage() {
         duration,
         ratio,
         resolution,
-        createdAt: new Date().toISOString(),
-        raw: task.raw || data.raw,
+        createdAt: now,
+        updatedAt: now,
+        formSnapshot,
       };
 
-      setClips((prev) => [clip, ...prev]);
+      const savedClip = await saveClipToServer(clip);
+      setClips((prev) => [savedClip, ...prev]);
       if (taskId && !isFinished(clip.status)) {
         setPollingTaskIds((prev) => new Set(prev).add(taskId));
       }
@@ -832,6 +1089,7 @@ export default function AiVideoPage() {
         if (!res.ok || !data.url) throw new Error(data.error || "上传视频失败");
 
         const clipId = createClipId();
+        const now = new Date().toISOString();
         const clip: ClipItem = {
           id: clipId,
           name: data.name?.replace(/\.[^.]+$/, "") || `上传片段 ${clips.length + 1}`,
@@ -843,9 +1101,11 @@ export default function AiVideoPage() {
           duration,
           ratio,
           resolution,
-          createdAt: new Date().toISOString(),
+          createdAt: now,
+          updatedAt: now,
         };
-        setClips((prev) => [clip, ...prev]);
+        const savedClip = await saveClipToServer(clip);
+        setClips((prev) => [savedClip, ...prev]);
         setSelectedClipIds((prev) => [...prev, clipId]);
         message.success("片段已上传并加入列表");
       } catch (e: any) {
@@ -1084,18 +1344,6 @@ export default function AiVideoPage() {
         });
   }
 
-  function moveClip(id: string, direction: -1 | 1) {
-    setClips((prev) => {
-      const index = prev.findIndex((clip) => clip.id === id);
-      const nextIndex = index + direction;
-      if (index < 0 || nextIndex < 0 || nextIndex >= prev.length) return prev;
-      const next = [...prev];
-      const [item] = next.splice(index, 1);
-      next.splice(nextIndex, 0, item);
-      message.success(direction < 0 ? "片段已上移" : "片段已下移");
-      return next;
-    });
-  }
 
   async function composeFilm() {
     if (selectedClips.length < 2) {
@@ -1348,7 +1596,27 @@ export default function AiVideoPage() {
     [uploadReferenceResource]
   );
 
+
+
   const columns: TableProps<ClipItem>["columns"] = [
+    {
+      title: "序号",
+      key: "order",
+      width: 64,
+      align: "center",
+      render: (_, record) => {
+        const composeOrder = composeOrderMap.get(record.id);
+        return composeOrder ? (
+          <Tag style={{ ...antdTagPresetStyle("blue"), margin: 0, minWidth: 24, textAlign: "center" }}>
+            {composeOrder}
+          </Tag>
+        ) : (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            —
+          </Typography.Text>
+        );
+      },
+    },
     {
       title: "片段",
       dataIndex: "name",
@@ -1452,32 +1720,12 @@ export default function AiVideoPage() {
     {
       title: "操作",
       key: "actions",
-      width: 230,
+      width: 210,
       render: (_, record) => {
-        const clipIndex = clips.findIndex((clip) => clip.id === record.id);
-        const isFirst = clipIndex <= 0;
-        const isLast = clipIndex < 0 || clipIndex >= clips.length - 1;
+        const canRestore = record.model !== "manual";
 
         return (
           <Space size={4} wrap>
-            <Tooltip title={isFirst ? "已在最前" : "上移，调整合成顺序"}>
-              <Button
-                size="small"
-                icon={<ArrowUpOutlined />}
-                disabled={isFirst}
-                aria-label="上移片段"
-                onClick={() => moveClip(record.id, -1)}
-              />
-            </Tooltip>
-            <Tooltip title={isLast ? "已在最后" : "下移，调整合成顺序"}>
-              <Button
-                size="small"
-                icon={<ArrowDownOutlined />}
-                disabled={isLast}
-                aria-label="下移片段"
-                onClick={() => moveClip(record.id, 1)}
-              />
-            </Tooltip>
             {record.taskId && !isFinished(record.status) ? (
               <Tooltip title="刷新 Seedance 任务状态">
                 <Button
@@ -1498,6 +1746,16 @@ export default function AiVideoPage() {
                 />
               </Tooltip>
             ) : null}
+            {canRestore ? (
+              <Tooltip title="回填该片段的生成配置到上方表单">
+                <Button
+                  size="small"
+                  icon={<RedoOutlined />}
+                  aria-label="重试回填配置"
+                  onClick={() => restoreFormFromClip(record)}
+                />
+              </Tooltip>
+            ) : null}
             <Tooltip title="从列表移除">
               <Button
                 danger
@@ -1505,9 +1763,16 @@ export default function AiVideoPage() {
                 icon={<DeleteOutlined />}
                 aria-label="删除片段"
                 onClick={() => {
-                  setClips((prev) => prev.filter((clip) => clip.id !== record.id));
-                  setSelectedClipIds((prev) => prev.filter((id) => id !== record.id));
-                  message.success("已移除片段");
+                  void (async () => {
+                    try {
+                      await deleteClipFromServer(record.id);
+                      setClips((prev) => prev.filter((clip) => clip.id !== record.id));
+                      setSelectedClipIds((prev) => prev.filter((id) => id !== record.id));
+                      message.success("已移除片段");
+                    } catch (error: any) {
+                      message.error(error.message || "删除片段失败");
+                    }
+                  })();
                 }}
               />
             </Tooltip>
@@ -1942,12 +2207,21 @@ export default function AiVideoPage() {
           <Space orientation="vertical" size={12} style={{ width: "100%" }}>
             <Space align="center" style={{ width: "100%", justifyContent: "space-between" }}>
               <div>
-                <Typography.Text strong style={{ fontSize: 15 }}>
-                  片段列表
-                </Typography.Text>
+                <Space align="center" size={8}>
+                  <Typography.Text strong style={{ fontSize: 15 }}>
+                    片段列表
+                  </Typography.Text>
+                  {clipsHydrated ? (
+                    <Tag variant="filled" color="default">
+                      共 {clips.length} 条
+                    </Tag>
+                  ) : (
+                    <Spin size="small" />
+                  )}
+                </Space>
                 <div>
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    按列表顺序组合成片，勾选需要进入成片的片段；操作列可调整顺序、刷新任务或删除
+                    勾选片段按选择先后决定合成顺序（序号列显示合成顺序）
                   </Typography.Text>
                 </div>
               </div>
@@ -1981,7 +2255,7 @@ export default function AiVideoPage() {
                 columns={columns}
                 rowSelection={{
                   selectedRowKeys: selectedClipIds,
-                  onChange: setSelectedClipIds,
+                  onChange: handleClipSelectionChange,
                   getCheckboxProps: (record) => ({ disabled: !record.videoUrl }),
                 }}
               />
@@ -2025,6 +2299,7 @@ export default function AiVideoPage() {
       <Modal
         open={Boolean(previewClip)}
         destroyOnHidden
+        centered
         title={previewClip?.name || "视频预览"}
         footer={null}
         width={760}
