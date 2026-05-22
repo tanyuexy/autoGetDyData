@@ -233,33 +233,11 @@ async function resolveSeedanceReferenceResources(resources?: SeedanceReferenceRe
   return Promise.all(filtered.map((item) => resolveSeedanceReferenceResource(item)));
 }
 
-function buildContent(input: CreateSeedanceTaskInput) {
-  const content: Array<Record<string, unknown>> = [
-    { type: "text", text: input.prompt.trim() },
-  ];
-
-  const firstFrameUrl = cleanUrl(input.firstFrameUrl);
-  const lastFrameUrl = cleanUrl(input.lastFrameUrl);
-
-  if (input.mode === "first-frame" || input.mode === "first-last-frame") {
-    if (!firstFrameUrl) throw new Error("首帧模式需要填写首帧图片 URL");
-    content.push({
-      type: "image_url",
-      image_url: { url: firstFrameUrl },
-      role: "first_frame",
-    });
-  }
-
-  if (input.mode === "first-last-frame") {
-    if (!lastFrameUrl) throw new Error("首尾帧模式需要填写尾帧图片 URL");
-    content.push({
-      type: "image_url",
-      image_url: { url: lastFrameUrl },
-      role: "last_frame",
-    });
-  }
-
-  for (const resource of input.referenceResources || []) {
+function appendReferenceResources(
+  content: Array<Record<string, unknown>>,
+  resources: SeedanceReferenceResource[]
+) {
+  for (const resource of resources) {
     if (resource.kind === "image") {
       content.push({
         type: "image_url",
@@ -279,6 +257,48 @@ function buildContent(input: CreateSeedanceTaskInput) {
         role: "reference_audio",
       });
     }
+  }
+}
+
+function buildContent(input: CreateSeedanceTaskInput) {
+  const content: Array<Record<string, unknown>> = [
+    { type: "text", text: input.prompt.trim() },
+  ];
+
+  const firstFrameUrl = cleanUrl(input.firstFrameUrl);
+  const lastFrameUrl = cleanUrl(input.lastFrameUrl);
+  const referenceResources = input.referenceResources || [];
+  // Seedance 不允许 first_frame/last_frame 与 reference_* 混用；有参考媒体时走多模态参考模式
+  const useMultimodalReference = referenceResources.length > 0;
+
+  if (useMultimodalReference) {
+    if (firstFrameUrl && input.mode === "first-frame") {
+      content.push({
+        type: "image_url",
+        image_url: { url: firstFrameUrl },
+        role: "reference_image",
+      });
+    }
+    appendReferenceResources(content, referenceResources);
+    return content;
+  }
+
+  if (input.mode === "first-frame" || input.mode === "first-last-frame") {
+    if (!firstFrameUrl) throw new Error("首帧模式需要填写首帧图片 URL");
+    content.push({
+      type: "image_url",
+      image_url: { url: firstFrameUrl },
+      role: "first_frame",
+    });
+  }
+
+  if (input.mode === "first-last-frame") {
+    if (!lastFrameUrl) throw new Error("首尾帧模式需要填写尾帧图片 URL");
+    content.push({
+      type: "image_url",
+      image_url: { url: lastFrameUrl },
+      role: "last_frame",
+    });
   }
 
   return content;
