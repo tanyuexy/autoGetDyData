@@ -1,5 +1,6 @@
 import type { LlmProvider, JsonValue } from "@/lib/llm";
 import { callStructuredLlm } from "@/lib/llm";
+import { normalizeFeishuAiContentMaxConcurrent } from "@/lib/feishuAiContentConcurrency";
 import { readBitable } from "@/lib/feishu/core/readBitable";
 import { loadFeishuBitableConfigForProfile } from "@/lib/feishu/core/config";
 import { getValidAccessToken } from "@/lib/feishu/core/oauth";
@@ -228,8 +229,170 @@ async function generateContent(
   return content;
 }
 
+async function loadAiContentCandidateContext() {
+  const taskData = await readBitable("task", { recordsOnly: true });
+  const productData = await readBitable("product", { recordsOnly: true });
+  const taskRecords = (Array.isArray(taskData.records) ? taskData.records : []) as FeishuRecord[];
+  const productRecords = (Array.isArray(productData.records) ? productData.records : []) as FeishuRecord[];
+  const products = productRecords.map(parseProductRecord).filter(Boolean) as ProductInfo[];
+  const indexes = buildProductIndexes(products);
+  const candidates = taskRecords.map(parseTaskRecord).filter(Boolean) as TaskCandidate[];
+  return { taskRecords, products, indexes, candidates };
+}
+
+function filterCandidatesByRecordIds(
+  candidates: TaskCandidate[],
+  recordIds?: string[]
+): TaskCandidate[] {
+  if (!recordIds || recordIds.length === 0) return candidates;
+  const allowed = new Set(recordIds.map((id) => String(id || "").trim()).filter(Boolean));
+  if (allowed.size === 0) return candidates;
+  return candidates.filter((candidate) => allowed.has(candidate.recordId));
+}
+
+function classifyAiContentCandidates(
+  candidates: TaskCandidate[],
+  indexes: ProductIndexes
+): {
+  generatable: TaskCandidate[];
+  generatableCount: number;
+  skippedNoProductCount: number;
+  skippedNoPromptCount: number;
+} {
+  const generatable: TaskCandidate[] = [];
+  let skippedNoProductCount = 0;
+  let skippedNoPromptCount = 0;
+
+  for (const task of candidates) {
+    const product = resolveProductForTask(task, indexes);
+    if (!product) {
+      skippedNoProductCount++;
+      continue;
+    }
+    if (!product.copyPrompt) {
+      skippedNoPromptCount++;
+      continue;
+    }
+    generatable.push(task);
+  }
+
+  return {
+    generatable,
+    generatableCount: generatable.length,
+    skippedNoProductCount,
+    skippedNoPromptCount,
+  };
+}
+
+/** 扫描任务表：正文为空且能匹配商品+文案提示词的可生成条数（不调用 LLM） */
+export async function peekFeishuAiContentCandidates(options: {
+  logger?: (...args: unknown[]) => void;
+  summaryPrefix?: string;
+} = {}) {
+  const log = options.logger || console.log;
+  const summaryPrefix = options.summaryPrefix || "[peek-feishu-ai-content]";
+
+  log(`${summaryPrefix} 扫描飞书任务表 AI 正文候选...`);
+  const { taskRecords, indexes, candidates } = await loadAiContentCandidateContext();
+  const classified = classifyAiContentCandidates(candidates, indexes);
+
+  log(
+    `  任务表 ${taskRecords.length} 条，正文为空 ${candidates.length} 条，可生成 ${classified.generatableCount} 条` +
+      (classified.skippedNoProductCount
+        ? `（无商品匹配 ${classified.skippedNoProductCount}）`
+        : "") +
+      (classified.skippedNoPromptCount
+        ? `（文案提示词为空 ${classified.skippedNoPromptCount}）`
+        : "")
+  );
+
+  return {
+    totalTaskCount: taskRecords.length,
+    emptyBodyCount: candidates.length,
+    ...classified,
+  };
+}
+
+async function runGeneratableWithConcurrency(options: {
+  generatable: TaskCandidate[];
+  generatableCount: number;
+  indexes: ProductIndexes;
+  provider: LlmProvider;
+  maxConcurrent: number;
+  taskCfg: ReturnType<typeof loadFeishuBitableConfigForProfile>;
+  accessToken: string;
+  log: (...args: unknown[]) => void;
+  isCancelled: () => boolean;
+  summaryPrefix: string;
+}): Promise<{ generatedCount: number; failedCount: number; cancelled: boolean }> {
+  const {
+    generatable,
+    generatableCount,
+    indexes,
+    provider,
+    maxConcurrent,
+    taskCfg,
+    accessToken,
+    log,
+    isCancelled,
+    summaryPrefix,
+  } = options;
+
+  let cursor = 0;
+
+  const worker = async () => {
+    let localGenerated = 0;
+    let localFailed = 0;
+    let localCancelled = false;
+
+    while (true) {
+      if (isCancelled()) {
+        localCancelled = true;
+        break;
+      }
+
+      const taskIndex = cursor++;
+      if (taskIndex >= generatable.length) break;
+
+      const task = generatable[taskIndex];
+      const displayIndex = taskIndex + 1;
+      const product = resolveProductForTask(task, indexes);
+      if (!product?.copyPrompt) continue;
+
+      try {
+        log(`  [${displayIndex}/${generatableCount}] ✎ 生成: ${task.rowLabel} -> ${product.productName}`);
+        const content = await generateContent(provider, task, product, log);
+        await updateBitableRecord(taskCfg, accessToken, task.recordId, { 正文: content });
+        localGenerated++;
+        log(`  [${displayIndex}/${generatableCount}] ✓ 写回成功: ${task.rowLabel} (recordId=${task.recordId})`);
+      } catch (error: unknown) {
+        localFailed++;
+        const message = error instanceof Error ? error.message : String(error);
+        log(`  [${displayIndex}/${generatableCount}] ✗ 失败: ${task.rowLabel}，${message}`);
+      }
+    }
+
+    return { generatedCount: localGenerated, failedCount: localFailed, cancelled: localCancelled };
+  };
+
+  const workerCount = Math.min(maxConcurrent, generatable.length);
+  const results = await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  const generatedCount = results.reduce((sum, item) => sum + item.generatedCount, 0);
+  const failedCount = results.reduce((sum, item) => sum + item.failedCount, 0);
+  const cancelled = results.some((item) => item.cancelled);
+
+  if (cancelled) {
+    log(`${summaryPrefix} 已取消，停止生成`);
+  }
+
+  return { generatedCount, failedCount, cancelled };
+}
+
 export async function generateTaskAiContentToFeishu(options: {
   provider?: LlmProvider;
+  maxConcurrent?: number;
+  recordIds?: string[];
   logger?: (...args: unknown[]) => void;
   isCancelled?: () => boolean;
   summaryPrefix?: string;
@@ -239,77 +402,73 @@ export async function generateTaskAiContentToFeishu(options: {
   const isCancelled = options.isCancelled || (() => false);
   const summaryPrefix = options.summaryPrefix || "[generate-feishu-ai-content]";
 
+  const maxConcurrent = normalizeFeishuAiContentMaxConcurrent(options.maxConcurrent);
   const model = resolveModelName(provider);
-  log(`${summaryPrefix} 开始读取飞书表格，厂商=${provider}，模型=${model}`);
-  const taskData = await readBitable("task", { recordsOnly: true });
-  const productData = await readBitable("product", { recordsOnly: true });
-  const taskRecords = (Array.isArray(taskData.records) ? taskData.records : []) as FeishuRecord[];
-  const productRecords = (Array.isArray(productData.records) ? productData.records : []) as FeishuRecord[];
-  const products = productRecords.map(parseProductRecord).filter(Boolean) as ProductInfo[];
-  const indexes = buildProductIndexes(products);
-  const candidates = taskRecords.map(parseTaskRecord).filter(Boolean) as TaskCandidate[];
+  log(
+    `${summaryPrefix} 开始读取飞书表格，厂商=${provider}，模型=${model}，并发=${maxConcurrent}`
+  );
+  const { taskRecords, products, indexes, candidates } = await loadAiContentCandidateContext();
+  const targetCandidates = filterCandidatesByRecordIds(candidates, options.recordIds);
+  const { generatable, generatableCount, skippedNoProductCount, skippedNoPromptCount } =
+    classifyAiContentCandidates(targetCandidates, indexes);
 
-  log(`${summaryPrefix} 任务表 ${taskRecords.length} 条，正文为空候选 ${candidates.length} 条，商品信息 ${products.length} 条`);
-  if (candidates.length > 0) {
-    log(`${summaryPrefix} 候选列表（前10条）:`);
-    for (const c of candidates.slice(0, 10)) {
+  log(
+    `${summaryPrefix} 任务表 ${taskRecords.length} 条，正文为空 ${candidates.length} 条` +
+      (options.recordIds?.length ? `，本次目标 ${targetCandidates.length} 条` : "") +
+      `，可生成 ${generatableCount} 条，商品信息 ${products.length} 条`
+  );
+  if (generatable.length > 0) {
+    log(`${summaryPrefix} 待生成列表（前10条）:`);
+    for (const c of generatable.slice(0, 10)) {
       log(`  - ${c.rowLabel}${c.productRecordIds.length ? ` [关联ID: ${c.productRecordIds.join(",")}]` : ""}`);
     }
-    if (candidates.length > 10) log(`  ... 共 ${candidates.length} 条`);
+    if (generatable.length > 10) log(`  ... 共 ${generatable.length} 条`);
+  }
+
+  if (generatableCount === 0) {
+    log(`${summaryPrefix} 没有满足 AI 正文生成条件的任务，跳过生成`);
+    return {
+      totalTaskCount: taskRecords.length,
+      emptyBodyCount: candidates.length,
+      targetEmptyBodyCount: targetCandidates.length,
+      generatableCount: 0,
+      generatedCount: 0,
+      skippedNoProductCount,
+      skippedNoPromptCount,
+      failedCount: 0,
+    };
   }
 
   const taskCfg = loadFeishuBitableConfigForProfile("task");
   const tokenCache = await getValidAccessToken(taskCfg);
   const accessToken = tokenCache.accessToken;
 
-  let generatedCount = 0;
-  let skippedNoProductCount = 0;
-  let skippedNoPromptCount = 0;
-  let failedCount = 0;
-  let index = 0;
-
-  for (const task of candidates) {
-    index++;
-    if (isCancelled()) {
-      log(`${summaryPrefix} 已取消，停止生成`);
-      break;
-    }
-
-    const product = resolveProductForTask(task, indexes);
-    if (!product) {
-      skippedNoProductCount++;
-      log(`  [${index}/${candidates.length}] ↷ 跳过: ${task.rowLabel}（无商品匹配）`);
-      continue;
-    }
-
-    if (!product.copyPrompt) {
-      skippedNoPromptCount++;
-      log(`  [${index}/${candidates.length}] ↷ 跳过: ${task.rowLabel} -> ${product.productName}（文案提示词为空）`);
-      continue;
-    }
-
-    try {
-      log(`  [${index}/${candidates.length}] ✎ 生成: ${task.rowLabel} -> ${product.productName}`);
-      const content = await generateContent(provider, task, product, log);
-      await updateBitableRecord(taskCfg, accessToken, task.recordId, { 正文: content });
-      generatedCount++;
-      log(`  [${index}/${candidates.length}] ✓ 写回成功: ${task.rowLabel} (recordId=${task.recordId})`);
-    } catch (error: any) {
-      failedCount++;
-      log(`  [${index}/${candidates.length}] ✗ 失败: ${task.rowLabel}，${error?.message || error}`);
-    }
-  }
+  const { generatedCount, failedCount } = await runGeneratableWithConcurrency({
+    generatable,
+    generatableCount,
+    indexes,
+    provider,
+    maxConcurrent,
+    taskCfg,
+    accessToken,
+    log,
+    isCancelled,
+    summaryPrefix,
+  });
 
   const summary = {
     totalTaskCount: taskRecords.length,
     emptyBodyCount: candidates.length,
+    targetEmptyBodyCount: targetCandidates.length,
+    generatableCount,
+    maxConcurrent,
     generatedCount,
     skippedNoProductCount,
     skippedNoPromptCount,
     failedCount,
   };
   log(
-    `${summaryPrefix} 完成：候选 ${summary.emptyBodyCount}，生成 ${summary.generatedCount}，无商品 ${summary.skippedNoProductCount}，无提示词 ${summary.skippedNoPromptCount}，失败 ${summary.failedCount}`
+    `${summaryPrefix} 完成：正文为空 ${summary.emptyBodyCount}，可生成 ${summary.generatableCount}，已生成 ${summary.generatedCount}，无商品 ${summary.skippedNoProductCount}，无提示词 ${summary.skippedNoPromptCount}，失败 ${summary.failedCount}`
   );
   return summary;
 }

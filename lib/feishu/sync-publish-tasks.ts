@@ -68,6 +68,11 @@ async function loadExistingTasksByFeishuRecordId(db) {
           feishuRecordId: 1,
           feishuContentHash: 1,
           feishuRowNumber: 1,
+          lastError: 1,
+          failureReason: 1,
+          failureCategory: 1,
+          failedStepTitle: 1,
+          failedStepTag: 1,
         },
       }
     )
@@ -412,6 +417,73 @@ function shouldQueueExistingTaskOnAutoStart(task) {
   return false;
 }
 
+async function queueAutoRetryableFailedTasks(db, options = {}) {
+  const logger = options.logger || console.log;
+  const log = (...args) => logger(...args);
+  const nowIso = new Date().toISOString();
+  const failedTasks = await db
+    .collection("creator_publish_tasks")
+    .find(
+      { status: "failed" },
+      {
+        projection: {
+          id: 1,
+          accountName: 1,
+          lastError: 1,
+          failureReason: 1,
+          failureCategory: 1,
+          failedStepTitle: 1,
+          failedStepTag: 1,
+        },
+      }
+    )
+    .toArray();
+
+  let queuedCount = 0;
+  let skippedExcludedCount = 0;
+  for (const task of failedTasks) {
+    if (isExcludedAutoRetryFailure(task)) {
+      skippedExcludedCount++;
+      continue;
+    }
+    await db.collection("creator_publish_tasks").updateOne(
+      { id: task.id, status: "failed" },
+      {
+        $set: {
+          status: "queued",
+          updatedAt: nowIso,
+          displayUpdatedAt: nowIso,
+        },
+        $unset: {
+          lastError: "",
+          taskId: "",
+          pid: "",
+          workerId: "",
+        },
+      }
+    );
+    queuedCount++;
+    log(`  → 可重试失败任务加入执行队列: ${task.accountName || "-"}（taskId=${task.id}）`);
+  }
+
+  if (failedTasks.length > 0) {
+    log(
+      `  失败任务自动重试扫描完成：入队 ${queuedCount}，排除 ${skippedExcludedCount}（购物车限额/限购或定时时间不满足平台要求）`
+    );
+  }
+
+  return { queuedCount, skippedExcludedCount, scannedCount: failedTasks.length };
+}
+
+async function queueAutoRetryableFailedPublishTasks(options = {}) {
+  const { client, db } = await getMongoDb();
+  try {
+    return await queueAutoRetryableFailedTasks(db, options);
+  } finally {
+    await client.close();
+  }
+}
+
 /** 轻量预检：满足导入前置条件的飞书任务行数（不读 Mongo、不下载附件） */
 async function peekFeishuSyncCandidates(options = {}) {
   const logger = options.logger || console.log;
@@ -439,6 +511,9 @@ async function peekFeishuSyncCandidates(options = {}) {
   return {
     totalRecords: records.length,
     syncCandidateCount: syncCandidates.length,
+    syncCandidateRecordIds: syncCandidates
+      .map((record) => String(record.record_id || "").trim())
+      .filter(Boolean),
     eligibleCount: eligibility.eligible,
     remoteCreatedSkipCount,
   };
@@ -537,7 +612,7 @@ async function syncPublishTasks(options = {}) {
     }
 
     if (syncCandidates.length === 0) {
-      log(`${summaryPrefix} 没有满足同步条件的任务，退出。`);
+      log(`${summaryPrefix} 没有满足同步条件的飞书任务，退出。`);
       return {
         createdCount: 0,
         updatedCount: 0,
@@ -809,4 +884,8 @@ async function syncPublishTasks(options = {}) {
   }
 }
 
-export { syncPublishTasks, peekFeishuSyncCandidates };
+export {
+  syncPublishTasks,
+  peekFeishuSyncCandidates,
+  queueAutoRetryableFailedPublishTasks,
+};

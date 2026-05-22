@@ -8,6 +8,7 @@ import {
   Card,
   DatePicker,
   Form,
+  Image,
   Input,
   Modal,
   Popconfirm,
@@ -234,6 +235,7 @@ export default function CreatorPublishPage() {
   const [accounts, setAccounts] = useState<{ name: string }[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [editingTask, setEditingTask] = useState<PublishTask | null>(null);
+  const [materialPreviewTask, setMaterialPreviewTask] = useState<PublishTask | null>(null);
   const [editState, setEditState] = useState<EditTaskState>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [scheduleColumnSortOrder, setScheduleColumnSortOrder] = useState<"ascend" | "descend" | null>(
@@ -761,6 +763,29 @@ export default function CreatorPublishPage() {
     setSavingEdit(false);
   }
 
+  function materialPreviewUrl(fileKey: string) {
+    return `/api/creator/publish/material?key=${encodeURIComponent(fileKey)}`;
+  }
+
+  function taskHasMaterial(task: PublishTask) {
+    if (task.payload.type === "video") {
+      return Boolean(task.payload.videoFileKey);
+    }
+    return Array.isArray(task.payload.imagesFileKeys) && task.payload.imagesFileKeys.length > 0;
+  }
+
+  function openMaterialPreview(task: PublishTask) {
+    if (!taskHasMaterial(task)) {
+      message.warning("暂无素材可预览");
+      return;
+    }
+    setMaterialPreviewTask(task);
+  }
+
+  function closeMaterialPreview() {
+    setMaterialPreviewTask(null);
+  }
+
   async function handleSaveEditTask() {
     if (!editingTask || !editState) return;
     const nextAccount = editState.accountName.trim();
@@ -900,7 +925,25 @@ export default function CreatorPublishPage() {
       title: "类型",
       align: "center" as const,
       width: 56,
-      render: (_: any, r: PublishTask) => (r.payload.type === "video" ? "视频" : "图文"),
+      render: (_: any, r: PublishTask) => {
+        const label = r.payload.type === "video" ? "视频" : "图文";
+        if (!taskHasMaterial(r)) return label;
+        return (
+          <Tooltip title="点击预览素材">
+            <span
+              style={{
+                color: "#2563eb",
+                cursor: "pointer",
+                fontSize: 12,
+                whiteSpace: "nowrap",
+              }}
+              onClick={() => openMaterialPreview(r)}
+            >
+              {label}
+            </span>
+          </Tooltip>
+        );
+      },
     },
     {
       title: "标题",
@@ -1462,6 +1505,84 @@ export default function CreatorPublishPage() {
         style={{ width: "100%" }}
         onRow={handleRow}
       />
+      <Modal
+        title={
+          materialPreviewTask
+            ? `素材预览 · ${materialPreviewTask.payload.type === "video" ? "视频" : "图文"}`
+            : "素材预览"
+        }
+        open={Boolean(materialPreviewTask)}
+        onCancel={closeMaterialPreview}
+        footer={null}
+        destroyOnHidden
+        centered
+        width={760}
+        styles={{
+          body: {
+            paddingTop: 12,
+            paddingBottom: 12,
+            maxHeight: "calc(100vh - 160px)",
+            overflow: "auto",
+          },
+        }}
+      >
+        {materialPreviewTask?.payload.type === "video" && materialPreviewTask.payload.videoFileKey ? (
+          <video
+            controls
+            preload="metadata"
+            style={{
+              width: "100%",
+              maxHeight: "70vh",
+              background: "#000",
+              borderRadius: 8,
+            }}
+            src={materialPreviewUrl(materialPreviewTask.payload.videoFileKey)}
+          />
+        ) : null}
+        {materialPreviewTask?.payload.type === "article" &&
+        Array.isArray(materialPreviewTask.payload.imagesFileKeys) &&
+        materialPreviewTask.payload.imagesFileKeys.length > 0 ? (
+          <Image.PreviewGroup>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                gap: 10,
+              }}
+            >
+              {materialPreviewTask.payload.imagesFileKeys.map((key, index) => {
+                const isCover =
+                  materialPreviewTask.payload.type === "article" &&
+                  (materialPreviewTask.payload.coverImageKey === key ||
+                    (!materialPreviewTask.payload.coverImageKey && index === 0));
+                return (
+                  <div key={key} style={{ position: "relative" }}>
+                    {isCover ? (
+                      <Tag
+                        color="blue"
+                        style={{ position: "absolute", top: 6, left: 6, zIndex: 1, margin: 0 }}
+                      >
+                        封面
+                      </Tag>
+                    ) : null}
+                    <Image
+                      src={materialPreviewUrl(key)}
+                      alt={key}
+                      style={{
+                        width: "100%",
+                        aspectRatio: "1 / 1",
+                        objectFit: "cover",
+                        borderRadius: 8,
+                        background: "#f5f5f5",
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </Image.PreviewGroup>
+        ) : null}
+      </Modal>
       <Modal
         title="编辑任务"
         open={Boolean(editingTask && editState)}

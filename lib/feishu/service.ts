@@ -1,10 +1,11 @@
 import dotenv from "dotenv";
 import { getConfig } from "@/lib/configService";
+import { normalizeFeishuAiContentMaxConcurrent } from "@/lib/feishuAiContentConcurrency";
 import { normalizeFeishuAiProvider } from "@/lib/feishuAiProvider";
-import type { LlmProvider } from "@/lib/llm";
 import { runWithArgs } from "@/lib/feishu/legacy-cli";
 import {
   peekFeishuSyncCandidates,
+  queueAutoRetryableFailedPublishTasks,
   syncPublishTasks,
 } from "@/lib/feishu/sync-publish-tasks";
 import { generateTaskAiContentToFeishu } from "@/lib/feishu/generate-task-ai-content";
@@ -64,11 +65,12 @@ export async function backupFeishuBitable(options: {
 
 export async function peekFeishuPublishImportCandidates(options: {
   logger?: (...args: unknown[]) => void;
+  summaryPrefix?: string;
 } = {}) {
   await prepareProjectConfigEnv("task");
   return await peekFeishuSyncCandidates({
     logger: options.logger || console.log,
-    summaryPrefix: "[peek-feishu-import-api]",
+    summaryPrefix: options.summaryPrefix || "[peek-feishu-import-api]",
   });
 }
 
@@ -86,11 +88,19 @@ export async function importPublishTasksFromFeishu(options: {
   });
 }
 
-/** 预检 →（有候选则）AI 生成正文 → 飞书导入；手动与定时调度共用 */
+export async function queueAutoRetryableFailedCreatorPublishTasks(options: {
+  logger?: (...args: unknown[]) => void;
+} = {}) {
+  await prepareProjectConfigEnv("task");
+  return await queueAutoRetryableFailedPublishTasks({
+    logger: options.logger || console.log,
+  });
+}
+
+/** 自动调度：先重试失败，再只给本次导入候选生成空正文，最后导入发布任务 */
 export async function runFeishuPublishImportPipeline(options: {
   autoStart?: boolean;
   allowCreate?: boolean;
-  provider?: LlmProvider;
   logger?: (...args: unknown[]) => void;
   isCancelled?: () => boolean;
   summaryPrefix?: string;
@@ -98,53 +108,70 @@ export async function runFeishuPublishImportPipeline(options: {
   const log = options.logger || console.log;
   const summaryPrefix = options.summaryPrefix || "[feishu-import-pipeline]";
 
-  log(`${summaryPrefix} 预检：飞书任务表是否满足导入条件`);
-  const peek = await peekFeishuPublishImportCandidates({ logger: log });
+  await prepareProjectConfigEnv("task");
+
+  let earlyAutoRetrySummary: Awaited<
+    ReturnType<typeof queueAutoRetryableFailedCreatorPublishTasks>
+  > | null = null;
+
+  if (options.autoStart === true) {
+    log(`${summaryPrefix} 自动调度：先扫描本地可重试失败任务`);
+    earlyAutoRetrySummary = await queueAutoRetryableFailedCreatorPublishTasks({
+      logger: log,
+    });
+  }
+
+  log(`${summaryPrefix} 扫描并从飞书导入任务`);
+  const peek = await peekFeishuPublishImportCandidates({
+    logger: log,
+    summaryPrefix: `${summaryPrefix}-import-peek`,
+  });
   log(
-    `  预检结果：任务表 ${peek.totalRecords} 条，待导入预检 ${peek.syncCandidateCount} 条` +
+    `  导入预检：任务表 ${peek.totalRecords} 条，待导入 ${peek.syncCandidateCount} 条` +
       (peek.remoteCreatedSkipCount
         ? `（已排除飞书已创建任务=是 ${peek.remoteCreatedSkipCount} 条）`
         : "")
   );
 
-  if (peek.syncCandidateCount <= 0) {
-    log("  没有满足同步条件的飞书任务，跳过 AI 生成与导入");
-    return { skipped: true, reason: "no-sync-candidates" as const, peek };
-  }
-
-  const config = await getConfig();
-  const provider = options.provider ?? normalizeFeishuAiProvider(config.creatorPublish?.feishuAiProvider);
-
-  log(`${summaryPrefix} 步骤 1/2：飞书 AI 正文生成 (provider=${provider})`);
-  try {
-    await generateFeishuTaskAiContent({
-      provider,
+  let targetedAiSummary: Awaited<ReturnType<typeof generateFeishuTaskAiContent>> | null = null;
+  if (options.autoStart === true && peek.syncCandidateRecordIds?.length > 0) {
+    log(
+      `${summaryPrefix} 自动调度：仅为本次飞书导入候选中的空正文任务生成 AI 正文`
+    );
+    targetedAiSummary = await generateFeishuTaskAiContent({
+      recordIds: peek.syncCandidateRecordIds,
       logger: log,
       isCancelled: options.isCancelled,
     });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
-    log(`  ⚠️ AI 正文生成失败，继续执行导入: ${message}`);
   }
 
-  log(`${summaryPrefix} 步骤 2/2：从飞书导入任务`);
   const importSummary = await importPublishTasksFromFeishu({
     autoStart: options.autoStart === true,
     allowCreate: options.allowCreate !== false,
     logger: log,
   });
 
-  return { skipped: false, peek, importSummary };
+  return { peek, targetedAiSummary, importSummary, earlyAutoRetrySummary };
 }
 
 export async function generateFeishuTaskAiContent(options: {
   provider?: "siliconflow" | "deepseek";
+  maxConcurrent?: number;
+  recordIds?: string[];
   logger?: (...args: unknown[]) => void;
   isCancelled?: () => boolean;
 } = {}) {
   await prepareProjectConfigEnv("task");
+  const config = await getConfig();
+  const provider = options.provider ?? normalizeFeishuAiProvider(config.creatorPublish?.feishuAiProvider);
   return await generateTaskAiContentToFeishu({
-    provider: options.provider || "siliconflow",
+    provider,
+    maxConcurrent:
+      options.maxConcurrent ??
+      normalizeFeishuAiContentMaxConcurrent(
+        config.creatorPublish?.feishuAiContentMaxConcurrent
+      ),
+    recordIds: options.recordIds,
     logger: options.logger || console.log,
     isCancelled: options.isCancelled,
     summaryPrefix: "[generate-feishu-ai-content-api]",

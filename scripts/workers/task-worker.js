@@ -284,7 +284,7 @@ async function enqueueCreatorPublishAutomationJob(taskId, reason) {
   appendTaskLog(
     taskId,
     "info",
-    `自动调度触发 (${reason})，启动飞书导入流水线（预检 → AI 正文 → 导入）`
+    `自动调度触发 (${reason})，启动飞书导入流水线`
   );
   try {
     const result = await startAndWaitInternalApiTask(

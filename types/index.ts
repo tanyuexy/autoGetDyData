@@ -40,8 +40,10 @@ export interface ConfigData {
     publishWaitSec?: number;  // 发布后停留秒数（默认 3）
     /** API + Worker 可同时运行的发布浏览器进程上限（默认 3，范围 1–20） */
     publishMaxConcurrent?: number;
-    /** 飞书 AI 生成正文使用的 LLM 厂商（手动与定时导入前生成共用） */
+    /** 飞书 AI 生成正文使用的 LLM 厂商（「AI生成正文」按钮） */
     feishuAiProvider?: FeishuAiProvider;
+    /** 飞书 AI 正文生成并发数（默认 3，范围 1–10） */
+    feishuAiContentMaxConcurrent?: number;
     automation?: {
       enabled?: boolean;
       mode?: "weekly" | "interval";
