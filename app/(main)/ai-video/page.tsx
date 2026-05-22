@@ -35,6 +35,7 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 import type { UploadFile, UploadProps } from "antd/es/upload/interface";
+import { antdTagPresetStyle, type SemanticTagPreset } from "@/lib/semanticTagStyles";
 
 type GenerationMode = "text" | "first-frame" | "first-last-frame";
 
@@ -264,12 +265,36 @@ function readCachedClips(): ClipItem[] {
   }
 }
 
-function getStatusColor(status: string) {
+function getStatusPreset(status: string): SemanticTagPreset {
   const normalized = status.toLowerCase();
   if (["succeeded", "success", "completed", "done"].includes(normalized)) return "success";
   if (["failed", "error", "cancelled", "canceled"].includes(normalized)) return "error";
   if (["queued", "created", "pending"].includes(normalized)) return "default";
-  return "processing";
+  if (["running", "processing", "in_progress", "in-progress"].includes(normalized)) return "processing";
+  return "default";
+}
+
+function formatClipStatusLabel(status: string) {
+  const normalized = status.toLowerCase();
+  const labels: Record<string, string> = {
+    running: "生成中",
+    processing: "生成中",
+    in_progress: "生成中",
+    "in-progress": "生成中",
+    queued: "排队中",
+    created: "已创建",
+    pending: "待生成",
+    succeeded: "已完成",
+    success: "已完成",
+    completed: "已完成",
+    done: "已完成",
+    failed: "失败",
+    error: "失败",
+    cancelled: "已取消",
+    canceled: "已取消",
+    unknown: "未知",
+  };
+  return labels[normalized] || status || "未知";
 }
 
 function isFinished(status: string) {
@@ -860,7 +885,14 @@ export default function AiVideoPage() {
       title: "状态",
       dataIndex: "status",
       width: 110,
-      render: (value) => <Tag color={getStatusColor(String(value))}>{String(value || "unknown")}</Tag>,
+      render: (value) => {
+        const status = String(value || "unknown");
+        return (
+          <Tag style={{ ...antdTagPresetStyle(getStatusPreset(status)), margin: 0 }}>
+            {formatClipStatusLabel(status)}
+          </Tag>
+        );
+      },
     },
     {
       title: "视频",
@@ -1072,7 +1104,7 @@ export default function AiVideoPage() {
               <Select value={model} onChange={setModel} options={modelOptions} style={{ minWidth: 300 }} />
               <Space>
                 {selectedModel?.generation.map((item) => (
-                  <Tag key={item} color="blue">
+                  <Tag key={item} style={antdTagPresetStyle("blue")}>
                     {item}
                   </Tag>
                 ))}

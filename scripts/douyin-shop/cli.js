@@ -274,7 +274,7 @@ async function runOne(browser, account, options = {}) {
     throw new Error("账号 email/password 缺失");
   }
   const paths = getAccountPaths(account.email);
-  const hasStorage = await fs
+  const hasStorage = await fse
     .access(paths.storageStatePath)
     .then(() => true)
     .catch(() => false);
