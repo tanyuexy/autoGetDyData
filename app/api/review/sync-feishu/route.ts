@@ -3,6 +3,9 @@ import { getConfig } from "@/lib/configService";
 import { readReviewItems } from "@/lib/reviewService";
 import { generateTaskIdWithTime } from "@/lib/taskManager";
 import { appendTaskLog, appendTaskDone, ensureTaskLogMeta } from "@/lib/taskLogStore";
+import { loadFeishuBitableConfigForProfile } from "@/lib/feishu/core/config";
+import { getValidAccessToken } from "@/lib/feishu/core/oauth";
+import { listAllBitableRecords, batchUpdateBitableRecords } from "@/lib/feishu/core/bitable";
 
 function log(taskId: string, text: string, level: "info" | "warn" | "error" = "info") {
   // 单行输出，避免正文换行拆散日志
@@ -92,10 +95,6 @@ export async function POST() {
 
     const projectConfig = await getConfig();
     process.env.PROJECT_CONFIG_JSON = JSON.stringify(projectConfig);
-
-    const { loadFeishuBitableConfigForProfile } = require("@/lib/feishu/core/config");
-    const { getValidAccessToken } = require("@/lib/feishu/core/oauth");
-    const { listAllBitableRecords, batchUpdateBitableRecords } = require("@/lib/feishu/core/bitable");
 
     const cfg = loadFeishuBitableConfigForProfile("task");
     const tokenCache = await getValidAccessToken(cfg);

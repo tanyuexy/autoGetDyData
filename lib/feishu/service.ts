@@ -1,11 +1,24 @@
+import dotenv from "dotenv";
 import { getConfig } from "@/lib/configService";
 import { normalizeFeishuAiProvider } from "@/lib/feishuAiProvider";
 import type { LlmProvider } from "@/lib/llm";
+import { runWithArgs } from "@/lib/feishu/legacy-cli";
+import {
+  peekFeishuSyncCandidates,
+  syncPublishTasks,
+} from "@/lib/feishu/sync-publish-tasks";
+import { generateTaskAiContentToFeishu } from "@/lib/feishu/generate-task-ai-content";
+import { loadFeishuBitableConfigForProfile } from "@/lib/feishu/core/config";
+import { getValidAccessToken } from "@/lib/feishu/core/oauth";
+import {
+  getBitableRecord,
+  updateBitableRecord,
+} from "@/lib/feishu/core/bitable";
 
 type FeishuSyncProfile = "creator" | "shop";
 
 async function prepareProjectConfigEnv(profile?: string) {
-  require("dotenv").config();
+  dotenv.config();
   process.env.PROJECT_CONFIG_JSON = JSON.stringify(await getConfig());
   if (profile) process.env.FEISHU_BITABLE_PROFILE = profile;
 }
@@ -19,7 +32,6 @@ export async function syncFeishuBitable(options: {
 }) {
   const profile = options.profile;
   await prepareProjectConfigEnv(profile);
-  const { runWithArgs } = require("@/lib/feishu/legacy-cli");
 
   const args =
     profile === "shop"
@@ -45,7 +57,6 @@ export async function backupFeishuBitable(options: {
   dryRun?: boolean;
 }) {
   await prepareProjectConfigEnv();
-  const { runWithArgs } = require("@/lib/feishu/legacy-cli");
   const args = ["backup-bitable", "--profiles", options.profiles || "creator,shop"];
   if (options.dryRun) args.push("--dry-run");
   await runWithArgs(args);
@@ -55,7 +66,6 @@ export async function peekFeishuPublishImportCandidates(options: {
   logger?: (...args: unknown[]) => void;
 } = {}) {
   await prepareProjectConfigEnv("task");
-  const { peekFeishuSyncCandidates } = require("@/lib/feishu/sync-publish-tasks");
   return await peekFeishuSyncCandidates({
     logger: options.logger || console.log,
     summaryPrefix: "[peek-feishu-import-api]",
@@ -68,7 +78,6 @@ export async function importPublishTasksFromFeishu(options: {
   logger?: (...args: unknown[]) => void;
 } = {}) {
   await prepareProjectConfigEnv("task");
-  const { syncPublishTasks } = require("@/lib/feishu/sync-publish-tasks");
   return await syncPublishTasks({
     autoStart: options.autoStart === true,
     allowCreate: options.allowCreate !== false,
@@ -134,7 +143,6 @@ export async function generateFeishuTaskAiContent(options: {
   isCancelled?: () => boolean;
 } = {}) {
   await prepareProjectConfigEnv("task");
-  const { generateTaskAiContentToFeishu } = require("@/lib/feishu/generate-task-ai-content");
   return await generateTaskAiContentToFeishu({
     provider: options.provider || "siliconflow",
     logger: options.logger || console.log,
@@ -153,9 +161,6 @@ export async function writeFeishuTaskStatus(options: {
   approvalText?: string;
 }) {
   await prepareProjectConfigEnv("task");
-  const { loadFeishuBitableConfigForProfile } = require("@/lib/feishu/core/config");
-  const { getValidAccessToken } = require("@/lib/feishu/core/oauth");
-  const { getBitableRecord, updateBitableRecord } = require("@/lib/feishu/core/bitable");
 
   const recordId = String(options.recordId || "").trim();
   const statusText = String(options.statusText || "").replace(/\s+/g, " ").trim().slice(0, 200);
@@ -185,9 +190,6 @@ export async function markFeishuTaskPublished(recordId: string) {
 
   try {
     await prepareProjectConfigEnv("task");
-    const { loadFeishuBitableConfigForProfile } = require("@/lib/feishu/core/config");
-    const { getValidAccessToken } = require("@/lib/feishu/core/oauth");
-    const { getBitableRecord } = require("@/lib/feishu/core/bitable");
 
     const cfg = loadFeishuBitableConfigForProfile("task");
     const tokenCache = await getValidAccessToken(cfg);

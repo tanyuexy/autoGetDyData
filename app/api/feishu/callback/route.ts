@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { loadFeishuConfig } from "@/lib/feishu/core/config";
+import { exchangeCodeForToken, writeTokenCache } from "@/lib/feishu/core/oauth";
 
 export async function GET(request: NextRequest) {
   try {
-    const { loadFeishuConfig } = require("@/lib/feishu/core/config");
-    const { exchangeCodeForToken, writeTokenCache } = require("@/lib/feishu/core/oauth");
 
     const url = new URL(request.url);
     const code = url.searchParams.get("code");

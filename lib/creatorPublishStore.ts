@@ -1,6 +1,12 @@
 import { getTaskList } from "./taskManager";
 import { getDb } from "./db/mongo";
 import { loadTaskSnapshot, readLastTaskError } from "./taskLogStore";
+import { loadFeishuBitableConfigForProfile } from "./feishu/core/config";
+import { getValidAccessToken } from "./feishu/core/oauth";
+import {
+  updateBitableRecord,
+  listAllBitableRecords,
+} from "./feishu/core/bitable";
 
 export type CreatorPublishTaskType = "video" | "article";
 
@@ -245,14 +251,6 @@ export async function reconcileFeishuWritebacks(): Promise<void> {
   if (pending.length === 0) return;
 
   try {
-    const { loadFeishuBitableConfigForProfile } = require(
-      "./feishu/core/config"
-    );
-    const { getValidAccessToken } = require("./feishu/core/oauth");
-    const { updateBitableRecord, listAllBitableRecords } = require(
-      "./feishu/core/bitable"
-    );
-
     const cfg = loadFeishuBitableConfigForProfile("task");
     const tokenCache = await getValidAccessToken(cfg);
 

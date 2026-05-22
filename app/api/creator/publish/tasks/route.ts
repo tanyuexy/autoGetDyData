@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import { killTask } from "@/lib/taskManager";
 import { getConfig } from "@/lib/configService";
 import {
   patchCreatorPublishTask,
@@ -80,7 +81,6 @@ export async function PATCH(req: NextRequest) {
       for (const task of tasks) {
         if (task.status !== "queued" && task.status !== "running") continue;
         if (task.taskId) {
-          const { killTask } = require("@/lib/taskManager");
           await killTask(task.taskId);
         }
         task.status = "cancelled";
@@ -106,7 +106,6 @@ export async function PATCH(req: NextRequest) {
         if (!ids.includes(task.id)) continue;
         if (task.status !== "queued" && task.status !== "running") continue;
         if (task.status === "running" && task.taskId) {
-          const { killTask } = require("@/lib/taskManager");
           await killTask(task.taskId);
         }
         task.status = "cancelled";
@@ -229,7 +228,6 @@ export async function PATCH(req: NextRequest) {
 
       const task = tasks[idx];
       if (task.status === "running" && task.taskId) {
-        const { killTask } = require("@/lib/taskManager");
         await killTask(task.taskId);
       }
 

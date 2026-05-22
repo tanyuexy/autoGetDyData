@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
+import { loadFeishuConfig } from "@/lib/feishu/core/config";
+import { buildAuthorizeUrl } from "@/lib/feishu/core/oauth";
 
 export async function POST() {
   try {
-    const { loadFeishuConfig } = require("@/lib/feishu/core/config");
-    const { buildAuthorizeUrl } = require("@/lib/feishu/core/oauth");
-
     const config = loadFeishuConfig();
     if (!config.redirectUri) {
       return NextResponse.json(

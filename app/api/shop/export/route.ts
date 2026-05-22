@@ -1,4 +1,6 @@
+import dotenv from "dotenv";
 import { NextRequest, NextResponse } from "next/server";
+import { calcDaysToExport } from "@/scripts/douyin-shop/lib/merge-shop-exports";
 import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
@@ -45,8 +47,7 @@ function parseExportDateRange(body: any) {
 
 export async function GET() {
   try {
-    require("dotenv").config();
-    const { calcDaysToExport } = require("@/scripts/douyin-shop/lib/merge-shop-exports");
+    dotenv.config();
     let daysToExport = 1;
     try {
       daysToExport = await calcDaysToExport();
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    require("dotenv").config();
+    dotenv.config();
 
     const body = await request.json().catch(() => ({} as any));
     const shopNames = parseShopNames(body);

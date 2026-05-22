@@ -1,3 +1,4 @@
+import dotenv from "dotenv";
 import { NextRequest, NextResponse } from "next/server";
 import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
@@ -12,7 +13,7 @@ export async function POST(_request: NextRequest) {
       );
     }
 
-    require("dotenv").config();
+    dotenv.config();
 
     const taskId = generateTaskIdWithTime("shop-login");
     await enqueueTask(taskId, "node", ["scripts/run.js", "shop:login"], { namespace: "login" });

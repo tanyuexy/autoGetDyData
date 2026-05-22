@@ -57,7 +57,7 @@ export interface ConfigData {
     };
   };
   feishu: {
-    shop: { baseUrl?: string; appToken: string; tableId: string };
+    shop: { baseUrl?: string; appToken: string; tableId: string; keepRows?: number };
     creator: { baseUrl?: string; appToken: string; tableId: string; keepRows?: number };
     task: { baseUrl?: string; appToken: string; tableId: string };
     product: { baseUrl?: string; appToken: string; tableId: string };

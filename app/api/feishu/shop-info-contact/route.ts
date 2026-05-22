@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getConfig } from "@/lib/configService";
+import { loadFeishuConfig } from "@/lib/feishu/core/config";
+import { getValidAccessToken } from "@/lib/feishu/core/oauth";
+import { listAllBitableRecords } from "@/lib/feishu/core/bitable";
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,10 +17,6 @@ export async function POST(request: NextRequest) {
     if (!shopInfo?.appToken || !shopInfo?.tableId) {
       return NextResponse.json({ found: false, error: "未配置 feishu.shopInfo" });
     }
-
-    const { loadFeishuConfig } = require("@/lib/feishu/core/config");
-    const { getValidAccessToken } = require("@/lib/feishu/core/oauth");
-    const { listAllBitableRecords } = require("@/lib/feishu/core/bitable");
 
     const feishuCfg = {
       ...loadFeishuConfig(),

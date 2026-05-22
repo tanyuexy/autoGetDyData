@@ -1,6 +1,6 @@
 // @ts-nocheck
-const fse = require("fs-extra");
-const path = require("path");
+import fse from "fs-extra";
+import path from "node:path";
 
 function normalizeScope(scopeText) {
   const scopes = String(scopeText || "")
@@ -145,11 +145,11 @@ async function getValidAccessToken(config) {
   return refreshed;
 }
 
-module.exports = {
+export {
   buildAuthorizeUrl,
   exchangeCodeForToken,
   refreshAccessToken,
   readTokenCache,
   writeTokenCache,
-  getValidAccessToken
+  getValidAccessToken,
 };

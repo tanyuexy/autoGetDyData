@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import fse from "fs-extra";
+import { getFeishuTokenCachePath } from "@/lib/feishu/core/config";
 
 export async function GET() {
   try {
-    const { getFeishuTokenCachePath } = require("@/lib/feishu/core/config");
 
     const cachePath = getFeishuTokenCachePath();
 

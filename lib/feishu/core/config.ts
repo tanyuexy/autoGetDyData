@@ -1,6 +1,6 @@
 // @ts-nocheck
-const path = require("path");
-const { readProjectConfigFromEnv } = require("../../../scripts/common/project-config");
+import path from "node:path";
+import { readProjectConfigFromEnv } from "@/scripts/common/project-config";
 
 const DEFAULT_API_BASE = "https://open.feishu.cn";
 const DEFAULT_AUTH_BASE = "https://accounts.feishu.cn";
@@ -108,10 +108,10 @@ function loadFeishuConfig() {
   };
 }
 
-module.exports = {
+export {
   loadFeishuConfig,
   loadFeishuBitableConfigForProfile,
   getFeishuTokenCachePath,
   requireEnv,
-  optionalEnv
+  optionalEnv,
 };

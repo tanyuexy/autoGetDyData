@@ -1,6 +1,6 @@
 import type { LogEntry } from "@/types";
 
-const taskLogStore = require("@/scripts/common/task-log-store");
+import * as taskLogStore from "@/scripts/common/task-log-store";
 
 export type TaskLogSnapshot = {
   found: boolean;

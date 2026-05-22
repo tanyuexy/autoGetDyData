@@ -1,3 +1,4 @@
+import dotenv from "dotenv";
 import { NextRequest, NextResponse } from "next/server";
 import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
@@ -12,7 +13,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    require("dotenv").config();
+    dotenv.config();
 
     const body = await request.json().catch(() => ({} as any));
     const accounts = Array.isArray(body?.accounts)

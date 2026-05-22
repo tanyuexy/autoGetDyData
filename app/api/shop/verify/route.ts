@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { enqueueTask, generateTaskIdWithTime } from "@/lib/taskManager";
 import { getDb } from "@/lib/db/mongo";
+import path from "node:path";
 import fse from "fs-extra";
 
 async function waitForTaskDone(taskId: string, timeoutMs: number) {
@@ -23,8 +24,6 @@ export async function POST(request: Request) {
     if (!email) {
       return NextResponse.json({ error: "缺少 email 参数" }, { status: 400 });
     }
-
-    const path = require("path");
 
     const ACCOUNTS_DIR = (() => {
       const envVal = process.env.SHOP_ACCOUNTS_DIR;

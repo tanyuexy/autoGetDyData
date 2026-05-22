@@ -1,14 +1,13 @@
 // @ts-nocheck
 import fse from "fs-extra";
-require("dotenv").config();
-
-const path = require("path");
-const crypto = require("crypto");
-const { MongoClient } = require("mongodb");
-const { readBitable } = require("./core/readBitable");
-const { downloadAttachment, updateBitableRecord } = require("./core/bitable");
-const { loadFeishuBitableConfigForProfile } = require("./core/config");
-const { getValidAccessToken } = require("./core/oauth");
+import "dotenv/config";
+import path from "node:path";
+import crypto from "node:crypto";
+import { MongoClient } from "mongodb";
+import { readBitable } from "./core/readBitable";
+import { downloadAttachment, updateBitableRecord } from "./core/bitable";
+import { loadFeishuBitableConfigForProfile } from "./core/config";
+import { getValidAccessToken } from "./core/oauth";
 
 const MATERIALS_DIR = path.resolve(
   process.cwd(),
@@ -810,7 +809,4 @@ async function syncPublishTasks(options = {}) {
   }
 }
 
-module.exports = {
-  syncPublishTasks,
-  peekFeishuSyncCandidates,
-};
+export { syncPublishTasks, peekFeishuSyncCandidates };

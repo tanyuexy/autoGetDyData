@@ -1,6 +1,6 @@
 // @ts-nocheck
-const fse = require("fs-extra");
-const path = require("path");
+import fse from "fs-extra";
+import path from "node:path";
 async function createBitableRecord(config, accessToken, fields) {
   if (!config.bitableAppToken) {
     throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
@@ -111,7 +111,7 @@ async function listBitableFields(config, accessToken, tableId = "") {
   return allItems;
 }
 
-async function listAllBitableRecords(config, accessToken, tableId = "", fieldNames = []) {
+async function listAllBitableRecords(config, accessToken, tableId = "", fieldNames?: string[]) {
   if (!config.bitableAppToken) {
     throw new Error("缺少 FEISHU_BITABLE_APP_TOKEN");
   }
@@ -511,7 +511,7 @@ async function batchUpdateBitableRecords(
   return { records: items, updated: items.length };
 }
 
-module.exports = {
+export {
   createBitableRecord,
   getBitableRecord,
   updateBitableRecord,

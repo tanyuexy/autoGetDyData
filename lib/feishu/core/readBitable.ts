@@ -3,13 +3,13 @@
  * 飞书多维表格读取工具 (可复用)
  *
  * 用法:
- *   const { readBitable } = require("@/lib/feishu/core/readBitable");
+ *   import { readBitable } from "@/lib/feishu/core/readBitable";
  *   const data = await readBitable("task");
  *   // data = { fields: [...], records: [...], fieldMap: {...} }
  */
-const { loadFeishuBitableConfigForProfile } = require("./config");
-const { getValidAccessToken } = require("./oauth");
-const { listBitableFields, listAllBitableRecords } = require("./bitable");
+import { loadFeishuBitableConfigForProfile } from "./config";
+import { getValidAccessToken } from "./oauth";
+import { listBitableFields, listAllBitableRecords } from "./bitable";
 
 const TYPE_MAP = {
   1: "文本",
@@ -113,7 +113,7 @@ async function readBitable(profile, options = {}) {
   return { fields, records, fieldMap, fieldMapByName, config: cfg };
 }
 
-module.exports = {
+export {
   readBitable,
   buildFieldMap,
   getFieldName,

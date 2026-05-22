@@ -37,6 +37,15 @@ Both layers share the same `scripts/run.js` routing table and namespace concurre
 
 `scripts/run.js` maps route names (e.g. `creator:export`) to entry scripts + CLI arguments. It loads `PROJECT_CONFIG_JSON` from MongoDB `app_config` and passes it as an env var to every child process. All Playwright scripts read this env var for runtime configuration instead of hitting MongoDB directly.
 
+### Next.js 模块规范（ESM）
+
+被 Next.js / Turbopack 打包的代码（`app/`、`lib/` 下的 `.ts` / `.tsx`）统一使用 **`import` / `export`**：
+
+- **禁止**在同一文件混用顶层 `import` 与 `module.exports` / 函数内 `require("@/lib/...")` 加载会被打包的模块；否则生产/开发运行时可能出现 `module is not defined`（例如飞书定时导入流水线）。
+- **`lib/feishu/`**：`core/*`、`sync-publish-tasks.ts`、`legacy-cli.ts`、`service.ts` 等均为 ESM；`service.ts` 用静态 import 调用同步/导入/AI 生成，不再动态 `require`。
+- **`scripts/**/*.js`**：仍由 `node scripts/run.js` 子进程执行，保持 CommonJS（`require` / `module.exports`）。API 若需脚本侧工具函数，优先抽到 `lib/`，或在路由顶层 `import` CJS 模块（依赖 `esModuleInterop`）。
+- **环境变量**：需在路由里加载 `.env` 时用 `import dotenv from "dotenv"` 后 `dotenv.config()`，或 `import "dotenv/config"`。
+
 ### 浏览器测试（playwright-cli）
 
 需要用真实浏览器做页面验证、DOM 调试或复现 Playwright 自动化流程时：**先读取并遵循本仓库的 playwright-cli skill**（`.claude/skills/playwright-cli/SKILL.md`），按其中的 `playwright-cli` 命令与 snapshot / refs 交互；不要凭空写选择器或臆测页面结构，在操作的时候每一步操作告诉我你的思考与后续详细执行步骤。

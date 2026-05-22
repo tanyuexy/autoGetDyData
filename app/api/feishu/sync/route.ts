@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 import { startApiTask } from "@/lib/apiTaskRunner";
 import { syncFeishuBitable } from "@/lib/feishu/service";
+import { getConfig } from "@/lib/configService";
 
 export const maxDuration = 0;
 
@@ -19,7 +20,6 @@ export async function POST(request: NextRequest) {
 
     let defaultKeepRows = 0;
     try {
-      const { getConfig } = require("@/lib/configService");
       const cfg = await getConfig();
       defaultKeepRows = Number(cfg?.feishu?.shop?.keepRows ?? 0) || 0;
     } catch { }

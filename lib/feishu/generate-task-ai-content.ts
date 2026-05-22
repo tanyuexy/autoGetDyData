@@ -1,10 +1,9 @@
 import type { LlmProvider, JsonValue } from "@/lib/llm";
 import { callStructuredLlm } from "@/lib/llm";
-
-const { readBitable } = require("@/lib/feishu/core/readBitable");
-const { loadFeishuBitableConfigForProfile } = require("@/lib/feishu/core/config");
-const { getValidAccessToken } = require("@/lib/feishu/core/oauth");
-const { updateBitableRecord } = require("@/lib/feishu/core/bitable");
+import { readBitable } from "@/lib/feishu/core/readBitable";
+import { loadFeishuBitableConfigForProfile } from "@/lib/feishu/core/config";
+import { getValidAccessToken } from "@/lib/feishu/core/oauth";
+import { updateBitableRecord } from "@/lib/feishu/core/bitable";
 
 type FeishuRecord = {
   record_id?: string;

@@ -1,24 +1,23 @@
 // @ts-nocheck
 import fse from "fs-extra";
-require("dotenv").config();
-
-const path = require("path");
-const { spawn } = require("child_process");
-const XLSX = require("xlsx");
-const {
+import "dotenv/config";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import XLSX from "xlsx";
+import {
   loadFeishuConfig,
   loadFeishuBitableConfigForProfile,
   optionalEnv
-} = require("./core/config");
-const {
+} from "./core/config";
+import {
   buildAuthorizeUrl,
   exchangeCodeForToken,
   refreshAccessToken,
   writeTokenCache,
   readTokenCache,
   getValidAccessToken
-} = require("./core/oauth");
-const {
+} from "./core/oauth";
+import {
   createBitableRecord,
   listBitableFields,
   listAllBitableRecords,
@@ -26,7 +25,9 @@ const {
   batchDeleteBitableRecords,
   batchCreateBitableRecords,
   batchUpdateBitableRecords
-} = require("./core/bitable");
+} from "./core/bitable";
+import { readProjectConfigFromEnv } from "@/scripts/common/project-config";
+import { fileURLToPath } from "node:url";
 
 const DEFAULT_XLSX_FIELD_ALIASES = {
   作品名称: "作品名",
@@ -43,8 +44,6 @@ const SHOP_XLSX_FIELD_ALIASES = {
   用户支付金额: "增加销售额",
   数据日期: "日期"
 };
-
-const { readProjectConfigFromEnv } = require("../../scripts/common/project-config");
 
 function getDefaultExportsDir() {
   const envVal = process.env.EXPORTS_DIR;
@@ -1533,13 +1532,19 @@ async function runWithArgs(argv) {
   throw new Error(`未知命令: ${command}`);
 }
 
-if (require.main === module) {
-  runWithArgs(process.argv.slice(2)).catch((error) => {
-    console.error("执行失败:", error.message || error);
+const __filename = fileURLToPath(import.meta.url);
+
+function isDirectRun(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  return path.resolve(entry) === __filename;
+}
+
+if (isDirectRun()) {
+  runWithArgs(process.argv.slice(2)).catch((error: unknown) => {
+    console.error("执行失败:", error instanceof Error ? error.message : error);
     process.exitCode = 1;
   });
 }
 
-module.exports = {
-  runWithArgs,
-};
+export { runWithArgs };
