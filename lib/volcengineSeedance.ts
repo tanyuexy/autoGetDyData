@@ -1,6 +1,14 @@
 export type SeedanceGenerationMode = "text" | "first-frame" | "first-last-frame";
 export type SeedanceReferenceKind = "image" | "video" | "audio";
 
+import {
+  getSeedanceDurationConfig,
+  normalizeSeedanceDuration,
+  type SeedanceDurationConfig,
+} from "./volcengineSeedanceDuration";
+
+export { getSeedanceDurationConfig, normalizeSeedanceDuration, type SeedanceDurationConfig };
+
 export interface SeedanceReferenceResource {
   id?: string;
   name?: string;
@@ -316,7 +324,7 @@ export function buildSeedanceTaskPayload(input: CreateSeedanceTaskInput) {
 
   if (input.ratio) payload.ratio = input.ratio;
   if (input.resolution) payload.resolution = input.resolution;
-  if (typeof input.duration === "number") payload.duration = input.duration;
+  payload.duration = normalizeSeedanceDuration(input.model, input.duration);
   if (typeof input.generateAudio === "boolean") {
     payload.generate_audio = input.generateAudio;
   }

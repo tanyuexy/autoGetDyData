@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   SEEDANCE_MODELS,
   createSeedanceTask,
+  getSeedanceDurationConfig,
   getSeedanceCallbackUrlConfig,
   getServerSeedanceApiKey,
   resolveSeedanceApiKey,
@@ -13,7 +14,10 @@ export const runtime = "nodejs";
 export async function GET() {
   const callbackConfig = getSeedanceCallbackUrlConfig();
   return NextResponse.json({
-    models: SEEDANCE_MODELS,
+    models: SEEDANCE_MODELS.map((item) => ({
+      ...item,
+      duration: getSeedanceDurationConfig(item.value),
+    })),
     hasServerApiKey: Boolean(getServerSeedanceApiKey()),
     showCallbackUrl: callbackConfig.showCallbackUrl,
     defaultCallbackUrl: callbackConfig.defaultCallbackUrl,

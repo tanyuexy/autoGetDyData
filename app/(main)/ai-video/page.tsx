@@ -37,6 +37,10 @@ import {
 } from "@ant-design/icons";
 import type { UploadFile, UploadProps } from "antd/es/upload/interface";
 import { antdTagPresetStyle, type SemanticTagPreset } from "@/lib/semanticTagStyles";
+import {
+  getSeedanceDurationConfig,
+  normalizeSeedanceDuration,
+} from "@/lib/volcengineSeedanceDuration";
 
 type GenerationMode = "text" | "first-frame" | "first-last-frame";
 type ReferenceKind = "image" | "video" | "audio";
@@ -128,10 +132,6 @@ const RESOLUTION_OPTIONS = ["480p", "720p", "1080p"].map((value) => ({
   value,
 }));
 
-const DURATION_OPTIONS = [5, 6, 8, 10].map((value) => ({
-  label: `${value} 秒`,
-  value,
-}));
 
 const CLIP_CACHE_KEY = "ai-video:seedance-clips";
 const REFERENCE_CACHE_KEY = "ai-video:seedance-reference-resources";
@@ -493,7 +493,9 @@ export default function AiVideoPage() {
   );
   const [ratio, setRatio] = useState(cachedConfig.ratio || "9:16");
   const [resolution, setResolution] = useState(cachedConfig.resolution || "720p");
-  const [duration, setDuration] = useState(cachedConfig.duration || 5);
+  const [duration, setDuration] = useState(() =>
+    normalizeSeedanceDuration(cachedConfig.model || FALLBACK_MODELS[0].value, cachedConfig.duration)
+  );
   const [generateAudio, setGenerateAudio] = useState(cachedConfig.generateAudio ?? false);
   const [watermark, setWatermark] = useState(cachedConfig.watermark ?? false);
   const [seed, setSeed] = useState<number | null>(
@@ -608,6 +610,12 @@ export default function AiVideoPage() {
     () => models.find((item) => item.value === model) || models[0],
     [model, models]
   );
+
+  const durationConfig = useMemo(() => getSeedanceDurationConfig(model), [model]);
+
+  useEffect(() => {
+    setDuration((prev) => normalizeSeedanceDuration(model, prev));
+  }, [model]);
 
   const modelOptions = useMemo(
     () =>
@@ -1834,13 +1842,37 @@ export default function AiVideoPage() {
                 />
               </Space>
               <Space orientation="vertical" size={4}>
-                <Typography.Text strong>时长</Typography.Text>
-                <Select
-                  value={duration}
-                  onChange={setDuration}
-                  options={DURATION_OPTIONS}
-                  style={{ width: 110 }}
-                />
+                <Tooltip
+                  title={`当前模型支持 ${durationConfig.min}–${durationConfig.max} 秒，按 1 秒步进调整`}
+                >
+                  <Typography.Text
+                    strong
+                    style={{ cursor: "help", borderBottom: "1px dashed var(--vol-hairline)" }}
+                  >
+                    时长
+                  </Typography.Text>
+                </Tooltip>
+                <Space.Compact>
+                  <InputNumber
+                    value={duration}
+                    min={durationConfig.min}
+                    max={durationConfig.max}
+                    step={1}
+                    precision={0}
+                    onChange={(value) =>
+                      setDuration(
+                        normalizeSeedanceDuration(
+                          model,
+                          typeof value === "number" ? value : durationConfig.default
+                        )
+                      )
+                    }
+                    style={{ width: 88 }}
+                  />
+                  <Button disabled style={{ pointerEvents: "none" }}>
+                    秒
+                  </Button>
+                </Space.Compact>
               </Space>
               <Space orientation="vertical" size={4}>
                 <Typography.Text strong>声音</Typography.Text>
