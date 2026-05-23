@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/** 发布页四场景 DOM 回归测试（图文/视频 × 挂车/不挂车）。用法与说明见仓库根 CLAUDE.md「发布页 DOM 回归测试」。 */
 const path = require("path");
 const fse = require("fs-extra");
 const { chromium } = require("../../common/stealth-browser");

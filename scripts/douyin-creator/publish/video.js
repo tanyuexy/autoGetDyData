@@ -2,7 +2,7 @@ const path = require("path");
 const { chromium } = require("../../common/stealth-browser");
 const fse = require("fs-extra");
 const { getAccountPaths } = require("../core/accounts");
-const { PUBLISH_BROWSER_VIEWPORT, HEADLESS } = require("../core/env");
+const { PUBLISH_BROWSER_VIEWPORT, HEADLESS, getPublishBrowserLaunchOptions } = require("../core/env");
 const { attachQrDataUrlSniffer } = require("../core/qr");
 const { saveDebugArtifacts, saveRunFailedArtifacts } = require("./debug");
 const { fillTitleAndDescription, normalizeDescriptionForPublish } = require("./editor");
@@ -32,6 +32,7 @@ const {
   PUBLISH_SMS_VERIFICATION_STEP_TIMEOUT_MS,
 } = require("./step-runner");
 const { selectCartAndLinkForVideo } = require("./product-link");
+const { extractVideoFirstFrameJpeg } = require("./cover-utils");
 
 const MAX_HASHTAGS = 5;
 const MATERIALS_DIR = path.resolve(
@@ -217,31 +218,52 @@ async function uploadVideo(page, videoKey, accountName, options = {}) {
   }
 }
 
-async function selectFirstFrameAsCover(page) {
-  // 等待 AI 推荐封面容器出现（视频上传后封面缩略图是异步生成的）
-  const container = await page
-    .waitForSelector('[class*="recommendCoverContainer"]', {
-      timeout: scaledMs(60000)
-    })
-    .catch(() => null);
-  if (!container) {
-    throw new Error("封面容器未出现，无法选择封面");
+async function waitCoverApplied(page, timeoutMs = 30000) {
+  const started = Date.now();
+  while (Date.now() - started < scaledMs(timeoutMs)) {
+    try {
+      await checkCoverSelected(page);
+      return;
+    } catch {
+      await page.waitForTimeout(1000);
+    }
   }
+  throw new Error("封面选择超时：未检测到封面已应用");
+}
+
+async function confirmRecommendCoverDialog(page) {
+  await page.waitForTimeout(1000);
+  const dialog = page
+    .locator('[role="modal"], [role="dialog"]')
+    .filter({ hasText: "是否确认应用此封面？" });
+  const confirmBtn = dialog.getByRole("button", { name: "确定" });
+  if (await confirmBtn.isVisible({ timeout: scaledMs(5000) }).catch(() => false)) {
+    await confirmBtn.click();
+    console.log("已确认应用封面");
+    await confirmBtn.waitFor({ state: "hidden", timeout: scaledMs(15000) }).catch(() => {});
+    return;
+  }
+  console.log("封面确认弹窗未出现，尝试关闭残留弹窗");
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+async function tryRecommendCoverQuickSelect(page) {
+  const container = await page
+    .waitForSelector('[class*="recommendCoverContainer"]', { timeout: scaledMs(60000) })
+    .catch(() => null);
+  if (!container) return false;
 
   const coverItems = page.locator(
     '[class*="recommendCoverContainer"] > [class*="recommendCover"]'
   );
 
-  // 轮询等待至少一个推荐封面渲染完毕（AI 封面 CDN 快，视频首帧 blob URL 慢）
   let foundAny = false;
   for (let attempt = 0; attempt < 30; attempt++) {
     const count = await coverItems.count().catch(() => 0);
     for (let i = 0; i < count; i++) {
       const item = coverItems.nth(i);
-      const imgs = await item
-        .locator("img")
-        .count()
-        .catch(() => 0);
+      const imgs = await item.locator("img").count().catch(() => 0);
       const visible = await item.isVisible().catch(() => false);
       const classAttr = await item.getAttribute("class").catch(() => "");
       if (imgs > 0 && visible && !/isSetting/i.test(classAttr)) {
@@ -255,95 +277,274 @@ async function selectFirstFrameAsCover(page) {
 
   const coverCount = await coverItems.count().catch(() => 0);
   console.log(`可选封面数: ${coverCount}`);
+  if (!foundAny) return false;
 
-  if (!foundAny) {
-    throw new Error("推荐封面未生成，无法选择封面");
-  }
-
-  // 选择封面：优先视频首帧（非 AI 标记），降级为 AI 封面
   let clicked = false;
-  // 第一轮：找非 AI 封面（视频首帧）
   for (let i = 0; i < coverCount; i += 1) {
     const item = coverItems.nth(i);
     if (!(await item.isVisible().catch(() => false))) continue;
     const classAttr = await item.getAttribute("class").catch(() => "");
     if (/selected/i.test(classAttr) || /isSetting/i.test(classAttr)) continue;
-    const hasAi =
-      (await item
-        .locator('[class*="ai-"]')
-        .count()
-        .catch(() => 0)) > 0;
+    const hasAi = (await item.locator('[class*="ai-"]').count().catch(() => 0)) > 0;
     if (hasAi) continue;
-    const imgs = await item
-      .locator("img")
-      .count()
-      .catch(() => 0);
-    if (imgs === 0) continue;
-
+    if ((await item.locator("img").count().catch(() => 0)) === 0) continue;
     await item.click().catch(() => {});
-    console.log("已选择视频首帧作为封面");
+    console.log("已选择推荐封面（优先视频首帧）");
     clicked = true;
     break;
   }
-  // 第二轮：降级为 AI 封面
+
   if (!clicked) {
     for (let i = 0; i < coverCount; i += 1) {
       const item = coverItems.nth(i);
       if (!(await item.isVisible().catch(() => false))) continue;
       const classAttr = await item.getAttribute("class").catch(() => "");
       if (/selected/i.test(classAttr) || /isSetting/i.test(classAttr)) continue;
-      const imgs = await item
-        .locator("img")
-        .count()
-        .catch(() => 0);
-      if (imgs === 0) continue;
-
+      if ((await item.locator("img").count().catch(() => 0)) === 0) continue;
       await item.click().catch(() => {});
-      console.log("视频首帧不可用，已降级选择 AI 推荐封面");
+      console.log("已降级选择 AI 推荐封面");
       clicked = true;
       break;
     }
   }
-  if (!clicked) {
-    throw new Error("无可点击的推荐封面");
-  }
 
-  // 等待封面确认弹窗出现，再点击确定（限定在封面确认模态框内）
-  await page.waitForTimeout(1000);
-  const dialog = page
-    .locator('[role="modal"], [role="dialog"]')
-    .filter({ hasText: "是否确认应用此封面？" });
-  const confirmBtn = dialog.getByRole("button", { name: "确定" });
-  if (
-    await confirmBtn.isVisible({ timeout: scaledMs(5000) }).catch(() => false)
-  ) {
-    await confirmBtn.click();
-    console.log("已确认应用封面");
-    // 等待弹窗关闭
-    await confirmBtn
-      .waitFor({ state: "hidden", timeout: scaledMs(15000) })
+  if (!clicked) return false;
+  await confirmRecommendCoverDialog(page);
+  await waitCoverApplied(page);
+  return true;
+}
+
+async function switchCoverUploadTab(page) {
+  await page.evaluate(() => {
+    const el = Array.from(
+      document.querySelectorAll(".semi-modal-content *, [role='dialog'] *")
+    ).find((node) => (node.textContent || "").trim() === "上传封面");
+    el?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  });
+  await page.waitForTimeout(500);
+}
+
+function getCoverUploadFileInput(page) {
+  return page
+    .locator(
+      '.semi-modal-content .semi-upload[class*="upload-"] input[type="file"], [role="dialog"] .semi-upload[class*="upload-"] input[type="file"]'
+    )
+    .first();
+}
+
+async function waitCoverUploadPreviewReady(page, timeoutMs = 60000) {
+  await page.waitForFunction(
+    () => {
+      const imgs = Array.from(
+        document.querySelectorAll(".semi-modal-content img, [role='dialog'] img")
+      );
+      return imgs.some((img) => img.naturalWidth > 400 && img.naturalHeight > 400);
+    },
+    null,
+    { timeout: scaledMs(timeoutMs) }
+  );
+}
+
+async function waitCoverPortalIdle(page) {
+  const spinners = page.locator(
+    ".dy-creator-content-portal .semi-spin-block, .dy-creator-content-modal-wrap .semi-spin-block"
+  );
+  const count = await spinners.count().catch(() => 0);
+  for (let i = 0; i < count; i += 1) {
+    await spinners
+      .nth(i)
+      .waitFor({ state: "hidden", timeout: scaledMs(120000) })
       .catch(() => {});
-  } else {
-    // 兜底：可能点击后无需确认就已应用（封面停留够久时会出现）
-    console.log("封面确认弹窗未出现，尝试按 Escape 关闭残留弹窗");
+  }
+}
+
+async function closeCoverEditorModal(page) {
+  const modalWrap = page.locator(".dy-creator-content-modal-wrap").first();
+  const visible = await modalWrap
+    .isVisible({ timeout: scaledMs(500) })
+    .catch(() => false);
+  if (!visible) {
     await page.keyboard.press("Escape").catch(() => {});
-    await page.waitForTimeout(500);
+    return;
   }
 
-  // 轮询等待封面 selected 标记生效（isSetting 过渡态结束后才会出现）
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const selectedItem = page
-      .locator(
-        '[class*="recommendCoverContainer"] > [class*="recommendCover"][class*="selected"]'
-      )
-      .first();
-    if (await selectedItem.isVisible({ timeout: 1000 }).catch(() => false)) {
-      console.log("封面 selected 标记已生效");
-      return;
-    }
-    await page.waitForTimeout(1000);
+  const closeBtn = page
+    .locator(".semi-modal-close, .semi-modal .semi-button-close, [aria-label='Close']")
+    .first();
+  if (await closeBtn.isVisible().catch(() => false)) {
+    await closeBtn.click({ force: true }).catch(() => {});
   }
-  throw new Error("封面选择超时：确认后未检测到 selected 标记");
+
+  const cancelBtn = page
+    .locator('.dy-creator-content-modal-wrap button:has-text("取消")')
+    .first();
+  if (await cancelBtn.isVisible().catch(() => false)) {
+    await cancelBtn.click({ force: true }).catch(() => {});
+  }
+
+  await page.keyboard.press("Escape").catch(() => {});
+  await modalWrap
+    .waitFor({ state: "hidden", timeout: scaledMs(8000) })
+    .catch(() => {});
+  await page.waitForTimeout(300);
+}
+
+function getVerticalCoverEditorModal(page) {
+  return page
+    .locator('.semi-modal-content, [role="dialog"]')
+    .filter({ hasText: "设置竖封面" })
+    .first();
+}
+
+async function clickVerticalCoverSlot(page) {
+  const slot = page
+    .locator('[class*="coverControl"]')
+    .filter({ hasText: "竖封面3:4" })
+    .first();
+  await slot.scrollIntoViewIfNeeded().catch(() => {});
+  await slot
+    .evaluate((root) => {
+      const target =
+        root.querySelector('[class*="filter"]') ||
+        root.querySelector('[class*="title"]') ||
+        root;
+      target.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true })
+      );
+    })
+    .catch(async () => {
+      await slot.click({ force: true, timeout: scaledMs(10000) });
+    });
+}
+
+async function ensureVerticalCoverEditorOpen(page) {
+  const modal = getVerticalCoverEditorModal(page);
+  if (await modal.isVisible().catch(() => false)) return modal;
+
+  await closeCoverEditorModal(page);
+  await clickVerticalCoverSlot(page);
+  await modal.waitFor({ state: "visible", timeout: scaledMs(15000) });
+  return modal;
+}
+
+async function openVerticalCoverEditor(page) {
+  await closeCoverEditorModal(page);
+  await clickVerticalCoverSlot(page);
+  const modal = getVerticalCoverEditorModal(page);
+  await modal.waitFor({ state: "visible", timeout: scaledMs(15000) });
+  return modal;
+}
+
+async function clickCoverEditorDoneWhenReady(page) {
+  const doneBtn = page
+    .locator(
+      '.semi-modal-content button:has-text("完成"), [role="dialog"] button:has-text("完成")'
+    )
+    .last();
+
+  await page.waitForFunction(
+    () => {
+      const buttons = Array.from(
+        document.querySelectorAll(".semi-modal-content button, [role='dialog'] button")
+      ).filter((el) => (el.textContent || "").trim() === "完成");
+      const btn = buttons[buttons.length - 1];
+      if (!btn) return false;
+      const cls = String(btn.className || "");
+      return !btn.disabled && !cls.includes("disabled");
+    },
+    null,
+    { timeout: scaledMs(120000) }
+  );
+
+  await doneBtn.click({ force: true });
+  await page
+    .locator(".dy-creator-content-modal-wrap")
+    .first()
+    .waitFor({ state: "hidden", timeout: scaledMs(30000) })
+    .catch(() => {});
+  await page.waitForTimeout(1000);
+  await closeCoverEditorModal(page);
+}
+
+async function tryCoverEditorCompleteFallback(page) {
+  console.log("封面兜底2: 打开封面编辑器并点击完成");
+  await ensureVerticalCoverEditorOpen(page);
+  await clickCoverEditorDoneWhenReady(page);
+  await waitCoverApplied(page);
+  console.log("封面兜底2: 完成");
+  return true;
+}
+
+async function tryUploadVideoFirstFrameFallback(page, videoFilePath) {
+  console.log("封面兜底4: 提取视频首帧并上传封面");
+  const tempDir = path.join(MATERIALS_DIR, ".cover-temp");
+  const framePath = await extractVideoFirstFrameJpeg(videoFilePath, tempDir);
+
+  try {
+    await ensureVerticalCoverEditorOpen(page);
+    await switchCoverUploadTab(page);
+
+    const fileInput = getCoverUploadFileInput(page);
+    await fileInput.waitFor({ state: "attached", timeout: scaledMs(30000) });
+    await fileInput.setInputFiles(framePath);
+    console.log(`  已上传首帧封面: ${path.basename(framePath)}`);
+    await waitCoverUploadPreviewReady(page);
+
+    await clickCoverEditorDoneWhenReady(page);
+    await waitCoverApplied(page, HEADLESS ? 8000 : 15000);
+    console.log("封面兜底4: 完成");
+    return true;
+  } finally {
+    await fse.remove(framePath).catch(() => {});
+  }
+}
+
+async function selectFirstFrameAsCover(page, videoKey = "") {
+  if (await tryRecommendCoverQuickSelect(page).catch(() => false)) {
+    return;
+  }
+
+  console.log("推荐封面快速选择失败，尝试封面兜底方案");
+  if (HEADLESS) {
+    console.log("无头模式：按 兜底4(首帧上传预热) → 兜底2(编辑器完成) 顺序尝试");
+  }
+
+  const videoFilePath = videoKey ? path.join(MATERIALS_DIR, videoKey) : "";
+  const hasVideoFile = videoFilePath && (await fse.pathExists(videoFilePath));
+  const errors = [];
+
+  async function runFallback4() {
+    if (!hasVideoFile) {
+      if (videoKey) errors.push(`兜底4: 视频文件不存在 (${videoFilePath})`);
+      return false;
+    }
+    try {
+      await tryUploadVideoFirstFrameFallback(page, videoFilePath);
+      return true;
+    } catch (error) {
+      errors.push(`兜底4: ${error.message}`);
+      console.log(`  ${errors[errors.length - 1]}`);
+      await closeCoverEditorModal(page).catch(() => {});
+      return false;
+    }
+  }
+
+  async function runFallback2() {
+    try {
+      await tryCoverEditorCompleteFallback(page);
+      return true;
+    } catch (error) {
+      errors.push(`兜底2: ${error.message}`);
+      console.log(`  ${errors[errors.length - 1]}`);
+      await closeCoverEditorModal(page).catch(() => {});
+      return false;
+    }
+  }
+
+  if (await runFallback4()) return;
+  if (await runFallback2()) return;
+
+  throw new Error(`所有封面选择方式均失败\n${errors.join("\n")}`);
 }
 
 async function runPublishVideo(options) {
@@ -363,13 +564,7 @@ async function runPublishVideo(options) {
     throw new Error(`账号 ${accountName} 缺少 storageState，无法自动发布视频`);
   }
 
-  const browser = await chromium.launch({
-    headless: HEADLESS,
-    args: [
-      "--start-maximized",
-      `--window-size=${PUBLISH_BROWSER_VIEWPORT.width},${PUBLISH_BROWSER_VIEWPORT.height}`
-    ]
-  });
+  const browser = await chromium.launch(getPublishBrowserLaunchOptions());
   activeBrowser = browser;
 
   const context = await browser.newContext({
@@ -509,7 +704,7 @@ async function runPublishVideo(options) {
       "选择视频首帧封面",
       "07-cover",
       async () => {
-        await selectFirstFrameAsCover(page);
+        await selectFirstFrameAsCover(page, videoKey);
       },
       async () => {
         await checkCoverSelected(page);
@@ -606,4 +801,4 @@ async function runPublishVideo(options) {
   }
 }
 
-module.exports = { runPublishVideo };
+module.exports = { runPublishVideo, selectFirstFrameAsCover };

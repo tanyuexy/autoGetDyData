@@ -226,6 +226,17 @@ const PUBLISH_WAIT_MULTIPLIER = (() => {
   return 1;
 })();
 
+function getPublishBrowserLaunchOptions() {
+  const args = [
+    "--start-maximized",
+    `--window-size=${PUBLISH_BROWSER_VIEWPORT.width},${PUBLISH_BROWSER_VIEWPORT.height}`,
+  ];
+  if (HEADLESS) {
+    args.push("--use-gl=angle", "--use-angle=swiftshader-webgl");
+  }
+  return { headless: HEADLESS, args };
+}
+
 module.exports = {
   TARGET_URL,
   ACCOUNTS_DIR,
@@ -244,5 +255,6 @@ module.exports = {
   LOGIN_VERIFY_METHOD,
   HEADLESS,
   PUBLISH_WAIT_MULTIPLIER,
+  getPublishBrowserLaunchOptions,
   getCreatorExportDateStartSpec
 };

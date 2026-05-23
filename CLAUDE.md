@@ -50,6 +50,21 @@ Both layers share the same `scripts/run.js` routing table and namespace concurre
 
 需要用真实浏览器做页面验证、DOM 调试或复现 Playwright 自动化流程时：**先读取并遵循本仓库的 playwright-cli skill**（`.claude/skills/playwright-cli/SKILL.md`），按其中的 `playwright-cli` 命令与 snapshot / refs 交互；不要凭空写选择器或臆测页面结构，在操作的时候每一步操作告诉我你的思考与后续详细执行步骤。
 
+### 发布页 DOM 回归测试（已有脚本，勿重复创建）
+
+仓库已包含手动集成测试 **`scripts/douyin-creator/publish/dom-stability-test.js`**，用于在改发布页选择器/DOM 逻辑后做回归。未接入 `scripts/run.js` 或 CI，不要另写同类四场景批量测试脚本。
+
+```bash
+node scripts/douyin-creator/publish/dom-stability-test.js
+HEADLESS=false node scripts/douyin-creator/publish/dom-stability-test.js  # 有界面（视频封面等步骤更稳）
+```
+
+- **账号/素材**：默认 `storage/creator-accounts/维乐多官方旗舰店/storageState.json`、`storage/creator-materials/` 下 `image-14.png`、`5月15日(10).mp4`
+- **场景**：图文±挂车、视频±挂车 共 4 个；逐步验证上传、定时、挂车、正文话题、封面（视频）、自主声明、音乐（图文）等
+- **输出**：每场景 JSON 报告 + 末尾 SUMMARY；任一场景失败 exit 1
+
+视频封面生产逻辑在 `video.js` 的 `selectFirstFrameAsCover()`（推荐封面 → 兜底4 首帧上传 → 兜底2 编辑器完成）；无头发布需 `HEADLESS=true`（见 `getPublishBrowserLaunchOptions()`）。
+
 ### Frontend → API → Script → internal API callback
 
 Pages call API routes → API enqueues a task → the Playwright script scrapes data → script calls back to an internal API (e.g. `/api/review/save`, `/api/feishu/sync`) via `scripts/common/internal-api-client.js` to persist results. The internal API base URL defaults to `http://127.0.0.1:3000` (overridable via `INTERNAL_API_BASE_URL`).
