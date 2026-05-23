@@ -2,13 +2,27 @@ const { waitVisible, setTextLikeInput } = require("./dom");
 const { step, info } = require("./logger");
 
 async function getFormSectionByTitle(page, title) {
+  const bySectionTitle = page
+    .locator("section")
+    .filter({
+      has: page.locator('[class*="title"], [class*="label"]').filter({ hasText: title }),
+    })
+    .first();
+  if (await bySectionTitle.isVisible({ timeout: 1500 }).catch(() => false)) {
+    return bySectionTitle;
+  }
+
+  const maxLabelLen = Math.max(title.length + 4, 12);
   const section = page
-    .locator(`xpath=//*[normalize-space()="${title}"]/ancestor::*[.//*[contains(@class,"selectBox")] or .//*[contains(@class,"semi-select")] or .//input or .//label][1]`)
+    .locator(
+      `xpath=//*[contains(normalize-space(.), "${title}") and string-length(normalize-space(.)) <= ${maxLabelLen}]/ancestor::*[.//*[contains(@class,"selectBox")] or .//*[contains(@class,"semi-select")] or .//input or .//label][1]`
+    )
     .first();
   if (await section.isVisible({ timeout: 1500 }).catch(() => false)) {
     return section;
   }
-  return page.locator(`section:has-text("${title}"), div:has-text("${title}")`).first();
+
+  return page.locator(`section:has-text("${title}")`).first();
 }
 
 async function selectSelfDeclaration(page, isAiContent) {
@@ -16,7 +30,14 @@ async function selectSelfDeclaration(page, isAiContent) {
   const targetLabel = isAiContent ? "内容由AI生成" : "无需添加自主声明";
 
   const section = await getFormSectionByTitle(page, "自主声明");
-  const selectBox = section.locator('[class*="selectBox"], .semi-select').first();
+  const selectCandidates = section.locator('[class*="selectBox"], .semi-select');
+  const selectBox = (await selectCandidates
+    .filter({ hasText: /请选择自主声明|内容由AI生成|无需添加自主声明/ })
+    .first()
+    .isVisible()
+    .catch(() => false))
+    ? selectCandidates.filter({ hasText: /请选择自主声明|内容由AI生成|无需添加自主声明/ }).first()
+    : selectCandidates.first();
 
   if (!(await selectBox.isVisible().catch(() => false))) {
     throw new Error("未找到自主声明下拉框");
@@ -29,10 +50,13 @@ async function selectSelfDeclaration(page, isAiContent) {
   }
 
   await selectBox.click();
-  await page.waitForTimeout(1500);
 
-  const modal = page.locator('.semi-modal-content').filter({ hasText: "请选择声明类型" }).first();
-  const targetOption = modal.locator(`label:has-text("${targetLabel}")`).first();
+  const modal = page.locator(".semi-modal-content").filter({ hasText: "请选择声明类型" }).first();
+  await modal.waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
+
+  const targetOption = modal
+    .locator(`label:has-text("${targetLabel}"), [role="radio"]:has-text("${targetLabel}")`)
+    .first();
   if (!(await targetOption.isVisible().catch(() => false))) {
     throw new Error(`未找到自主声明选项: ${targetLabel}`);
   }
@@ -135,18 +159,13 @@ async function setScheduleIfNeeded(page, scheduleAt) {
   ]);
   await scheduleToggle.click();
 
-  const inputWrap = await waitVisible(page, [
-    '.date-picker-x1Ag_4 .semi-input-wrapper',
-    '.semi-datepicker-input .semi-input-wrapper',
-    '.semi-datepicker input',
-  ]);
-  await inputWrap.click();
-
   const input = await waitVisible(page, [
-    '.semi-datepicker input',
+    'input[placeholder="日期和时间"]',
     'input[placeholder*="日期"]',
     'input[placeholder*="时间"]',
+    '.semi-datepicker input',
   ]);
+  await input.click();
 
   const pad = (n) => String(n).padStart(2, "0");
   const text = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;

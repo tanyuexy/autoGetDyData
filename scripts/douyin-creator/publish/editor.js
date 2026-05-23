@@ -156,7 +156,7 @@ async function typeTopicDirectly(page, editor, topic, isFirstTopic) {
 }
 
 async function typeTopicFromToolbar(page, editor, topic) {
-  const button = page.locator('.toolbar-button-spPS4r:has-text("#添加话题"), text="#添加话题"').first();
+  const button = page.getByText("#添加话题", { exact: true }).first();
   if (!(await button.isVisible({ timeout: 800 }).catch(() => false))) {
     return false;
   }

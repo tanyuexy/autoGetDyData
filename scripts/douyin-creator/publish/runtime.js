@@ -870,7 +870,9 @@ async function checkHashtagsSet(page, expectedHashtags) {
 
 async function checkScheduleSet(page) {
   const dateInput = page
-    .locator('.semi-datepicker input, input[placeholder*="日期"]')
+    .locator(
+      'input[placeholder="日期和时间"], input[placeholder*="日期"], .semi-datepicker input'
+    )
     .first();
   const actual = (await dateInput.inputValue().catch(() => "")).trim();
   if (actual) {
@@ -1019,13 +1021,27 @@ async function checkProductLinkAbsent(page) {
 }
 
 async function getFormSectionByTitle(page, title) {
-  const section = page
-    .locator(`xpath=//*[normalize-space()="${title}"]/ancestor::*[.//*[contains(@class,"selectBox")] or .//*[contains(@class,"semi-select")] or .//input or .//label][1]`)
+  const bySectionTitle = page
+    .locator("section")
+    .filter({
+      has: page.locator('[class*="title"], [class*="label"]').filter({ hasText: title }),
+    })
     .first();
-  if (await section.isVisible({ timeout: 1000 }).catch(() => false)) {
+  if (await bySectionTitle.isVisible({ timeout: 1500 }).catch(() => false)) {
+    return bySectionTitle;
+  }
+
+  const maxLabelLen = Math.max(title.length + 4, 12);
+  const section = page
+    .locator(
+      `xpath=//*[contains(normalize-space(.), "${title}") and string-length(normalize-space(.)) <= ${maxLabelLen}]/ancestor::*[.//*[contains(@class,"selectBox")] or .//*[contains(@class,"semi-select")] or .//input or .//label][1]`
+    )
+    .first();
+  if (await section.isVisible({ timeout: 1500 }).catch(() => false)) {
     return section;
   }
-  return page.locator(`section:has-text("${title}"), div:has-text("${title}")`).first();
+
+  return page.locator(`section:has-text("${title}")`).first();
 }
 
 async function checkSelfDeclarationSet(page, isAiContent) {
