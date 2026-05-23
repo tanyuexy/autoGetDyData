@@ -1711,6 +1711,7 @@ export default function AiVideoPage() {
       title: "片段",
       dataIndex: "name",
       width: 240,
+      align: "center",
       render: (_, record) => {
         const meta = `${record.ratio} · ${record.resolution} · ${record.duration}s`;
         const tooltipContent = `${record.name}\n${meta}`;
@@ -1720,7 +1721,7 @@ export default function AiVideoPage() {
             title={<span style={{ whiteSpace: "pre-wrap" }}>{tooltipContent}</span>}
             styles={{ root: { maxWidth: 420 } }}
           >
-            <Space orientation="vertical" size={2} style={{ maxWidth: 210 }}>
+            <Space orientation="vertical" size={2} style={{ maxWidth: 210, margin: "0 auto" }}>
               <Typography.Text strong ellipsis>
                 {record.name}
               </Typography.Text>
@@ -1736,6 +1737,7 @@ export default function AiVideoPage() {
       title: "模型",
       dataIndex: "model",
       width: 190,
+      align: "center",
       render: (value) => (
         <Typography.Text style={{ fontSize: 12 }} ellipsis>
           {value}
@@ -1746,6 +1748,7 @@ export default function AiVideoPage() {
       title: "提示词",
       dataIndex: "prompt",
       width: 260,
+      align: "center",
       render: (value) => {
         const prompt = String(value || "").trim();
         if (!prompt) {
@@ -1767,7 +1770,7 @@ export default function AiVideoPage() {
             styles={{ root: { maxWidth: 480 } }}
           >
             <Typography.Text
-              style={{ fontSize: 12, maxWidth: 240, cursor: "copy" }}
+              style={{ fontSize: 12, maxWidth: 240, cursor: "copy", display: "block", textAlign: "center" }}
               ellipsis
               onClick={() => void copyPrompt(prompt)}
             >
@@ -1781,6 +1784,7 @@ export default function AiVideoPage() {
       title: "状态",
       dataIndex: "status",
       width: 110,
+      align: "center",
       render: (value) => {
         const status = String(value || "unknown");
         return (
@@ -1794,6 +1798,7 @@ export default function AiVideoPage() {
       title: "视频",
       dataIndex: "videoUrl",
       width: 88,
+      align: "center",
       render: (_, record) =>
         record.videoUrl ? (
           <ClipVideoThumbnail
@@ -1811,11 +1816,12 @@ export default function AiVideoPage() {
       title: "操作",
       key: "actions",
       width: 210,
+      align: "center",
       render: (_, record) => {
         const canRestore = record.model !== "manual";
 
         return (
-          <Space size={4} wrap>
+          <Space size={4} wrap style={{ justifyContent: "center" }}>
             {record.taskId && !isFinished(record.status) ? (
               <Tooltip title="刷新 Seedance 任务状态">
                 <Button
@@ -1874,6 +1880,17 @@ export default function AiVideoPage() {
 
   return (
     <div style={pageWrapStyle}>
+
+      <style jsx global>{`
+        .ai-video-clips-table .ant-table-thead > tr > th,
+        .ai-video-clips-table .ant-table-tbody > tr > td {
+          text-align: center;
+        }
+        .ai-video-clips-table .ant-table-selection-column {
+          text-align: center;
+        }
+      `}</style>
+
       {!pageReady ? (
         <div
           style={{
@@ -2340,6 +2357,7 @@ export default function AiVideoPage() {
               <Table
                 rowKey="id"
                 size="small"
+                className="ai-video-clips-table"
                 pagination={{ pageSize: 8 }}
                 dataSource={clips}
                 columns={columns}
@@ -2347,6 +2365,7 @@ export default function AiVideoPage() {
                   selectedRowKeys: selectedClipIds,
                   onChange: handleClipSelectionChange,
                   getCheckboxProps: (record) => ({ disabled: !record.videoUrl }),
+                  align: "center",
                 }}
               />
             ) : (

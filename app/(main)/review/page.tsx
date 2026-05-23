@@ -192,7 +192,7 @@ export default function ReviewPage() {
   const toolbarAccountSelectOptions = useMemo(
     () => [
       {
-        label: accounts.length ? `全部（${accounts.length} 个账号）` : "全部（无账号）",
+        label: accounts.length ? `全选（${accounts.length} 个账号）` : "全选（无账号）",
         value: MULTI_SELECT_ALL_ACCOUNTS,
         disabled: accounts.length === 0,
       },
@@ -205,17 +205,6 @@ export default function ReviewPage() {
     () => selectedAccounts.filter((n) => allCreatorAccountNames.includes(n)),
     [selectedAccounts, allCreatorAccountNames]
   );
-
-  const toolbarAccountSelectValue = useMemo(() => {
-    if (allCreatorAccountNames.length === 0) return [];
-    if (
-      toolbarAccountsSanitized.length === allCreatorAccountNames.length &&
-      allCreatorAccountNames.every((n) => toolbarAccountsSanitized.includes(n))
-    ) {
-      return [MULTI_SELECT_ALL_ACCOUNTS];
-    }
-    return toolbarAccountsSanitized;
-  }, [allCreatorAccountNames, toolbarAccountsSanitized]);
 
   function handleToolbarAccountSelectChange(vals: string[]) {
     const picked = [...new Set(vals)];
@@ -509,7 +498,7 @@ export default function ReviewPage() {
             mode="multiple"
             allowClear
             style={{ minWidth: 240 }}
-            value={toolbarAccountSelectValue}
+            value={toolbarAccountsSanitized}
             onChange={handleToolbarAccountSelectChange}
             options={toolbarAccountSelectOptions}
             loading={loadingAccounts}
