@@ -1,5 +1,5 @@
 const { step, info } = require("./logger");
-const { scaledMs } = require("./runtime");
+const { scaledMs, closeCreatorGuides } = require("./runtime");
 
 function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -59,7 +59,13 @@ async function getVisibleOptionTexts(page) {
 async function selectCartOption(page) {
   const started = Date.now();
   while (Date.now() - started < scaledMs(8000)) {
-    const cartOpt = page.locator('[role="option"], .semi-select-option').filter({ hasText: '购物车' }).first();
+    const portalOptions = page
+      .locator('.semi-portal [role="option"], .semi-portal .semi-select-option')
+      .filter({ hasText: "购物车" })
+      .first();
+    const cartOpt = (await portalOptions.isVisible({ timeout: 500 }).catch(() => false))
+      ? portalOptions
+      : page.locator('[role="option"], .semi-select-option').filter({ hasText: "购物车" }).first();
     if (await cartOpt.isVisible({ timeout: 500 }).catch(() => false)) {
       await clickEvenIfCovered(cartOpt, "购物车选项");
       await page.waitForTimeout(scaledMs(1000));
@@ -71,6 +77,106 @@ async function selectCartOption(page) {
 
   const texts = await getVisibleOptionTexts(page);
   throw new Error(`未找到购物车选项；当前可见选项: ${texts.join(" / ") || "(空)"}`);
+}
+
+async function waitForCoverRecommendationSettled(page, timeoutMs = 45000) {
+  const started = Date.now();
+  while (Date.now() - started < scaledMs(timeoutMs)) {
+    const generating = await page
+      .evaluate(() =>
+        /Ai智能推荐封面生成中|AI智能推荐封面生成中/.test(document.body?.innerText || "")
+      )
+      .catch(() => false);
+    if (!generating) return;
+    await page.waitForTimeout(scaledMs(500));
+  }
+  info("封面推荐仍在生成中，继续挂车步骤");
+}
+
+async function isCartUiVisible(page) {
+  const anchor = page.locator("#douyin_creator_pc_anchor_jump").first();
+  const checks = [
+    anchor.locator('[class*="cart-part"]').first(),
+    anchor.locator('input[placeholder*="粘贴商品"], input[placeholder*="链接"]').first(),
+    page.locator('.semi-select-selection-text:has-text("购物车")').first(),
+  ];
+  for (const locator of checks) {
+    if (await locator.isVisible({ timeout: 300 }).catch(() => false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function waitForCartUi(page, timeoutMs = 12000) {
+  const started = Date.now();
+  while (Date.now() - started < scaledMs(timeoutMs)) {
+    if (await isCartUiVisible(page)) return;
+    await page.waitForTimeout(scaledMs(300));
+  }
+  throw new Error("选择购物车后未出现挂车输入区域");
+}
+
+async function getCartLinkInput(page) {
+  const anchor = page.locator("#douyin_creator_pc_anchor_jump").first();
+  const linkInput = anchor
+    .locator('input[placeholder*="粘贴商品"], input[placeholder*="链接"]')
+    .first();
+  await linkInput.waitFor({ state: "visible", timeout: scaledMs(10000) });
+  return linkInput;
+}
+
+async function fillCartLinkInput(page, linkInput, productLink) {
+  await linkInput.fill(productLink);
+  await linkInput
+    .evaluate((el) => {
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.blur();
+    })
+    .catch(() => {});
+
+  const actual = cleanText(await linkInput.inputValue().catch(() => ""));
+  if (actual !== cleanText(productLink)) {
+    throw new Error(`商品链接填写校验失败：期望 "${productLink}"，实际 "${actual || "(空)"}"`);
+  }
+  step("链接已填入");
+}
+
+async function isAddLinkDisabled(locator) {
+  return locator
+    .evaluate((el) => {
+      const cls = String(el.className || "");
+      return (
+        el.classList.contains("disabled") ||
+        /disable/i.test(cls) ||
+        el.getAttribute("aria-disabled") === "true"
+      );
+    })
+    .catch(() => true);
+}
+
+async function clickAddLinkButton(page, tagSection) {
+  const anchor = page.locator("#douyin_creator_pc_anchor_jump").first();
+  const addBtn = anchor.locator('span:has-text("添加链接"), button:has-text("添加链接")').first();
+  const targetAddBtn = (await addBtn.isVisible().catch(() => false))
+    ? addBtn
+    : tagSection.locator('span:has-text("添加链接"), button:has-text("添加链接")').first();
+
+  if (!(await targetAddBtn.isVisible().catch(() => false))) {
+    throw new Error("未找到添加链接按钮");
+  }
+
+  const started = Date.now();
+  while (Date.now() - started < scaledMs(8000)) {
+    if (!(await isAddLinkDisabled(targetAddBtn))) break;
+    await page.waitForTimeout(scaledMs(300));
+  }
+  if (await isAddLinkDisabled(targetAddBtn)) {
+    throw new Error("添加链接按钮仍不可用，请检查商品链接是否有效");
+  }
+
+  await clickEvenIfCovered(targetAddBtn, "添加链接按钮");
 }
 
 async function readBlockingMessage(page) {
@@ -210,34 +316,32 @@ async function selectCartAndLinkForVideo(page, productLink, productTitle, approv
   }
   step("设置购物车");
 
+  await closeCreatorGuides(page);
+  await waitForCoverRecommendationSettled(page);
+
   const tagSection = await getAddTagSection(page);
-  const tagSelect = tagSection.locator('.semi-select').first();
+  const tagSelect = tagSection.locator(".semi-select").first();
   if (!(await tagSelect.isVisible().catch(() => false))) {
     throw new Error("未找到购物车下拉框");
   }
+
   await dismissBlockingPortals(page);
   await clickEvenIfCovered(tagSelect, "购物车下拉框");
   await selectCartOption(page);
+  await waitForCartUi(page);
 
-  const linkInput = tagSection.locator('input[placeholder*="粘贴商品"], input[placeholder*="链接"], input').first();
-  if (await linkInput.isVisible().catch(() => false)) {
-    await linkInput.fill(productLink);
-    step("链接已填入");
-    await page.waitForTimeout(scaledMs(3000));
-  }
+  const linkInput = await getCartLinkInput(page);
+  await fillCartLinkInput(page, linkInput, productLink);
+  await page.waitForTimeout(scaledMs(1000));
 
-  let editModal = page.locator('.semi-modal-content').filter({ hasText: '完成编辑' }).first();
+  const editModal = page.locator('.semi-modal-content').filter({ hasText: "完成编辑" }).first();
   if (await editModal.isVisible().catch(() => false)) {
     console.log("  商品编辑弹窗已自动打开");
   } else {
-    const addBtn = tagSection.locator('span:has-text("添加链接"), button:has-text("添加链接")').first();
-    if (await addBtn.isVisible().catch(() => false)) {
-      await clickEvenIfCovered(addBtn, "添加链接按钮");
-    }
+    await clickAddLinkButton(page, tagSection);
   }
 
   await waitForProductLinkResult(page);
-  editModal = page.locator('.semi-modal-content').filter({ hasText: '完成编辑' }).first();
   if (await editModal.isVisible().catch(() => false)) {
     await fillProductEditModal(page, productTitle, approvalNumber);
   }
@@ -249,10 +353,12 @@ async function selectCartAndLinkForArticle(page, productLink, productTitle, appr
   }
   step("设置购物车");
 
-  const anchor = page.locator('#douyin_creator_pc_anchor_jump');
-  const cartSelect = anchor.locator('.semi-select').first();
+  await closeCreatorGuides(page);
+
+  const anchor = page.locator("#douyin_creator_pc_anchor_jump");
+  const cartSelect = anchor.locator(".semi-select").first();
   const tagSection = await getAddTagSection(page);
-  const tagSelect = tagSection.locator('.semi-select').first();
+  const tagSelect = tagSection.locator(".semi-select").first();
   const select = (await cartSelect.isVisible().catch(() => false)) ? cartSelect : tagSelect;
 
   if (!(await select.isVisible().catch(() => false))) {
@@ -262,26 +368,13 @@ async function selectCartAndLinkForArticle(page, productLink, productTitle, appr
   await dismissBlockingPortals(page);
   await clickEvenIfCovered(select, "购物车下拉框");
   await selectCartOption(page);
+  await waitForCartUi(page);
 
-  const anchorInput = anchor.locator('input').first();
-  const linkInput = (await anchorInput.isVisible().catch(() => false))
-    ? anchorInput
-    : tagSection.locator('input[placeholder*="粘贴商品"], input[placeholder*="链接"], input').first();
-  if (await linkInput.isVisible().catch(() => false)) {
-    await linkInput.fill(productLink);
-    console.log("  链接已填入");
-  } else {
-    throw new Error("未找到链接输入框");
-  }
+  const linkInput = await getCartLinkInput(page);
+  await fillCartLinkInput(page, linkInput, productLink);
+  await page.waitForTimeout(scaledMs(1000));
 
-  const addBtn = anchor.locator('span:has-text("添加链接"), button:has-text("添加链接")').first();
-  const globalAddBtn = tagSection.locator('span:has-text("添加链接"), button:has-text("添加链接")').first();
-  const targetAddBtn = (await addBtn.isVisible().catch(() => false)) ? addBtn : globalAddBtn;
-  if (!(await targetAddBtn.isVisible().catch(() => false))) {
-    throw new Error("未找到添加链接按钮");
-  }
-
-  await clickEvenIfCovered(targetAddBtn, "添加链接按钮");
+  await clickAddLinkButton(page, tagSection);
   await waitForProductLinkResult(page);
 
   await fillProductEditModal(page, productTitle, approvalNumber);
