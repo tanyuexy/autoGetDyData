@@ -1,19 +1,18 @@
-// Next.js / 飞书同步侧定时校验（ESM）。规则须与 scripts/common/publish-schedule-validation.js 保持一致。
+// 脚本侧定时校验（CJS）。规则须与 lib/publishScheduleValidation.ts 保持一致。
 const MIN_OFFSET_MS = 2 * 60 * 60 * 1000;
 const MAX_OFFSET_MS = 14 * 24 * 60 * 60 * 1000;
 
-function fmtLocal(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+function fmtLocal(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export type ScheduleValidationResult =
-  | { ok: true }
-  | { ok: false; error: string };
-
-export function validateScheduleAt(
-  scheduleAt: string | null | undefined
-): ScheduleValidationResult {
+/**
+ * @param {string | null | undefined} scheduleAt
+ * @returns {{ ok: true } | { ok: false, error: string }}
+ */
+function validateScheduleAt(scheduleAt) {
   if (!scheduleAt) return { ok: true };
 
   const d = new Date(scheduleAt);
@@ -47,7 +46,25 @@ export function validateScheduleAt(
   return { ok: true };
 }
 
-export function formatFeishuScheduleFailureStatus(errorText: string | undefined): string {
-  const raw = String(errorText || "未知错误");
-  return `创建失败: ${raw}`.replace(/\s+/g, " ").trim().slice(0, 200);
+/**
+ * @param {string | null | undefined} scheduleAt
+ */
+function assertScheduleAtValid(scheduleAt) {
+  const result = validateScheduleAt(scheduleAt);
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
 }
+
+/**
+ * @param {string | Date} scheduleAt
+ */
+function formatScheduleAtLocal(scheduleAt) {
+  return fmtLocal(scheduleAt);
+}
+
+module.exports = {
+  validateScheduleAt,
+  assertScheduleAtValid,
+  formatScheduleAtLocal,
+};

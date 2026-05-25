@@ -23,6 +23,7 @@ const {
   getPublishDebugTaskDir,
   readLatestPublishStepStateFromTaskDir
 } = require("../douyin-creator/publish/debug");
+const { validateScheduleAt } = require("../common/publish-schedule-validation");
 
 const projectRoot = path.resolve(__dirname, "../..");
 const WORKER_ID = process.env.WORKER_ID || `task-worker-${process.pid}`;
@@ -658,10 +659,44 @@ async function markFeishuFailed(task, errorText, runtimeTaskId) {
   }
 }
 
+async function failTaskBeforeLaunch(task, runtimeTaskId, errorText) {
+  const failure = buildFailurePatch(task, errorText);
+  ensureTaskLogMeta(
+    runtimeTaskId,
+    {
+      taskId: runtimeTaskId,
+      namespace: "creator-publish",
+      accountName: task.accountName,
+      target: task.id
+    },
+    new Date().toISOString()
+  );
+  appendTaskLog(runtimeTaskId, "error", failure.operatorText);
+  appendTaskLog(
+    runtimeTaskId,
+    failure.classification.retryable ? "warn" : "error",
+    `[failure-classifier] category=${failure.classification.category} retryable=${failure.classification.retryable} step=${failure.classification.step?.index || "?"}/${failure.classification.step?.phase || "?"} reason=${failure.classification.reason}`
+  );
+  appendTaskDone(runtimeTaskId, 1, failure.operatorText);
+  await patchTask(task.id, {
+    status: "failed",
+    ...failure.patch
+  });
+  await markFeishuFailed(task, failure.operatorText, runtimeTaskId);
+}
+
 async function startTask(task) {
   const runtimeTaskId = generateRuntimeTaskId(task.id);
   const claimed = await claimTask(task, runtimeTaskId);
   if (!claimed) return false;
+
+  if (task.payload?.scheduleAt) {
+    const scheduleValidation = validateScheduleAt(task.payload.scheduleAt);
+    if (!scheduleValidation.ok) {
+      await failTaskBeforeLaunch(task, runtimeTaskId, scheduleValidation.error);
+      return true;
+    }
+  }
 
   const args = await buildRunArgs(task);
   let headless = String(
