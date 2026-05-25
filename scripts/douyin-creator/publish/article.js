@@ -372,7 +372,7 @@ async function runPublishArticle(options) {
     }
 
     await runStep(13, `发布后停留 ${publishWaitSec}s`, "13-post-wait", async () => {
-      await page.waitForTimeout(scaledMs(publishWaitSec * 1000));
+      await page.waitForTimeout(publishWaitSec * 1000);
     });
   } catch (error) {
     await saveRunFailedArtifacts(page, accountName, debugOptions).catch(() => {});

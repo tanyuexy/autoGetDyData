@@ -785,7 +785,7 @@ async function runPublishVideo(options) {
       `发布后停留 ${publishWaitSec}s`,
       "12-post-wait",
       async () => {
-        await page.waitForTimeout(scaledMs(publishWaitSec * 1000));
+        await page.waitForTimeout(publishWaitSec * 1000);
       }
     );
   } catch (error) {

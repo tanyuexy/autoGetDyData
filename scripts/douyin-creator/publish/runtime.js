@@ -413,6 +413,12 @@ async function checkPublishSmsVerificationCompleted(page) {
   checkOk("短信验证码校验通过");
 }
 
+function isTransientPublishServerError(text) {
+  return /服务器打瞌睡|打瞌睡了|系统异常|服务器异常|服务繁忙|请稍后再试/.test(
+    String(text || "").replace(/\s+/g, " ").trim()
+  );
+}
+
 async function clickPublishButton(page, accountName, options = {}) {
   const { handleSms = true } = options;
   console.log("点击发布按钮...");
@@ -439,112 +445,145 @@ async function clickPublishButton(page, accountName, options = {}) {
     throw new Error("发布按钮处于禁用状态，可能必填字段未填写完成");
   }
 
-  await publishBtn.scrollIntoViewIfNeeded().catch(() => {});
-  await publishBtn.click();
-  console.log("  ✓ 已点击发布按钮");
+  const toastSelector =
+    '.semi-toast-content, .semi-message, [class*="toast"], [class*="message"]';
+  const maxAttempts = 2;
 
-  await page.waitForTimeout(scaledMs(1000));
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (attempt > 1) {
+      console.log("  检测到服务端临时异常，2s 后重试点击发布...");
+      await page.waitForTimeout(scaledMs(2000));
+    }
 
-  // 处理"未添加自主声明"确认对话框
-  const declarationDialogTitle = page.locator("text=未添加自主声明").first();
-  if (
-    await declarationDialogTitle
-      .isVisible({ timeout: scaledMs(2000) })
-      .catch(() => false)
-  ) {
-    console.log("  检测到自主声明确认对话框，点击「直接发布」");
-    const directPublishBtn = page
-      .locator('button:has-text("直接发布")')
-      .first();
+    await publishBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await publishBtn.click();
+    console.log(attempt === 1 ? "  ✓ 已点击发布按钮" : "  ✓ 已重试点击发布按钮");
+
+    await page.waitForTimeout(scaledMs(1000));
+
+    // 处理"未添加自主声明"确认对话框
+    const declarationDialogTitle = page.locator("text=未添加自主声明").first();
     if (
-      await directPublishBtn
+      await declarationDialogTitle
         .isVisible({ timeout: scaledMs(2000) })
         .catch(() => false)
     ) {
-      await directPublishBtn.click();
-      console.log("  ✓ 已点击「直接发布」");
-      await page.waitForTimeout(scaledMs(1000));
+      console.log("  检测到自主声明确认对话框，点击「直接发布」");
+      const directPublishBtn = page
+        .locator('button:has-text("直接发布")')
+        .first();
+      if (
+        await directPublishBtn
+          .isVisible({ timeout: scaledMs(2000) })
+          .catch(() => false)
+      ) {
+        await directPublishBtn.click();
+        console.log("  ✓ 已点击「直接发布」");
+        await page.waitForTimeout(scaledMs(1000));
+      }
     }
-  }
 
-  // 处理 SMS 验证码弹窗
-  const smsPanel = page.locator("text=接收短信验证码").first();
-  if (
-    await smsPanel
-      .isVisible({ timeout: scaledMs(handleSms ? 2000 : 8000) })
-      .catch(() => false)
-  ) {
-    if (!handleSms) {
-      console.log("  检测到短信验证码弹窗，交给独立短信验证步骤处理");
-      return true;
-    }
-    await handlePublishSmsVerification(page, accountName);
-    // 点击验证后等待结果
-    await page.waitForTimeout(scaledMs(5000));
-  }
-
-  // 等待最终 toast 结果
-  const toastSelector =
-    '.semi-toast-content, .semi-message, [class*="toast"], [class*="message"]';
-  try {
-    const toast = await page
-      .waitForSelector(toastSelector, { timeout: scaledMs(25000) })
-      .catch(() => null);
-    if (toast) {
-      const toastText = await toast.textContent().catch(() => "");
-      console.log(`  提示信息: ${toastText.slice(0, 100)}`);
-      if (toastText.includes("发布成功") || toastText.includes("success")) {
-        console.log("  ✅ 发布成功");
+    // 处理 SMS 验证码弹窗
+    const smsPanel = page.locator("text=接收短信验证码").first();
+    if (
+      await smsPanel
+        .isVisible({ timeout: scaledMs(handleSms ? 2000 : 8000) })
+        .catch(() => false)
+    ) {
+      if (!handleSms) {
+        console.log("  检测到短信验证码弹窗，交给独立短信验证步骤处理");
         return true;
       }
-      if (
-        toastText.includes("失败") ||
-        toastText.includes("错误") ||
-        toastText.includes("违规")
-      ) {
-        throw new Error(`发布失败: ${toastText.slice(0, 200)}`);
-      }
-      // "正在发布" 等中间状态：继续等待更长时间
-      if (toastText.includes("正在发布")) {
-        console.log("  检测到「正在发布」状态，继续等待...");
-        await page.waitForTimeout(scaledMs(10000));
-        // 再次检查 toast
-        const finalToast = await page
-          .waitForSelector(toastSelector, { timeout: scaledMs(30000) })
-          .catch(() => null);
-        if (finalToast) {
-          const finalText = await finalToast.textContent().catch(() => "");
-          console.log(`  最终提示: ${finalText.slice(0, 100)}`);
-          if (finalText.includes("发布成功") || finalText.includes("success")) {
-            console.log("  ✅ 发布成功");
-            return true;
+      await handlePublishSmsVerification(page, accountName);
+      await page.waitForTimeout(scaledMs(5000));
+    }
+
+    let transientErrorText = "";
+
+    // 等待最终 toast 结果
+    try {
+      const toast = await page
+        .waitForSelector(toastSelector, { timeout: scaledMs(25000) })
+        .catch(() => null);
+      if (toast) {
+        const toastText = await toast.textContent().catch(() => "");
+        console.log(`  提示信息: ${toastText.slice(0, 100)}`);
+        if (toastText.includes("发布成功") || toastText.includes("success")) {
+          console.log("  ✅ 发布成功");
+          return true;
+        }
+        if (
+          toastText.includes("失败") ||
+          toastText.includes("错误") ||
+          toastText.includes("违规")
+        ) {
+          throw new Error(`发布失败: ${toastText.slice(0, 200)}`);
+        }
+        if (isTransientPublishServerError(toastText)) {
+          transientErrorText = toastText.trim();
+          if (attempt < maxAttempts) {
+            continue;
           }
-          if (
-            finalText.includes("失败") ||
-            finalText.includes("错误") ||
-            finalText.includes("违规")
-          ) {
-            throw new Error(`发布失败: ${finalText.slice(0, 200)}`);
+          throw new Error(`发布失败: ${toastText.slice(0, 200)}`);
+        }
+        // "正在发布" 等中间状态：继续等待更长时间
+        if (toastText.includes("正在发布")) {
+          console.log("  检测到「正在发布」状态，继续等待...");
+          await page.waitForTimeout(scaledMs(10000));
+          const finalToast = await page
+            .waitForSelector(toastSelector, { timeout: scaledMs(30000) })
+            .catch(() => null);
+          if (finalToast) {
+            const finalText = await finalToast.textContent().catch(() => "");
+            console.log(`  最终提示: ${finalText.slice(0, 100)}`);
+            if (finalText.includes("发布成功") || finalText.includes("success")) {
+              console.log("  ✅ 发布成功");
+              return true;
+            }
+            if (
+              finalText.includes("失败") ||
+              finalText.includes("错误") ||
+              finalText.includes("违规")
+            ) {
+              throw new Error(`发布失败: ${finalText.slice(0, 200)}`);
+            }
+            if (isTransientPublishServerError(finalText)) {
+              transientErrorText = finalText.trim();
+              if (attempt < maxAttempts) {
+                continue;
+              }
+              throw new Error(`发布失败: ${finalText.slice(0, 200)}`);
+            }
           }
         }
       }
+    } catch (e) {
+      if (e.message.startsWith("发布失败")) throw e;
     }
-  } catch (e) {
-    if (e.message.startsWith("发布失败")) throw e;
-  }
 
-  if (!handleSms && (await isPublishSmsVerificationVisible(page, 1000))) {
-    console.log("  检测到短信验证码弹窗，交给独立短信验证步骤处理");
-    return true;
-  }
+    if (!handleSms && (await isPublishSmsVerificationVisible(page, 1000))) {
+      console.log("  检测到短信验证码弹窗，交给独立短信验证步骤处理");
+      return true;
+    }
 
-  const stillVisible = await publishBtn.isVisible().catch(() => false);
-  if (stillVisible) {
+    const stillVisible = await publishBtn.isVisible().catch(() => false);
+    if (!stillVisible) {
+      console.log("  ✅ 发布已提交（按钮已隐藏）");
+      return true;
+    }
+
+    if (transientErrorText && attempt < maxAttempts) {
+      continue;
+    }
+
+    if (transientErrorText) {
+      throw new Error(`发布失败: ${transientErrorText.slice(0, 200)}`);
+    }
+
     throw new Error("发布按钮仍在，发布未完成");
   }
 
-  console.log("  ✅ 发布已提交（按钮已隐藏）");
-  return true;
+  throw new Error("发布按钮仍在，发布未完成");
 }
 
 async function checkPublishSubmitted(page) {
