@@ -8,6 +8,10 @@ import { readBitable } from "./core/readBitable";
 import { downloadAttachment, updateBitableRecord } from "./core/bitable";
 import { loadFeishuBitableConfigForProfile } from "./core/config";
 import { getValidAccessToken } from "./core/oauth";
+import {
+  formatFeishuScheduleFailureStatus,
+  validateScheduleAt,
+} from "@/lib/publishScheduleValidation";
 
 dotenv.config({ quiet: true });
 
@@ -170,6 +174,52 @@ function parseScheduleAt(raw) {
 function formatImportErrorStatus(error) {
   const raw = error && error.message ? error.message : String(error || "未知错误");
   return `创建失败: ${raw}`.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+async function writeFeishuScheduleImportFailure(feishuCfg, accessToken, record, errorText, log) {
+  const f = record.fields || {};
+  if (String(f["已创建任务"] || "").trim() === "是") {
+    log("    ↺ 跳过飞书回写：已创建任务已为「是」");
+    return;
+  }
+  try {
+    await updateBitableRecord(feishuCfg, accessToken, record.record_id, {
+      已创建任务: formatFeishuScheduleFailureStatus(errorText),
+      审批: "异常待修改",
+    });
+    log("    ↺ 已回写飞书已创建任务列为失败原因（审批=异常待修改）");
+  } catch (writebackError) {
+    log(`    ⚠️ 回写飞书失败: ${writebackError.message}`);
+  }
+}
+
+async function markExistingTaskScheduleFailed(db, existingTask, errorText, log) {
+  if (!existingTask?.id) return;
+  const nowIso = new Date().toISOString();
+  await db.collection("creator_publish_tasks").updateOne(
+    { id: existingTask.id },
+    {
+      $set: {
+        status: "failed",
+        lastError: errorText,
+        updatedAt: nowIso,
+        displayUpdatedAt: nowIso,
+      },
+      $unset: {
+        taskId: "",
+        pid: "",
+        workerId: "",
+      },
+    }
+  );
+  log(`    ↺ 本地任务已标记失败: ${existingTask.id}`);
+  return {
+    ...existingTask,
+    status: "failed",
+    lastError: errorText,
+    updatedAt: nowIso,
+    displayUpdatedAt: nowIso,
+  };
 }
 
 function normalizeAttachmentSignature(attachments) {
@@ -675,6 +725,7 @@ async function syncPublishTasks(options = {}) {
     let backfilledHashCount = 0;
     let skippedRemoteCreatedCount = 0;
     let skippedRunningCount = 0;
+    let skippedScheduleInvalidCount = 0;
     let failedCount = 0;
 
     for (const record of syncCandidates) {
@@ -696,6 +747,32 @@ async function syncPublishTasks(options = {}) {
       if (!existingTask && snapshot.remoteCreatedStatus !== "" && snapshot.remoteCreatedStatus !== "否") {
         skippedRemoteCreatedCount++;
         continue;
+      }
+
+      if (snapshot.scheduleAt) {
+        const scheduleValidation = validateScheduleAt(snapshot.scheduleAt);
+        if (!scheduleValidation.ok) {
+          log(`  ⚠️ 跳过导入（定时时间不满足平台要求）: ${label}`);
+          log(`    ${scheduleValidation.error}`);
+          await writeFeishuScheduleImportFailure(
+            feishuCfg,
+            accessToken,
+            record,
+            scheduleValidation.error,
+            log
+          );
+          const failedTask = await markExistingTaskScheduleFailed(
+            db,
+            existingTask,
+            scheduleValidation.error,
+            log
+          );
+          if (failedTask && record.record_id) {
+            existingTasksByRecordId.set(String(record.record_id), failedTask);
+          }
+          skippedScheduleInvalidCount++;
+          continue;
+        }
       }
 
       const contentHash = buildFeishuContentHash(snapshot);
@@ -909,12 +986,13 @@ async function syncPublishTasks(options = {}) {
       backfilledHashCount,
       skippedRemoteCreatedCount,
       skippedRunningCount,
+      skippedScheduleInvalidCount,
       failedCount,
       rowUpdatedCount,
     };
 
     log(
-      `${summaryPrefix} 完成：创建 ${createdCount}，更新 ${updatedCount}，入队/无变化 ${unchangedCount}，飞书已创建跳过 ${skippedRemoteCreatedCount}，运行中跳过 ${skippedRunningCount}，失败 ${failedCount}` +
+      `${summaryPrefix} 完成：创建 ${createdCount}，更新 ${updatedCount}，入队/无变化 ${unchangedCount}，飞书已创建跳过 ${skippedRemoteCreatedCount}，运行中跳过 ${skippedRunningCount}，定时无效跳过 ${skippedScheduleInvalidCount}，失败 ${failedCount}` +
         (backfilledHashCount ? `，补摘要 ${backfilledHashCount}` : "") +
         (rowUpdatedCount ? `，行号更新 ${rowUpdatedCount}` : "")
     );
