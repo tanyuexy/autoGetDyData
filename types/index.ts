@@ -162,6 +162,23 @@ export interface AiVideoClipFormSnapshot {
   callbackUrl: string;
 }
 
+
+export interface AiVideoComposedFilmSegment {
+  id: string;
+  name: string;
+  order: number;
+}
+
+export interface AiVideoComposedFilm {
+  id: string;
+  videoUrl: string;
+  mode: "sequential" | "random";
+  segments: AiVideoComposedFilmSegment[];
+  backgroundMusic?: string | null;
+  comboIndex?: number | null;
+  createdAt: string;
+}
+
 export interface AiVideoClip {
   id: string;
   name: string;
@@ -176,6 +193,8 @@ export interface AiVideoClip {
   duration: number;
   ratio: string;
   resolution: string;
+  /** 混剪分组名，随机混剪时同组片段互斥选取 */
+  composeGroup?: string | null;
   createdAt: string;
   updatedAt: string;
   formSnapshot?: AiVideoClipFormSnapshot;

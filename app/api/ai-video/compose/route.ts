@@ -1,144 +1,75 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn } from "child_process";
-import { mkdir, mkdtemp, rm, writeFile, copyFile } from "fs/promises";
-import { existsSync } from "fs";
-import os from "os";
-import path from "path";
-import { getFfmpegPath } from "@/lib/ffmpeg";
+import type { ComposeGroupInput, ComposeRequest, ComposeSegmentInput } from "@/lib/videoComposeShared";
+import { saveComposedFilmsFromResults } from "@/lib/aiVideoComposedFilmService";
+import { runComposeRequest } from "@/lib/videoCompose";
 
 export const runtime = "nodejs";
 
-interface ComposeSegmentInput {
-  id: string;
-  name: string;
-  videoUrl: string;
+function normalizeSegment(item: unknown): ComposeSegmentInput | null {
+  if (!item || typeof item !== "object") return null;
+  const row = item as { id?: string; name?: string; videoUrl?: string };
+  if (!row.videoUrl) return null;
+  return {
+    id: String(row.id || row.videoUrl),
+    name: String(row.name || row.id || "片段"),
+    videoUrl: String(row.videoUrl),
+  };
 }
 
-function runCommand(command: string, args: string[], cwd: string) {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, { cwd });
-    let stderr = "";
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(stderr.trim() || `${command} exited with code ${code}`));
-    });
-  });
-}
-
-async function downloadSegment(url: string, filePath: string) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`下载片段失败：HTTP ${res.status}`);
-  const buffer = Buffer.from(await res.arrayBuffer());
-  await writeFile(filePath, buffer);
-}
-
-async function materializeSegment(url: string, filePath: string) {
-  const trimmed = url.trim();
-  if (trimmed.startsWith("/")) {
-    const localPath = path.join(process.cwd(), "public", trimmed);
-    if (existsSync(localPath)) {
-      await copyFile(localPath, filePath);
-      return;
-    }
-    const origin = (process.env.PUBLIC_BASE_URL || "http://127.0.0.1:3000").replace(/\/+$/, "");
-    await downloadSegment(`${origin}${trimmed}`, filePath);
-    return;
-  }
-  await downloadSegment(trimmed, filePath);
+function normalizeGroup(item: unknown): ComposeGroupInput | null {
+  if (!item || typeof item !== "object") return null;
+  const row = item as { name?: string; segments?: unknown[] };
+  const name = String(row.name || "").trim();
+  const segments = Array.isArray(row.segments)
+    ? row.segments.map(normalizeSegment).filter(Boolean)
+    : [];
+  if (!name || !segments.length) return null;
+  return { name, segments: segments as ComposeSegmentInput[] };
 }
 
 export async function POST(request: NextRequest) {
-  let tmpDir: string | null = null;
   try {
     const body = await request.json();
-    const segments = Array.isArray(body.segments)
-      ? (body.segments as ComposeSegmentInput[])
-          .filter((item) => item?.videoUrl)
-          .slice(0, 30)
-      : [];
+    const mode = body.mode === "random" ? "random" : "sequential";
 
-    if (segments.length < 2) {
-      return NextResponse.json({ error: "至少选择 2 个有视频 URL 的片段" }, { status: 400 });
+    let composeRequest: ComposeRequest;
+    if (mode === "random") {
+      const groups = (Array.isArray(body.groups) ? body.groups : [])
+        .map(normalizeGroup)
+        .filter(Boolean) as ComposeGroupInput[];
+      composeRequest = {
+        mode: "random",
+        groups,
+        outputCount: Number(body.outputCount) || 1,
+        orderRule: typeof body.orderRule === "string" ? body.orderRule : "",
+        addBackgroundMusic: body.addBackgroundMusic !== false,
+      };
+    } else {
+      const segments = (Array.isArray(body.segments) ? body.segments : [])
+        .slice(0, 30)
+        .map(normalizeSegment)
+        .filter(Boolean) as ComposeSegmentInput[];
+      composeRequest = {
+        mode: "sequential",
+        segments,
+        addBackgroundMusic: body.addBackgroundMusic !== false,
+      };
     }
 
-    tmpDir = await mkdtemp(path.join(os.tmpdir(), "seedance-compose-"));
-    const inputFiles: string[] = [];
-
-    for (let i = 0; i < segments.length; i += 1) {
-      const filePath = path.join(tmpDir, `clip-${String(i + 1).padStart(2, "0")}.mp4`);
-      await materializeSegment(segments[i].videoUrl, filePath);
-      inputFiles.push(filePath);
-    }
-
-    const listPath = path.join(tmpDir, "concat.txt");
-    await writeFile(
-      listPath,
-      inputFiles.map((file) => `file '${file.replace(/'/g, "'\\''")}'`).join("\n")
-    );
-
-    const publicDir = path.join(process.cwd(), "public", "generated-videos");
-    await mkdir(publicDir, { recursive: true });
-    const filename = `seedance-film-${Date.now()}.mp4`;
-    const outputPath = path.join(publicDir, filename);
-
-    const ffmpegPath = getFfmpegPath();
-
-    await runCommand(
-      ffmpegPath,
-      [
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        listPath,
-        "-c",
-        "copy",
-        outputPath,
-      ],
-      process.cwd()
-    ).catch(async () => {
-      await runCommand(
-        ffmpegPath,
-        [
-          "-y",
-          "-f",
-          "concat",
-          "-safe",
-          "0",
-          "-i",
-          listPath,
-          "-c:v",
-          "libx264",
-          "-pix_fmt",
-          "yuv420p",
-          "-c:a",
-          "aac",
-          "-movflags",
-          "+faststart",
-          outputPath,
-        ],
-        process.cwd()
-      );
-    });
-
-    if (!existsSync(outputPath)) {
-      throw new Error("合成完成但没有生成输出文件");
-    }
+    const result = await runComposeRequest(composeRequest);
+    const savedFilms = await saveComposedFilmsFromResults(result.films);
+    const primaryFilm = savedFilms[0] || result.films[0];
 
     return NextResponse.json({
       ok: true,
-      videoUrl: `/generated-videos/${filename}`,
-      segmentCount: segments.length,
+      mode: result.mode,
+      generated: result.generated,
+      films: savedFilms.length ? savedFilms : result.films,
+      videoUrl: primaryFilm?.videoUrl || null,
+      segmentCount: primaryFilm?.segments?.length || result.films[0]?.segmentCount || 0,
     });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message || "合成视频失败" }, { status: 400 });
-  } finally {
-    if (tmpDir) await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "合成视频失败";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

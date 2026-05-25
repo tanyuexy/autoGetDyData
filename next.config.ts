@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
     "imapflow",
     "mailparser",
     "dotenv",
+    "@ffmpeg-installer/ffmpeg",
   ],
   // Allow localhost-only access (this is a local tool)
   // Long-running API routes use export const maxDuration = 0

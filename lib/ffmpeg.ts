@@ -1,5 +1,5 @@
 import { existsSync } from "fs";
-import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
+import { createRequire } from "module";
 
 const SYSTEM_CANDIDATES = [
   "/opt/homebrew/bin/ffmpeg",
@@ -8,6 +8,20 @@ const SYSTEM_CANDIDATES = [
 ];
 
 let cachedPath: string | null = null;
+
+function resolveBundledFfmpegPath(): string | null {
+  try {
+    const require = createRequire(import.meta.url);
+    const installer = require("@ffmpeg-installer/ffmpeg") as { path?: string };
+    const bundledPath = String(installer.path || "").trim();
+    if (bundledPath && existsSync(bundledPath)) {
+      return bundledPath;
+    }
+  } catch {
+    /* 打包/开发环境未安装时忽略 */
+  }
+  return null;
+}
 
 export function getFfmpegPath(): string {
   if (cachedPath) return cachedPath;
@@ -18,8 +32,8 @@ export function getFfmpegPath(): string {
     return cachedPath;
   }
 
-  const bundledPath = String(ffmpegInstaller.path || "").trim();
-  if (bundledPath && existsSync(bundledPath)) {
+  const bundledPath = resolveBundledFfmpegPath();
+  if (bundledPath) {
     cachedPath = bundledPath;
     return cachedPath;
   }

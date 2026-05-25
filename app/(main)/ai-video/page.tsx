@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   App,
   Alert,
+  AutoComplete,
   Button,
   Divider,
   Empty,
@@ -16,6 +17,7 @@ import {
   Spin,
   Switch,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -23,7 +25,7 @@ import {
   type TableProps,
 } from "antd";
 import {
-  CopyOutlined,
+  GroupOutlined,
   DeleteOutlined,
   DownloadOutlined,
   LinkOutlined,
@@ -37,7 +39,8 @@ import {
 } from "@ant-design/icons";
 import type { UploadFile, UploadProps } from "antd/es/upload/interface";
 import { antdTagPresetStyle, type SemanticTagPreset } from "@/lib/semanticTagStyles";
-import type { AiVideoClip, AiVideoClipFormSnapshot, AiVideoReferenceResource } from "@/types";
+import { ComposeFilmModal, type ComposeFilmModalResult } from "@/components/ComposeFilmModal";
+import type { AiVideoClip, AiVideoClipFormSnapshot, AiVideoComposedFilm, AiVideoReferenceResource } from "@/types";
 import {
   getSeedanceDurationConfig,
   normalizeSeedanceDuration,
@@ -56,6 +59,9 @@ interface SeedanceModelOption {
 type ClipItem = AiVideoClip;
 type ClipFormSnapshot = AiVideoClipFormSnapshot;
 type ReferenceResource = AiVideoReferenceResource;
+
+const COMPOSE_GROUP_PRESETS = ["开头", "中间", "结尾"];
+const COMPOSE_GROUP_QUICK_PICKS = ["1", "2", "3", "4", "5"];
 
 const FALLBACK_MODELS: SeedanceModelOption[] = [
   {
@@ -158,10 +164,20 @@ function ClipVideoThumbnail({
   videoUrl,
   coverUrl,
   onClick,
+  tooltipTitle = "点击预览视频",
+  width = 72,
+  height = 48,
+  showPlayIcon = true,
+  orderBadge,
 }: {
   videoUrl: string;
   coverUrl?: string | null;
   onClick: () => void;
+  tooltipTitle?: React.ReactNode;
+  width?: number;
+  height?: number;
+  showPlayIcon?: boolean;
+  orderBadge?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [thumbUrl, setThumbUrl] = useState<string | null>(coverUrl ? resolveMediaUrl(coverUrl) : null);
@@ -202,16 +218,15 @@ function ClipVideoThumbnail({
     };
   }, [thumbUrl, videoUrl]);
 
-  return (
-    <Tooltip title="点击预览视频">
+  const button = (
       <button
         type="button"
         aria-label="预览视频"
         onClick={onClick}
         style={{
           position: "relative",
-          width: 72,
-          height: 48,
+          width,
+          height,
           padding: 0,
           border: "1px solid var(--vol-hairline)",
           borderRadius: 6,
@@ -232,23 +247,50 @@ function ClipVideoThumbnail({
             style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }}
           />
         )}
-        <span
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "rgba(0, 0, 0, 0.28)",
-            color: "#fff",
-            fontSize: 18,
-          }}
-        >
-          <PlayCircleOutlined />
-        </span>
+        {typeof orderBadge === "number" ? (
+          <span
+            style={{
+              position: "absolute",
+              top: 4,
+              left: 4,
+              minWidth: 18,
+              height: 18,
+              paddingInline: 4,
+              borderRadius: 999,
+              background: "rgba(0, 0, 0, 0.55)",
+              color: "#fff",
+              fontSize: 11,
+              lineHeight: "18px",
+              textAlign: "center",
+              fontWeight: 600,
+              boxShadow: "0 1px 4px rgba(0,0,0,0.25)",
+              zIndex: 2,
+            }}
+          >
+            {orderBadge}
+          </span>
+        ) : null}
+        {showPlayIcon ? (
+          <span
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "rgba(0, 0, 0, 0.28)",
+              color: "#fff",
+              fontSize: Math.max(14, Math.round(width * 0.25)),
+            }}
+          >
+            <PlayCircleOutlined />
+          </span>
+        ) : null}
       </button>
-    </Tooltip>
   );
+
+  if (tooltipTitle === null || tooltipTitle === false || tooltipTitle === "") return button;
+  return <Tooltip title={tooltipTitle}>{button}</Tooltip>;
 }
 
 const pageWrapStyle: React.CSSProperties = {
@@ -281,6 +323,19 @@ async function fetchClipsFromServer(): Promise<ClipItem[]> {
   const data = (await res.json()) as { items?: ClipItem[]; error?: string };
   if (!res.ok) throw new Error(data.error || "读取片段列表失败");
   return Array.isArray(data.items) ? data.items : [];
+}
+
+async function fetchFilmsFromServer(): Promise<AiVideoComposedFilm[]> {
+  const res = await fetch("/api/ai-video/films", { cache: "no-store" });
+  const data = (await res.json()) as { items?: AiVideoComposedFilm[]; error?: string };
+  if (!res.ok) throw new Error(data.error || "读取成片列表失败");
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+async function deleteFilmFromServer(id: string) {
+  const res = await fetch(`/api/ai-video/films?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  const data = (await res.json()) as { error?: string };
+  if (!res.ok) throw new Error(data.error || "删除成片失败");
 }
 
 async function saveClipToServer(clip: ClipItem): Promise<ClipItem> {
@@ -627,7 +682,14 @@ export default function AiVideoPage() {
   const [uploadingClip, setUploadingClip] = useState(false);
   const [uploadingReference, setUploadingReference] = useState(false);
   const [composing, setComposing] = useState(false);
-  const [filmUrl, setFilmUrl] = useState<string | null>(null);
+  const [composeModalOpen, setComposeModalOpen] = useState(false);
+  const [groupAssignOpen, setGroupAssignOpen] = useState(false);
+  const [groupAssignName, setGroupAssignName] = useState("");
+  const [assigningGroup, setAssigningGroup] = useState(false);
+  const [listTab, setListTab] = useState<"clips" | "films">("clips");
+  const [composedFilms, setComposedFilms] = useState<AiVideoComposedFilm[]>([]);
+  const [filmsHydrated, setFilmsHydrated] = useState(false);
+  const [previewFilm, setPreviewFilm] = useState<AiVideoComposedFilm | null>(null);
   const [previewClip, setPreviewClip] = useState<ClipItem | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [draggingReferenceId, setDraggingReferenceId] = useState<string | null>(null);
@@ -722,6 +784,25 @@ export default function AiVideoPage() {
     };
   }, [clipsHydrated, message, pageReady]);
 
+  useEffect(() => {
+    if (!pageReady || filmsHydrated) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const items = await fetchFilmsFromServer();
+        if (!cancelled) setComposedFilms(items);
+      } catch (error: unknown) {
+        if (!cancelled) {
+          message.error(error instanceof Error ? error.message : "加载成片列表失败");
+        }
+      } finally {
+        if (!cancelled) setFilmsHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [filmsHydrated, message, pageReady]);
 
   useEffect(() => {
     try {
@@ -810,6 +891,20 @@ export default function AiVideoPage() {
 
 
   const selectedDuration = selectedClips.reduce((sum, item) => sum + (item.duration || 0), 0);
+
+  const existingComposeGroups = useMemo(() => {
+    const names = new Set<string>();
+    for (const clip of clips) {
+      const name = String(clip.composeGroup || "").trim();
+      if (name) names.add(name);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+  }, [clips]);
+
+  const composeGroupOptions = useMemo(
+    () => existingComposeGroups.map((name) => ({ value: name, label: name })),
+    [existingComposeGroups]
+  );
 
   const updateClip = useCallback((id: string, patch: Partial<ClipItem>) => {
     setClips((prev) => prev.map((clip) => (clip.id === id ? { ...clip, ...patch } : clip)));
@@ -1435,30 +1530,147 @@ export default function AiVideoPage() {
   }
 
 
-  async function composeFilm() {
-    if (selectedClips.length < 2) {
-      message.warning("至少选择 2 个已有视频 URL 的片段");
+
+  const batchAssignComposeGroup = useCallback(
+    async (clipIds: string[], composeGroup: string) => {
+      const nextGroup = composeGroup.trim();
+      if (!nextGroup) {
+        message.warning("请输入分组名称");
+        return false;
+      }
+      if (!clipIds.length) {
+        message.warning("请先勾选片段");
+        return false;
+      }
+
+      const clipsToUpdate = clipsRef.current
+        .filter((clip) => clipIds.includes(clip.id))
+        .map((clip) => ({ ...clip, composeGroup: nextGroup }));
+
+      if (!clipsToUpdate.length) return false;
+
+      setAssigningGroup(true);
+      for (const clip of clipsToUpdate) {
+        updateClip(clip.id, { composeGroup: nextGroup });
+      }
+      try {
+        const res = await fetch("/api/ai-video/clips", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clips: clipsToUpdate }),
+        });
+        const data = (await res.json()) as { items?: ClipItem[]; error?: string };
+        if (!res.ok || !Array.isArray(data.items)) {
+          throw new Error(data.error || "批量设置分组失败");
+        }
+        for (const saved of data.items) {
+          updateClip(saved.id, saved);
+        }
+        message.success(`已将 ${data.items.length} 个片段设为「${nextGroup}」`);
+        setSelectedClipIds([]);
+        return true;
+      } catch (e: unknown) {
+        message.error(e instanceof Error ? e.message : "批量设置分组失败");
+        return false;
+      } finally {
+        setAssigningGroup(false);
+      }
+    },
+    [message, updateClip]
+  );
+
+  const openGroupAssignModal = useCallback(() => {
+    if (!selectedClips.length) {
+      message.warning("请先勾选要分组的片段");
       return;
     }
+    setGroupAssignName("");
+    setGroupAssignOpen(true);
+  }, [message, selectedClips.length]);
+
+  const clearSelectedComposeGroups = useCallback(async () => {
+    if (!selectedClips.length) {
+      message.warning("请先勾选片段");
+      return;
+    }
+    setAssigningGroup(true);
+    try {
+      const clipsToUpdate = selectedClips.map((clip) => ({ ...clip, composeGroup: null }));
+      for (const clip of clipsToUpdate) {
+        updateClip(clip.id, { composeGroup: null });
+      }
+      const res = await fetch("/api/ai-video/clips", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clips: clipsToUpdate }),
+      });
+      const data = (await res.json()) as { items?: ClipItem[]; error?: string };
+      if (!res.ok || !Array.isArray(data.items)) {
+        throw new Error(data.error || "清除分组失败");
+      }
+      for (const saved of data.items) {
+        updateClip(saved.id, saved);
+      }
+      message.success(`已清除 ${data.items.length} 个片段的分组`);
+    } catch (e: unknown) {
+      message.error(e instanceof Error ? e.message : "清除分组失败");
+    } finally {
+      setAssigningGroup(false);
+    }
+  }, [message, selectedClips, updateClip]);
+
+  async function reloadComposedFilms() {
+    try {
+      const items = await fetchFilmsFromServer();
+      setComposedFilms(items);
+      setFilmsHydrated(true);
+    } catch (e: unknown) {
+      message.error(e instanceof Error ? e.message : "刷新成片列表失败");
+    }
+  }
+
+  async function handleComposeSubmit(payload: {
+    mode: "sequential" | "random";
+    segments?: Array<{ id: string; name: string; videoUrl: string }>;
+    groups?: Array<{ name: string; segments: Array<{ id: string; name: string; videoUrl: string }> }>;
+    outputCount?: number;
+    orderRule?: string;
+    addBackgroundMusic?: boolean;
+  }): Promise<ComposeFilmModalResult | null> {
     setComposing(true);
     try {
       const res = await fetch("/api/ai-video/compose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          segments: selectedClips.map((clip) => ({
-            id: clip.id,
-            name: clip.name,
-            videoUrl: clip.videoUrl,
-          })),
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "合成视频失败");
-      setFilmUrl(data.videoUrl);
-      message.success("成片已合成");
-    } catch (e: any) {
-      message.error(e.message || "合成视频失败");
+      const urls = Array.isArray(data.films)
+        ? data.films.map((film: { videoUrl?: string }) => film.videoUrl).filter(Boolean)
+        : data.videoUrl
+          ? [data.videoUrl]
+          : [];
+      await reloadComposedFilms();
+      setListTab("films");
+      const bgmName = Array.isArray(data.films)
+        ? data.films.find((film: { backgroundMusic?: string | null }) => film.backgroundMusic)?.backgroundMusic
+        : null;
+      const bgmHint = bgmName ? `，背景音乐：${bgmName}` : "";
+      message.success(
+        payload.mode === "random"
+          ? `已生成 ${data.generated || urls.length} 条成片${bgmHint}`
+          : `成片已合成${bgmHint}`
+      );
+      return {
+        mode: payload.mode,
+        films: Array.isArray(data.films) ? data.films : [],
+        generated: Number(data.generated) || urls.length,
+        videoUrl: urls[0] || null,
+      };
+    } catch (e: unknown) {
+      message.error(e instanceof Error ? e.message : "合成视频失败");
+      return null;
     } finally {
       setComposing(false);
     }
@@ -1488,11 +1700,6 @@ export default function AiVideoPage() {
     }
   }
 
-  async function copyFilmPlan() {
-    const lines = selectedClips.map((clip, index) => `${index + 1}. ${clip.name} ${clip.videoUrl}`);
-    await navigator.clipboard.writeText(lines.join("\n"));
-    message.success("已复制成片清单");
-  }
 
   async function copyPrompt(text: string) {
     try {
@@ -1688,6 +1895,162 @@ export default function AiVideoPage() {
 
 
 
+  const clipById = useMemo(() => new Map(clips.map((clip) => [clip.id, clip])), [clips]);
+
+  const filmColumns: TableProps<AiVideoComposedFilm>["columns"] = useMemo(
+    () => [
+      {
+        title: "预览",
+        key: "preview",
+        width: 108,
+        align: "center" as const,
+        render: (_: unknown, record: AiVideoComposedFilm) => (
+          <ClipVideoThumbnail width={96} height={64} videoUrl={record.videoUrl} onClick={() => setPreviewFilm(record)} />
+        ),
+      },
+      {
+        title: "使用片段",
+        key: "segments",
+        width: 360,
+        align: "center" as const,
+        render: (_: unknown, record: AiVideoComposedFilm) => (
+          <Space size={10} wrap style={{ width: "100%", justifyContent: "center" }}>
+            {record.segments.map((segment) => {
+              const clip = clipById.get(segment.id);
+              const prompt = String(clip?.prompt || "").trim();
+              const tooltipContent = (
+                <Space orientation="vertical" size={4} style={{ maxWidth: 360 }}>
+                  <Typography.Text style={{ color: "#fff", fontSize: 12 }}>
+                    {segment.order}. {segment.name}
+                  </Typography.Text>
+                  {prompt ? (
+                    <Typography.Text style={{ color: "rgba(255,255,255,0.88)", fontSize: 12, whiteSpace: "pre-wrap" }}>
+                      {prompt}
+                    </Typography.Text>
+                  ) : null}
+                </Space>
+              );
+
+              return (
+                <Tooltip key={`${record.id}-${segment.id}-${segment.order}`} title={tooltipContent} styles={{ root: { maxWidth: 420 } }}>
+                  {clip?.videoUrl ? (
+                    <ClipVideoThumbnail
+                      videoUrl={clip.videoUrl}
+                      coverUrl={clip.coverUrl}
+                      width={88}
+                      height={60}
+                      showPlayIcon={false}
+                      orderBadge={segment.order}
+                      tooltipTitle={null}
+                      onClick={() => setPreviewClip(clip)}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        position: "relative",
+                        width: 88,
+                        height: 60,
+                        borderRadius: 6,
+                        border: "1px dashed var(--vol-hairline)",
+                        background: "var(--vol-canvas)",
+                      }}
+                    >
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: 4,
+                          left: 4,
+                          minWidth: 18,
+                          height: 18,
+                          paddingInline: 4,
+                          borderRadius: 999,
+                          background: "rgba(0, 0, 0, 0.55)",
+                          color: "#fff",
+                          fontSize: 11,
+                          lineHeight: "18px",
+                          textAlign: "center",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {segment.order}
+                      </span>
+                    </div>
+                  )}
+                </Tooltip>
+              );
+            })}
+          </Space>
+        ),
+      },
+      {
+        title: "背景音乐",
+        dataIndex: "backgroundMusic",
+        width: 200,
+        align: "center" as const,
+        render: (value: string | null | undefined) =>
+          value ? (
+            <Typography.Text style={{ fontSize: 12, display: "block", textAlign: "center" }} ellipsis={{ tooltip: String(value) }}>
+              {String(value)}
+            </Typography.Text>
+          ) : (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              —
+            </Typography.Text>
+          ),
+      },
+      {
+        title: "创建时间",
+        dataIndex: "createdAt",
+        width: 168,
+        align: "center" as const,
+        render: (value: string) => (
+          <Typography.Text style={{ fontSize: 12 }}>
+            {value ? new Date(String(value)).toLocaleString("zh-CN") : "—"}
+          </Typography.Text>
+        ),
+      },
+      {
+        title: "操作",
+        key: "actions",
+        width: 152,
+        fixed: "right" as const,
+        align: "center" as const,
+        render: (_: unknown, record: AiVideoComposedFilm) => (
+          <Space size={8} wrap style={{ justifyContent: "center", width: "100%" }}>
+            <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setPreviewFilm(record)}>
+              预览
+            </Button>
+            <Button size="small" type="link" style={{ padding: 0 }} href={resolveMediaUrl(record.videoUrl)} target="_blank">
+              打开
+            </Button>
+            <Button
+              size="small"
+              type="link"
+              danger
+              style={{ padding: 0 }}
+              onClick={() => {
+                Modal.confirm({
+                  title: "删除这条成片记录？",
+                  content: "仅删除列表记录，不会删除磁盘上的视频文件。",
+                  okText: "删除",
+                  cancelText: "取消",
+                  onOk: async () => {
+                    await deleteFilmFromServer(record.id);
+                    setComposedFilms((prev) => prev.filter((item) => item.id !== record.id));
+                    message.success("已删除成片记录");
+                  },
+                });
+              }}
+            >
+              删除
+            </Button>
+          </Space>
+        ),
+      },
+    ],
+    [clipById]
+  );
+
   const columns: TableProps<ClipItem>["columns"] = [
     {
       title: "序号",
@@ -1730,6 +2093,24 @@ export default function AiVideoPage() {
               </Typography.Text>
             </Space>
           </Tooltip>
+        );
+      },
+    },
+    {
+      title: "混剪分组",
+      dataIndex: "composeGroup",
+      width: 120,
+      align: "center",
+      render: (_, record) => {
+        const group = String(record.composeGroup || "").trim();
+        return group ? (
+          <Tag variant="filled" color="purple" style={{ margin: 0 }}>
+            {group}
+          </Tag>
+        ) : (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            —
+          </Typography.Text>
         );
       },
     },
@@ -1883,11 +2264,16 @@ export default function AiVideoPage() {
 
       <style jsx global>{`
         .ai-video-clips-table .ant-table-thead > tr > th,
-        .ai-video-clips-table .ant-table-tbody > tr > td {
+        .ai-video-clips-table .ant-table-tbody > tr > td,
+        .ai-video-films-table .ant-table-thead > tr > th,
+        .ai-video-films-table .ant-table-tbody > tr > td {
           text-align: center;
         }
         .ai-video-clips-table .ant-table-selection-column {
           text-align: center;
+        }
+        .ai-video-films-table .ant-table-cell {
+          vertical-align: middle;
         }
       `}</style>
 
@@ -2311,99 +2697,219 @@ export default function AiVideoPage() {
         </section>
 
         <section style={sectionStyle}>
-          <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-            <Space align="center" style={{ width: "100%", justifyContent: "space-between" }}>
-              <div>
-                <Space align="center" size={8}>
-                  <Typography.Text strong style={{ fontSize: 15 }}>
-                    片段列表
-                  </Typography.Text>
-                  {clipsHydrated ? (
-                    <Tag variant="filled" color="default">
-                      共 {clips.length} 条
-                    </Tag>
-                  ) : (
-                    <Spin size="small" />
-                  )}
-                </Space>
-                <div>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    勾选片段按选择先后决定合成顺序（序号列显示合成顺序）
-                  </Typography.Text>
-                </div>
-              </div>
-              <Space>
-                <Button icon={<CopyOutlined />} onClick={copyFilmPlan} disabled={!selectedClips.length}>
-                  复制清单
-                </Button>
-                <Upload {...clipUploadProps}>
-                  <Button icon={<UploadOutlined />} loading={uploadingClip}>
-                    上传片段
-                  </Button>
-                </Upload>
-                <Button
-                  type="primary"
-                  icon={<ScissorOutlined />}
-                  loading={composing}
-                  disabled={selectedClips.length < 2}
-                  onClick={composeFilm}
-                >
-                  合成成片
-                </Button>
-              </Space>
-            </Space>
+          <Tabs
+            activeKey={listTab}
+            onChange={(key) => setListTab(key as "clips" | "films")}
+            items={[
+              {
+                key: "clips",
+                label: (
+                  <Space size={6}>
+                    <span>片段列表</span>
+                    {clipsHydrated ? <Tag variant="filled" color="default">{clips.length}</Tag> : <Spin size="small" />}
+                  </Space>
+                ),
+                children: (
+                  <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+                    <Space align="center" style={{ width: "100%", justifyContent: "space-between" }}>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        勾选片段后可「设为一组」批量分组；随机混剪时在弹窗内勾选参与的分组
+                      </Typography.Text>
+                      <Space wrap>
+                        <Button
+                          icon={<GroupOutlined />}
+                          disabled={!selectedClips.length}
+                          loading={assigningGroup}
+                          onClick={openGroupAssignModal}
+                        >
+                          设为一组
+                        </Button>
+                        <Button disabled={!selectedClips.length} loading={assigningGroup} onClick={() => void clearSelectedComposeGroups()}>
+                          清除分组
+                        </Button>
+                        <Upload {...clipUploadProps}>
+                          <Button icon={<UploadOutlined />} loading={uploadingClip}>
+                            上传片段
+                          </Button>
+                        </Upload>
+                        <Button type="primary" icon={<ScissorOutlined />} onClick={() => setComposeModalOpen(true)}>
+                          合成成片
+                        </Button>
+                      </Space>
+                    </Space>
 
-            {clips.length ? (
-              <Table
-                rowKey="id"
-                size="small"
-                className="ai-video-clips-table"
-                pagination={{ pageSize: 8 }}
-                dataSource={clips}
-                columns={columns}
-                rowSelection={{
-                  selectedRowKeys: selectedClipIds,
-                  onChange: handleClipSelectionChange,
-                  getCheckboxProps: (record) => ({ disabled: !record.videoUrl }),
-                  align: "center",
-                }}
-              />
-            ) : (
-              <Empty description="还没有片段" />
-            )}
+                    {clips.length ? (
+                      <Table
+                        rowKey="id"
+                        size="small"
+                        className="ai-video-clips-table"
+                        pagination={{ pageSize: 8 }}
+                        dataSource={clips}
+                        columns={columns}
+                        rowSelection={{
+                          selectedRowKeys: selectedClipIds,
+                          onChange: handleClipSelectionChange,
+                          getCheckboxProps: (record) => ({ disabled: !record.videoUrl }),
+                          align: "center",
+                        }}
+                      />
+                    ) : (
+                      <Empty description="还没有片段" />
+                    )}
 
-            <Alert
-              type="info"
-              showIcon
-              title={`已选 ${selectedClips.length} 个片段，预计 ${selectedDuration || 0} 秒`}
-            />
-
-            {filmUrl ? (
-              <>
-                <Divider style={{ margin: "8px 0" }} />
-                <Space orientation="vertical" size={8} style={{ width: "100%" }}>
-                  <Typography.Text strong>成片预览</Typography.Text>
-                  <video
-                    controls
-                    src={filmUrl}
-                    style={{
-                      width: "100%",
-                      maxWidth: 520,
-                      borderRadius: 8,
-                      border: "1px solid var(--vol-hairline)",
-                      background: "#000",
-                    }}
-                  />
-                  <Button icon={<LinkOutlined />} href={filmUrl} target="_blank">
-                    打开成片
-                  </Button>
-                </Space>
-              </>
-            ) : null}
-          </Space>
+                    <Alert type="info" showIcon title={`已选 ${selectedClips.length} 个片段，预计 ${selectedDuration || 0} 秒`} />
+                  </Space>
+                ),
+              },
+              {
+                key: "films",
+                label: (
+                  <Space size={6}>
+                    <span>成片列表</span>
+                    {filmsHydrated ? <Tag variant="filled" color="default">{composedFilms.length}</Tag> : <Spin size="small" />}
+                  </Space>
+                ),
+                children: (
+                  <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+{composedFilms.length ? (
+                      <Table
+                        rowKey="id"
+                        size="small"
+                        className="ai-video-films-table"
+                        tableLayout="fixed"
+                        scroll={{ x: 988 }}
+                        pagination={{ pageSize: 8 }}
+                        dataSource={composedFilms}
+                        columns={filmColumns}
+                      />
+                    ) : filmsHydrated ? (
+                      <Empty description="还没有成片，合成后会自动出现在这里" />
+                    ) : (
+                      <Spin />
+                    )}
+                  </Space>
+                ),
+              },
+            ]}
+          />
         </section>
         </Space>
       )}
+
+      <Modal
+        title="设为一组"
+        open={groupAssignOpen}
+        centered
+        destroyOnHidden
+        confirmLoading={assigningGroup}
+        okText="确定"
+        cancelText="取消"
+        onCancel={() => setGroupAssignOpen(false)}
+        onOk={async () => {
+          const ok = await batchAssignComposeGroup(
+            selectedClips.map((clip) => clip.id),
+            groupAssignName
+          );
+          if (ok) setGroupAssignOpen(false);
+        }}
+      >
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <Typography.Text type="secondary">
+            将已选的 {selectedClips.length} 个片段设为同一混剪分组。
+          </Typography.Text>
+          <AutoComplete
+            value={groupAssignName}
+            options={composeGroupOptions}
+            placeholder="选择已有分组或输入新名称"
+            style={{ width: "100%" }}
+            allowClear
+            filterOption={(inputValue, option) =>
+              String(option?.value ?? "")
+                .toLowerCase()
+                .includes(inputValue.trim().toLowerCase())
+            }
+            onChange={(value) => setGroupAssignName(value)}
+            onSelect={(value) => setGroupAssignName(value)}
+            onKeyDown={async (e) => {
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              const ok = await batchAssignComposeGroup(
+                selectedClips.map((clip) => clip.id),
+                groupAssignName
+              );
+              if (ok) setGroupAssignOpen(false);
+            }}
+          />
+          <Space size={[8, 8]} wrap>
+            {[...COMPOSE_GROUP_PRESETS, ...COMPOSE_GROUP_QUICK_PICKS].map((name) => (
+              <Tag
+                key={name}
+                variant="filled"
+                color={groupAssignName === name ? "blue" : "default"}
+                style={{
+                  cursor: "pointer",
+                  margin: 0,
+                  ...(COMPOSE_GROUP_QUICK_PICKS.includes(name)
+                    ? { minWidth: 28, textAlign: "center" as const }
+                    : {}),
+                }}
+                onClick={() => setGroupAssignName(name)}
+              >
+                {name}
+              </Tag>
+            ))}
+          </Space>
+        </Space>
+      </Modal>
+
+      <ComposeFilmModal
+        open={composeModalOpen}
+        clips={clips}
+        selectedClips={selectedClips}
+        composing={composing}
+        onCancel={() => setComposeModalOpen(false)}
+        onSubmit={handleComposeSubmit}
+      />
+
+      <Modal
+        open={Boolean(previewFilm)}
+        destroyOnHidden
+        centered
+        title={previewFilm ? `成片预览 · ${previewFilm.mode === "random" ? "随机混剪" : "顺序合成"}` : "成片预览"}
+        footer={null}
+        width={760}
+        onCancel={() => setPreviewFilm(null)}
+      >
+        {previewFilm?.videoUrl ? (
+          <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+            <video
+              key={previewFilm.id}
+              controls
+              autoPlay
+              src={resolveMediaUrl(previewFilm.videoUrl)}
+              style={{
+                width: "100%",
+                maxHeight: "60vh",
+                borderRadius: 8,
+                background: "#000",
+              }}
+            />
+            <Space orientation="vertical" size={4} style={{ width: "100%" }}>
+              <Typography.Text strong style={{ fontSize: 13 }}>
+                使用片段
+              </Typography.Text>
+              {previewFilm.segments.map((segment) => (
+                <Typography.Text key={`${previewFilm.id}-${segment.id}`} style={{ fontSize: 12 }}>
+                  {segment.order}. {segment.name}
+                </Typography.Text>
+              ))}
+            </Space>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              背景音乐：{previewFilm.backgroundMusic || "—"}
+            </Typography.Text>
+          </Space>
+        ) : null}
+      </Modal>
 
       <Modal
         open={Boolean(previewClip)}

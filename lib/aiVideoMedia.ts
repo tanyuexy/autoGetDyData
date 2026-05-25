@@ -5,6 +5,13 @@ import path from "path";
 const GENERATED_VIDEOS_DIR = path.join(process.cwd(), "public", "generated-videos");
 export const GENERATED_VIDEOS_URL_PREFIX = "/generated-videos/";
 
+const COMPOSED_FILMS_DIR = path.join(process.cwd(), "public", "composed-films");
+export const COMPOSED_FILMS_URL_PREFIX = "/composed-films/";
+
+export function getComposedFilmsDir() {
+  return COMPOSED_FILMS_DIR;
+}
+
 function getOrigin() {
   return (process.env.PUBLIC_BASE_URL || "http://127.0.0.1:3000").replace(/\/+$/, "");
 }

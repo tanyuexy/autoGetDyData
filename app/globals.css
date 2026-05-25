@@ -52,9 +52,28 @@ html {
   scrollbar-gutter: stable;
 }
 
-/* Modal 打开时 rc-portal 会注入 body width: calc(100% - 滚动条宽)，导致页面左右抖动 */
+body {
+  overflow: hidden;
+  scrollbar-gutter: stable;
+}
+
+/* Modal 打开时 rc-portal 可能改写 body 宽度/内边距，统一禁止补偿抖动 */
 html body {
   width: 100% !important;
+}
+
+html:has(.ant-modal-root),
+html:has(.ant-modal-wrap),
+body:has(.ant-modal-root),
+body:has(.ant-modal-wrap) {
+  padding-right: 0 !important;
+  margin-right: 0 !important;
+  width: 100% !important;
+  scrollbar-gutter: stable;
+}
+
+.app-main-content {
+  scrollbar-gutter: stable;
 }
 
 body {

@@ -132,7 +132,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <Layout className="app-shell" style={{ minHeight: "100vh" }}>
+    <Layout className="app-shell" style={{ height: "100dvh", minHeight: "100vh", overflow: "hidden" }}>
       <Sider
         className="glass"
         collapsible
@@ -272,15 +272,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </Sider>
 
-      <Layout style={{ background: "transparent" }}>
+      <Layout style={{ background: "transparent", minHeight: 0, flex: 1, overflow: "hidden" }}>
         <Content
-          className="glass"
+          className="glass app-main-content"
           style={{
             margin: 12,
             marginLeft: 0,
             padding: 20,
             borderRadius: 12,
-            minHeight: 200,
+            minHeight: 0,
+            height: "calc(100dvh - 24px)",
             overflow: "auto",
           }}
         >
