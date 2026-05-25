@@ -1,48 +1,22 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Space, Divider, App, Select, Typography, Button } from "antd";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Space, Divider, App, Typography, Button } from "antd";
 import AccountTable from "@/components/AccountTable";
+import { ToolbarMultiSelect } from "@/components/ToolbarMultiSelect";
 import { useTaskContext } from "@/contexts/TaskContext";
+import { useToolbarMultiSelect } from "@/hooks/useToolbarMultiSelect";
+import { SELECT_ALL_CREATOR_EXPORT } from "@/lib/toolbarMultiSelect";
 import type { CreatorAccount } from "@/types";
 
 const { Text } = Typography;
 
-/** Select 第一项「一键全选」的哨兵值，不会作为账号名传给接口 */
-const MULTI_SELECT_ALL_ACCOUNTS = "__toolbar_all_creator_export_accounts__";
-
 const CREATOR_SELECTION_CACHE_KEY = "creator:selectedAccounts";
-
-function readCachedCreatorSelection() {
-  try {
-    const cached = JSON.parse(
-      window.localStorage.getItem(CREATOR_SELECTION_CACHE_KEY) || "[]"
-    );
-    return Array.isArray(cached) ? cached.map((name) => String(name)) : [];
-  } catch {
-    return [];
-  }
-}
 
 export default function CreatorPage() {
   const { message } = App.useApp();
   const [accounts, setAccounts] = useState<CreatorAccount[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const [selectedAccounts, setSelectedAccountsState] = useState<string[]>([]);
-  const hasHydratedSelectionRef = useRef(false);
-  const isApplyingInitialSelectionRef = useRef(false);
-
-  const setSelectedAccounts = useCallback((value: string[]) => {
-    setSelectedAccountsState(value);
-    if (isApplyingInitialSelectionRef.current) return;
-    try {
-      window.localStorage.setItem(
-        CREATOR_SELECTION_CACHE_KEY,
-        JSON.stringify(value)
-      );
-    } catch {}
-  }, []);
 
   const { startTask, done, isNamespaceBusy } = useTaskContext();
 
@@ -58,7 +32,7 @@ export default function CreatorPage() {
       message.error("获取账号列表失败");
     }
     setLoading(false);
-  }, []);
+  }, [message]);
 
   useEffect(() => {
     fetchAccounts();
@@ -68,81 +42,40 @@ export default function CreatorPage() {
     if (done) {
       fetchAccounts();
     }
-  }, [done]);
+  }, [done, fetchAccounts]);
 
   const validAccounts = useMemo(
     () => accounts.filter((a) => a.hasStorageState).map((a) => a.name),
     [accounts]
   );
 
-  const accountSelectOptions = useMemo(
-    () => [
-      {
-        label: validAccounts.length
-          ? `全选（${validAccounts.length} 个已登录账号）`
-          : "全选（无已登录账号）",
-        value: MULTI_SELECT_ALL_ACCOUNTS,
-        disabled: validAccounts.length === 0,
-      },
-      ...accounts.map((a) => ({
+  const itemOptions = useMemo(
+    () =>
+      accounts.map((a) => ({
         label: a.name,
         value: a.name,
         disabled: !a.hasStorageState,
       })),
-    ],
-    [accounts, validAccounts.length]
+    [accounts]
   );
 
-  const exportAccountsSanitized = useMemo(
-    () => selectedAccounts.filter((name) => validAccounts.includes(name)),
-    [selectedAccounts, validAccounts]
-  );
-
-  const handleAccountSelectChange = useCallback((vals: string[]) => {
-    const picked = [...new Set(vals)];
-    if (picked.includes(MULTI_SELECT_ALL_ACCOUNTS)) {
-      setSelectedAccounts([...validAccounts]);
-      return;
-    }
-    setSelectedAccounts(picked.filter((v) => v !== MULTI_SELECT_ALL_ACCOUNTS));
-  }, [setSelectedAccounts, validAccounts]);
-
-  useEffect(() => {
-    if (!validAccounts.length) return;
-
-    isApplyingInitialSelectionRef.current = true;
-    setSelectedAccountsState((prev) => {
-      const cached = readCachedCreatorSelection().filter((name) =>
-        validAccounts.includes(name)
-      );
-
-      if (!hasHydratedSelectionRef.current) {
-        hasHydratedSelectionRef.current = true;
-        if (cached.length > 0) return cached;
-      }
-
-      if (cached.length > 0) return cached;
-
-      if (prev.length > 0) {
-        return prev.filter((name) => validAccounts.includes(name));
-      }
-      return validAccounts;
-    });
-    isApplyingInitialSelectionRef.current = false;
-  }, [validAccounts]);
+  const toolbarMultiSelect = useToolbarMultiSelect({
+    allValues: validAccounts,
+    selectAllToken: SELECT_ALL_CREATOR_EXPORT,
+    selectAllLabel: validAccounts.length
+      ? `全选（${validAccounts.length} 个已登录账号）`
+      : "全选（无已登录账号）",
+    cacheKey: CREATOR_SELECTION_CACHE_KEY,
+    itemOptions,
+  });
 
   async function handleAction(action: "export" | "feishu-sync" | "sync-feishu") {
-    if (!exportAccountsSanitized.length) {
+    if (!toolbarMultiSelect.sanitized.length) {
       message.warning("请先选择账号");
       return;
     }
 
-    try {
-      window.localStorage.setItem(
-        CREATOR_SELECTION_CACHE_KEY,
-        JSON.stringify(exportAccountsSanitized)
-      );
-    } catch {}
+    toolbarMultiSelect.persistSelection(toolbarMultiSelect.sanitized);
 
     const endpoints: Record<string, string> = {
       export: "/api/creator/export",
@@ -153,12 +86,12 @@ export default function CreatorPage() {
     try {
       await startTask(
         endpoints[action],
-        { accounts: exportAccountsSanitized },
+        { accounts: toolbarMultiSelect.sanitized },
         "creator-export"
       );
       message.info("任务已启动");
-    } catch (e: any) {
-      message.error(e.message || "启动任务失败");
+    } catch (e: unknown) {
+      message.error(e instanceof Error ? e.message : "启动任务失败");
     }
   }
 
@@ -176,14 +109,12 @@ export default function CreatorPage() {
           <Text type="secondary" style={{ fontSize: 12 }}>
             选择账号：
           </Text>
-          <Select
-            mode="multiple"
-            allowClear
+          <ToolbarMultiSelect
+            value={toolbarMultiSelect.sanitized}
+            onChange={toolbarMultiSelect.handleChange}
+            options={toolbarMultiSelect.selectOptions}
             placeholder="请选择账号（默认选中已登录账号）"
-            style={{ minWidth: 360 }}
-            value={exportAccountsSanitized}
-            onChange={(v) => handleAccountSelectChange(v as string[])}
-            options={accountSelectOptions}
+            minWidth={360}
           />
           <Text type="secondary" style={{ fontSize: 12 }}>
             未登录账号不可选
@@ -191,32 +122,31 @@ export default function CreatorPage() {
         </Space>
 
         <div>
-        <Space wrap>
-          <Button
-            type="primary"
-            onClick={() => handleAction("export")}
-            disabled={accounts.length === 0 || isNamespaceBusy("creator-export")}
-          >
-            导出数据
-          </Button>
-          <Button
-            type="primary"
-            onClick={() => handleAction("feishu-sync")}
-            disabled={isNamespaceBusy("creator-export")}
-          >
-            同步多维表格
-          </Button>
-          <Button
-            danger
-            type="primary"
-            onClick={() => handleAction("sync-feishu")}
-            disabled={isNamespaceBusy("creator-export")}
-          >
-            导出并推送
-          </Button>
-        </Space>
+          <Space wrap>
+            <Button
+              type="primary"
+              onClick={() => void handleAction("export")}
+              disabled={accounts.length === 0 || isNamespaceBusy("creator-export")}
+            >
+              导出数据
+            </Button>
+            <Button
+              type="primary"
+              onClick={() => void handleAction("feishu-sync")}
+              disabled={isNamespaceBusy("creator-export")}
+            >
+              同步多维表格
+            </Button>
+            <Button
+              danger
+              type="primary"
+              onClick={() => void handleAction("sync-feishu")}
+              disabled={isNamespaceBusy("creator-export")}
+            >
+              导出并推送
+            </Button>
+          </Space>
         </div>
-
       </div>
 
       <Divider />

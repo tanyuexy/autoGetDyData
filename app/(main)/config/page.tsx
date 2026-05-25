@@ -1,160 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
-import { Tabs, Button, Spin, App, Switch, Space, Typography, Alert, Divider, InputNumber, Checkbox, Select } from "antd";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Tabs, Spin, App, Switch, Space, Typography, Alert } from "antd";
 import ConfigEmailTab from "@/components/ConfigEmailTab";
 import ConfigFeishuTab from "@/components/ConfigFeishuTab";
 import ConfigCreatorDatesSection from "@/components/ConfigCreatorDatesSection";
 import AccountTable from "@/components/AccountTable";
+import { ConfigCreatorPublishTab } from "@/components/config/ConfigCreatorPublishTab";
+import SettingSection from "@/components/layout/SettingSection";
 import { useTaskContext } from "@/contexts/TaskContext";
 import type { ConfigData, CreatorAccount } from "@/types";
-import {
-  FEISHU_AI_PROVIDER_OPTIONS,
-  normalizeFeishuAiProvider,
-} from "@/lib/feishuAiProvider";
-import {
-  normalizeFeishuAiContentMaxConcurrent,
-  FEISHU_AI_CONTENT_MAX_CONCURRENT_DEFAULT,
-  FEISHU_AI_CONTENT_MAX_CONCURRENT_HARD_MAX,
-} from "@/lib/feishuAiContentConcurrency";
-import {
-  normalizePublishMaxConcurrent,
-  PUBLISH_MAX_CONCURRENT_DEFAULT,
-  PUBLISH_MAX_CONCURRENT_HARD_MAX,
-} from "@/lib/publishConcurrency";
-
-type CreatorPublishConfig = NonNullable<ConfigData["creatorPublish"]>;
-
-const DEFAULT_CREATOR_PUBLISH_CONFIG: CreatorPublishConfig = {
-  publishEnabled: true,
-  publishWaitSec: 3,
-  publishMaxConcurrent: PUBLISH_MAX_CONCURRENT_DEFAULT,
-  feishuAiProvider: "minimax",
-  feishuAiContentMaxConcurrent: FEISHU_AI_CONTENT_MAX_CONCURRENT_DEFAULT,
-  automation: {
-    enabled: false,
-    mode: "weekly",
-    weekly: {
-      days: [1, 2, 3, 4, 5],
-      times: ["09:00"],
-    },
-    interval: {
-      days: [1, 2, 3, 4, 5],
-      everyMinutes: 60,
-      anchorAt: null,
-    },
-  },
-};
-
-const WEEKDAY_OPTIONS = [
-  { label: "周一", value: 1 },
-  { label: "周二", value: 2 },
-  { label: "周三", value: 3 },
-  { label: "周四", value: 4 },
-  { label: "周五", value: 5 },
-  { label: "周六", value: 6 },
-  { label: "周日", value: 0 },
-];
-
-function normalizeTimeTags(values: string[]) {
-  return Array.from(
-    new Set(
-      values
-        .map((item) => String(item || "").trim())
-        .filter((item) => /^\d{2}:\d{2}$/.test(item))
-    )
-  ).sort();
-}
-
-function normalizeCreatorPublishConfig(input?: Partial<CreatorPublishConfig> | null): CreatorPublishConfig {
-  return {
-    publishEnabled: input?.publishEnabled ?? DEFAULT_CREATOR_PUBLISH_CONFIG.publishEnabled,
-    publishWaitSec: input?.publishWaitSec ?? DEFAULT_CREATOR_PUBLISH_CONFIG.publishWaitSec,
-    publishMaxConcurrent: normalizePublishMaxConcurrent(
-      input?.publishMaxConcurrent ?? DEFAULT_CREATOR_PUBLISH_CONFIG.publishMaxConcurrent
-    ),
-    feishuAiProvider: normalizeFeishuAiProvider(
-      input?.feishuAiProvider ?? DEFAULT_CREATOR_PUBLISH_CONFIG.feishuAiProvider
-    ),
-    feishuAiContentMaxConcurrent: normalizeFeishuAiContentMaxConcurrent(
-      input?.feishuAiContentMaxConcurrent ??
-        DEFAULT_CREATOR_PUBLISH_CONFIG.feishuAiContentMaxConcurrent
-    ),
-    automation: {
-      enabled: input?.automation?.enabled ?? DEFAULT_CREATOR_PUBLISH_CONFIG.automation!.enabled,
-      mode: input?.automation?.mode ?? DEFAULT_CREATOR_PUBLISH_CONFIG.automation!.mode,
-      weekly: {
-        days: input?.automation?.weekly?.days ?? DEFAULT_CREATOR_PUBLISH_CONFIG.automation!.weekly!.days,
-        times: normalizeTimeTags(
-          input?.automation?.weekly?.times ?? DEFAULT_CREATOR_PUBLISH_CONFIG.automation!.weekly!.times!
-        ),
-      },
-      interval: {
-        days: input?.automation?.interval?.days ?? DEFAULT_CREATOR_PUBLISH_CONFIG.automation!.interval!.days,
-        everyMinutes:
-          input?.automation?.interval?.everyMinutes ??
-          DEFAULT_CREATOR_PUBLISH_CONFIG.automation!.interval!.everyMinutes,
-        anchorAt:
-          input?.automation?.interval?.anchorAt ??
-          DEFAULT_CREATOR_PUBLISH_CONFIG.automation!.interval!.anchorAt,
-      },
-    },
-  };
-}
-
-function getAutomationSelectedDays(config: CreatorPublishConfig): number[] {
-  const mode = config.automation?.mode ?? "weekly";
-  return mode === "interval"
-    ? config.automation?.interval?.days ?? []
-    : config.automation?.weekly?.days ?? [];
-}
-
-const sectionStyle: React.CSSProperties = {
-  border: "1px solid var(--vol-hairline)",
-  borderRadius: 8,
-  background: "var(--vol-canvas-soft)",
-  padding: 16,
-};
-
-const pageWrapStyle: React.CSSProperties = {
-  maxWidth: 1180,
-};
-
-function SettingSection(props: {
-  title: string;
-  description?: string;
-  extra?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section style={sectionStyle}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: 12,
-          marginBottom: 14,
-        }}
-      >
-        <div>
-          <Typography.Text strong style={{ fontSize: 15 }}>
-            {props.title}
-          </Typography.Text>
-          {props.description ? (
-            <div style={{ marginTop: 4 }}>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {props.description}
-              </Typography.Text>
-            </div>
-          ) : null}
-        </div>
-        {props.extra}
-      </div>
-      {props.children}
-    </section>
-  );
-}
+import { normalizeCreatorPublishConfig } from "@/lib/creatorPublishConfig";
+import { configPageWrapStyle } from "@/lib/pageStyles";
 
 export default function ConfigPage() {
   const { message } = App.useApp();
@@ -177,12 +34,12 @@ export default function ConfigPage() {
         const data = await res.json();
         setConfig(data);
       }
-    } catch (e) {
+    } catch {
       message.error("加载配置失败");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [message]);
 
   const fetchCreatorAccounts = useCallback(async () => {
     setLoadingCreatorAccounts(true);
@@ -196,7 +53,7 @@ export default function ConfigPage() {
       message.error("获取抖创账号状态失败");
     }
     setLoadingCreatorAccounts(false);
-  }, []);
+  }, [message]);
 
   useEffect(() => {
     fetchConfig();
@@ -212,12 +69,10 @@ export default function ConfigPage() {
     loginTaskWasRunningRef.current = loginTaskRunning;
   }, [runningTasks, fetchCreatorAccounts]);
 
-  // Keep ref in sync for debounced saves
   useEffect(() => {
     configRef.current = config;
   }, [config]);
 
-  // Cleanup debounce timer on unmount
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -294,7 +149,7 @@ export default function ConfigPage() {
                   });
                   if (res.ok) {
                     message.success(`已添加账号: ${name}`);
-                    setConfig((prev) => prev ? { ...prev, accounts: nextAccounts } : prev);
+                    setConfig((prev) => (prev ? { ...prev, accounts: nextAccounts } : prev));
                     await fetchCreatorAccounts();
                   } else {
                     message.error("添加失败");
@@ -309,7 +164,7 @@ export default function ConfigPage() {
                   });
                   if (res.ok) {
                     message.success(`已删除账号: ${name}`);
-                    setConfig((prev) => prev ? { ...prev, accounts: nextAccounts } : prev);
+                    setConfig((prev) => (prev ? { ...prev, accounts: nextAccounts } : prev));
                     await fetchCreatorAccounts();
                   } else {
                     message.error("删除失败");
@@ -319,16 +174,16 @@ export default function ConfigPage() {
                   try {
                     await startTask("/api/creator/login", { accountName: name, mode }, "login");
                     message.info(`登录任务已启动: ${name}`);
-                  } catch (e: any) {
-                    message.error(e.message || "启动登录失败");
+                  } catch (e: unknown) {
+                    message.error(e instanceof Error ? e.message : "启动登录失败");
                   }
                 }}
                 onOpenCreator={async (name) => {
                   try {
                     await startTask("/api/creator/open", { accountName: name }, "system");
                     message.info(`已打开抖音创作者中心: ${name}`);
-                  } catch (e: any) {
-                    message.error(e.message || "打开失败");
+                  } catch (e: unknown) {
+                    message.error(e instanceof Error ? e.message : "打开失败");
                   }
                 }}
               />
@@ -387,309 +242,10 @@ export default function ConfigPage() {
             />
           </SettingSection>
 
-          <SettingSection
-            title="发布行为"
-            description="控制发布并发、是否点击提交，以及发布后页面停留时长。"
-          >
-            <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-              <Space align="start" size={12}>
-                <Switch
-                  checked={publishConfig.publishEnabled ?? true}
-                  onChange={(v) =>
-                    autoSave({
-                      creatorPublish: {
-                        ...publishConfig,
-                        publishEnabled: v,
-                      },
-                    })
-                  }
-                />
-                <Space orientation="vertical" size={0}>
-                  <Typography.Text strong>点击发布按钮</Typography.Text>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    开启后发布流程会自动点击发布按钮；关闭后仅填写表单不发布
-                  </Typography.Text>
-                </Space>
-              </Space>
-
-              <Space align="center" size={16}>
-                <Space orientation="vertical" size={0}>
-                  <Typography.Text strong>停留秒数</Typography.Text>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    发布或填表完成后在页面停留的秒数
-                  </Typography.Text>
-                </Space>
-                <Space.Compact>
-                  <InputNumber
-                    min={1}
-                    max={Infinity}
-                    value={publishConfig.publishWaitSec ?? 3}
-                    onChange={(v) =>
-                      autoSave({
-                        creatorPublish: {
-                          ...publishConfig,
-                          publishWaitSec: v || 3,
-                        },
-                      })
-                    }
-                    style={{ width: 92 }}
-                  />
-                  <Button disabled>秒</Button>
-                </Space.Compact>
-              </Space>
-
-              <Space align="center" size={16}>
-                <Space orientation="vertical" size={0}>
-                  <Typography.Text strong>发布并发进程数</Typography.Text>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    同时拉起多少个浏览器跑发布脚本（前台与后台 Worker 共用）。调高易占满内存。
-                  </Typography.Text>
-                </Space>
-                <Space.Compact>
-                  <InputNumber
-                    min={1}
-                    max={PUBLISH_MAX_CONCURRENT_HARD_MAX}
-                    value={normalizePublishMaxConcurrent(publishConfig.publishMaxConcurrent)}
-                    onChange={(v) =>
-                      autoSave({
-                        creatorPublish: {
-                          ...publishConfig,
-                          publishMaxConcurrent:
-                            v == null || !Number.isFinite(Number(v))
-                              ? normalizePublishMaxConcurrent(undefined)
-                              : normalizePublishMaxConcurrent(Number(v)),
-                        },
-                      })
-                    }
-                    style={{ width: 92 }}
-                  />
-                  <Button disabled>个</Button>
-                </Space.Compact>
-              </Space>
-
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "flex-start",
-                  justifyContent: "flex-start",
-                  gap: 16,
-                  width: "100%",
-                }}
-              >
-                <Space align="center" size={16}>
-                  <Space orientation="vertical" size={0}>
-                    <Typography.Text strong>飞书 AI 正文模型</Typography.Text>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      「AI生成正文」按钮使用；写入 app_config
-                    </Typography.Text>
-                  </Space>
-                  <Select
-                    value={publishConfig.feishuAiProvider ?? "minimax"}
-                    onChange={(value) =>
-                      autoSave({
-                        creatorPublish: {
-                          ...publishConfig,
-                          feishuAiProvider: normalizeFeishuAiProvider(value),
-                        },
-                      })
-                    }
-                    style={{ width: 160 }}
-                    options={FEISHU_AI_PROVIDER_OPTIONS}
-                  />
-                </Space>
-
-                <Space align="center" size={16}>
-                  <Space orientation="vertical" size={0}>
-                    <Typography.Text strong>飞书 AI 正文并发数</Typography.Text>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      同时向 LLM 发起多少条正文生成请求；仅「AI生成正文」使用
-                    </Typography.Text>
-                  </Space>
-                  <Space.Compact>
-                    <InputNumber
-                      min={1}
-                      max={FEISHU_AI_CONTENT_MAX_CONCURRENT_HARD_MAX}
-                      value={normalizeFeishuAiContentMaxConcurrent(
-                        publishConfig.feishuAiContentMaxConcurrent
-                      )}
-                      onChange={(v) =>
-                        autoSave({
-                          creatorPublish: {
-                            ...publishConfig,
-                            feishuAiContentMaxConcurrent:
-                              v == null || !Number.isFinite(Number(v))
-                                ? normalizeFeishuAiContentMaxConcurrent(undefined)
-                                : normalizeFeishuAiContentMaxConcurrent(Number(v)),
-                          },
-                        })
-                      }
-                      style={{ width: 92 }}
-                    />
-                    <Button disabled>个</Button>
-                  </Space.Compact>
-                </Space>
-              </div>
-            </Space>
-          </SettingSection>
-
-          <SettingSection
-            title="自动调度"
-            description="定时从飞书任务表导入内容，并让新导入任务直接进入发布执行队列。"
-          >
-            <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-              <Space align="start" size={12}>
-                <Switch
-                  checked={publishConfig.automation?.enabled ?? false}
-                  onChange={(checked) =>
-                    autoSave({
-                      creatorPublish: {
-                        ...publishConfig,
-                        automation: {
-                          ...publishConfig.automation,
-                          enabled: checked,
-                        },
-                      },
-                    })
-                  }
-                />
-                <Space orientation="vertical" size={0}>
-                  <Typography.Text strong>启用自动从飞书导入并执行任务</Typography.Text>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    到达设定时间后自动“从飞书导入任务”，新导入任务会直接进入执行队列（正文需先在飞书填写或单独点「AI生成正文」）
-                  </Typography.Text>
-                </Space>
-              </Space>
-
-              <div>
-                <Typography.Text strong>执行日期</Typography.Text>
-                <div style={{ marginTop: 8 }}>
-                  <Checkbox.Group
-                    options={WEEKDAY_OPTIONS}
-                    value={getAutomationSelectedDays(publishConfig)}
-                    onChange={(days) =>
-                      autoSave({
-                        creatorPublish: {
-                          ...publishConfig,
-                          automation: {
-                            ...publishConfig.automation,
-                            ...(publishConfig.automation?.mode === "interval"
-                              ? {
-                                  interval: {
-                                    ...publishConfig.automation?.interval,
-                                    days: days as number[],
-                                  },
-                                }
-                              : {
-                                  weekly: {
-                                    ...publishConfig.automation?.weekly,
-                                    days: days as number[],
-                                  },
-                                }),
-                          },
-                        },
-                      })
-                    }
-                  />
-                </div>
-              </div>
-
-              <Tabs
-                size="small"
-                activeKey={publishConfig.automation?.mode ?? "weekly"}
-                onChange={(key) =>
-                  autoSave({
-                    creatorPublish: {
-                      ...publishConfig,
-                      automation: {
-                        ...publishConfig.automation,
-                        mode: key as "weekly" | "interval",
-                        interval: {
-                          ...publishConfig.automation?.interval,
-                          anchorAt:
-                            key === "interval"
-                              ? new Date().toISOString()
-                              : publishConfig.automation?.interval?.anchorAt ?? null,
-                        },
-                      },
-                    },
-                  })
-                }
-                items={[
-                  {
-                    key: "weekly",
-                    label: "固定时间",
-                    children: (
-                      <div style={{ paddingTop: 4 }}>
-                        <Typography.Text strong>执行时间</Typography.Text>
-                        <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-                          输入 `09:00` 后回车，可添加多个时间
-                        </Typography.Text>
-                        <Select
-                          mode="tags"
-                          value={publishConfig.automation?.weekly?.times ?? []}
-                          onChange={(values) =>
-                            autoSave({
-                              creatorPublish: {
-                                ...publishConfig,
-                                automation: {
-                                  ...publishConfig.automation,
-                                  weekly: {
-                                    ...publishConfig.automation?.weekly,
-                                    times: normalizeTimeTags(values as string[]),
-                                  },
-                                },
-                              },
-                            })
-                          }
-                          tokenSeparators={[",", " "]}
-                          placeholder="例如 09:00、14:30"
-                          style={{ width: "100%", marginTop: 8 }}
-                        />
-                      </div>
-                    ),
-                  },
-                  {
-                    key: "interval",
-                    label: "执行间隔",
-                    children: (
-                      <Space align="center" size={12} style={{ paddingTop: 4 }}>
-                        <Typography.Text strong>在选定日期里，每隔</Typography.Text>
-                        <InputNumber
-                          min={1}
-                          max={10080}
-                          value={publishConfig.automation?.interval?.everyMinutes ?? 60}
-                          onChange={(value) =>
-                            autoSave({
-                              creatorPublish: {
-                                ...publishConfig,
-                                automation: {
-                                  ...publishConfig.automation,
-                                  interval: {
-                                    ...publishConfig.automation?.interval,
-                                    everyMinutes: Number(value) || 60,
-                                    anchorAt: new Date().toISOString(),
-                                  },
-                                },
-                              },
-                            })
-                          }
-                          style={{ width: 100 }}
-                        />
-                        <Typography.Text>分钟自动导入并执行一次</Typography.Text>
-                      </Space>
-                    ),
-                  },
-                ]}
-              />
-
-              <Alert
-                type="info"
-                showIcon
-                title="自动调度使用服务器当前时间触发；固定时间按设定时刻运行，执行间隔只会在你选中的星期几里按分钟间隔触发。"
-              />
-            </Space>
-          </SettingSection>
+          <ConfigCreatorPublishTab
+            publishConfig={publishConfig}
+            onSave={(patch) => autoSave(patch)}
+          />
         </Space>
       ),
     },
@@ -709,8 +265,8 @@ export default function ConfigPage() {
               try {
                 await startTask("/api/shop/login-one", { email }, "login");
                 message.info(`登录任务已启动: ${email}`);
-              } catch (e: any) {
-                message.error(e.message || "启动登录失败");
+              } catch (e: unknown) {
+                message.error(e instanceof Error ? e.message : "启动登录失败");
               }
             }}
           />
@@ -739,7 +295,7 @@ export default function ConfigPage() {
   ];
 
   return (
-    <div style={pageWrapStyle}>
+    <div style={configPageWrapStyle}>
       <div style={{ marginBottom: 16 }}>
         <Typography.Title level={4} style={{ margin: 0 }}>
           配置管理
