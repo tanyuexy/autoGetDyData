@@ -29,7 +29,6 @@ const {
 } = require("./core/accounts");
 const {
   BROWSER_VIEWPORT,
-  LOGIN_VERIFY_METHOD,
   HEADLESS
 } = require("./core/env");
 const { attachQrDataUrlSniffer } = require("./core/qr");
@@ -212,7 +211,7 @@ async function main() {
   }
 
   const { withAuth, withoutAuth } = splitAccountsByCreatorSettingsStatus(accounts);
-  printExportChannelSummary(withAuth, withoutAuth, LOGIN_VERIFY_METHOD);
+  printExportChannelSummary(withAuth, withoutAuth);
 
   // 串行执行两路队列，避免并行 console 交错导致「开始处理账号 A」与「账号 B 无登录态」粘在一起
   const authResults = await runAccountQueue(browser, withAuth, "export", {

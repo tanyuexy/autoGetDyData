@@ -33,7 +33,6 @@ export interface ConfigData {
   emails: { email: string; password: string }[];
   creatorExportDateStart: string | null;
   creatorExportDateStartByAccount: Record<string, string>;
-  douyinCreator: { loginVerifyMethod: string };
   headless: boolean;
   creatorPublish?: {
     publishEnabled?: boolean; // 是否点击发布按钮（默认 true）

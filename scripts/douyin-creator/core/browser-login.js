@@ -1,21 +1,15 @@
 const {
   TARGET_URL,
-  LOGIN_VERIFY_METHOD,
   LOGIN_WAIT_TIMEOUT_MS,
   LOGIN_PAGE_GOTO_TIMEOUT_MS,
-  LOGIN_REMIND_INTERVAL_MS,
-  SMS_REMIND_INTERVAL_MS
+  LOGIN_REMIND_INTERVAL_MS
 } = require("./env");
 const { sendAlertEmail } = require("./notification");
 const { captureLoginQrScreenshot, hasVisibleQr } = require("./qr");
 const {
   isReceiveOtpPanelVisible,
-  isSmsVerifyPanelVisible,
-  handleFaceVerificationIfPresent,
-  handleSmsVerificationIfPresent,
   handleReceiveSmsCodeIfPresent,
-  readReceiveOtpInfoFromPage,
-  readSmsVerifyInfoFromPage
+  readReceiveOtpInfoFromPage
 } = require("./verification");
 const { loginStageHintByAccount } = require("./state");
 
@@ -68,8 +62,6 @@ async function isVerificationUiVisible(page) {
   const checks = [
     page.locator("text=扫码登录").first(),
     page.locator("text=身份验证").first(),
-    page.locator("text=手机刷脸验证").first(),
-    page.locator("text=发送短信验证").first(),
     page.locator("text=接收短信验证码").first()
   ];
   for (const locator of checks) {
@@ -86,7 +78,6 @@ async function isVerificationUiVisible(page) {
 async function detectLoginStep(page) {
   if (await isLoggedInAtTarget(page)) return "logged_in";
   if (await isReceiveOtpPanelVisible(page)) return "receive_sms_code_panel";
-  if (await isSmsVerifyPanelVisible(page)) return "sms_panel";
 
   const identityVisible = await page
     .locator("text=身份验证")
@@ -94,13 +85,6 @@ async function detectLoginStep(page) {
     .isVisible({ timeout: 300 })
     .catch(() => false);
   if (identityVisible) return "identity_verify";
-
-  const faceTitleVisible = await page
-    .locator("text=手机刷脸验证")
-    .first()
-    .isVisible({ timeout: 300 })
-    .catch(() => false);
-  if (faceTitleVisible) return "face_verify";
 
   const qrTitleVisible = await page
     .locator("text=扫码登录")
@@ -152,20 +136,6 @@ async function notifyLoginRequired(page, paths, accountName, reason) {
 async function resendLoginReminderByStage(page, paths, accountName, baseReason) {
   const stageHint = loginStageHintByAccount.get(accountName) || "";
 
-  if (stageHint.includes("手机刷脸验证")) {
-    const { captureFaceQrScreenshot } = require("./qr");
-    const { sendFaceVerifyEmail } = require("./notification");
-    const screenshotPath = await captureFaceQrScreenshot(page, paths, accountName);
-    await sendFaceVerifyEmail({
-      accountName,
-      screenshotPath,
-      reason: `${baseReason}（刷脸二维码可能过期，定时重发）`
-    }).catch((error) => {
-      console.error(`账号 [${accountName}] 刷脸重发邮件失败:`, error.message || error);
-    });
-    return;
-  }
-
   if (stageHint.includes("接收短信验证码")) {
     const { sendReceiveOtpEmail } = require("./notification");
     const { maskedPhone } = await readReceiveOtpInfoFromPage(page);
@@ -175,20 +145,6 @@ async function resendLoginReminderByStage(page, paths, accountName, baseReason) 
       reason: `${baseReason}（仍在等待用户填写验证码）`
     }).catch((error) => {
       console.error(`账号 [${accountName}] 接收验证码重发邮件失败:`, error.message || error);
-    });
-    return;
-  }
-
-  if (stageHint.includes("短信验证")) {
-    const { sendSmsVerifyEmail } = require("./notification");
-    const { maskedPhone, smsContent, smsTarget } = await readSmsVerifyInfoFromPage(page);
-    await sendSmsVerifyEmail({
-      accountName,
-      maskedPhone,
-      smsContent,
-      smsTarget
-    }).catch((error) => {
-      console.error(`账号 [${accountName}] 短信验证重发邮件失败:`, error.message || error);
     });
     return;
   }
@@ -211,23 +167,18 @@ async function waitForManualLoginFlow(
   const enableReminders = options.enableReminders !== false;
   const sendNotifications = options.sendNotifications !== false;
   const onLoggedIn = typeof options.onLoggedIn === "function" ? options.onLoggedIn : null;
-  console.log(`账号 [${accountName}] 等待手动完成登录（扫码 + 验证）。`);
-  const smsVerifyMode = LOGIN_VERIFY_METHOD === "sms";
-  const receiveSmsCodeMode = LOGIN_VERIFY_METHOD === "receive_sms_code";
+  console.log(`账号 [${accountName}] 等待手动完成登录（扫码 + 接收短信验证码）。`);
   let lastStep = "";
   const start = Date.now();
   let lastGeneralNotifyAt = Date.now();
-  let lastSmsNotifyAt = Date.now();
   let lastRetryToTargetAt = 0;
   while (Date.now() - start < timeoutMs) {
     const step = await detectLoginStep(page);
     if (step !== lastStep) {
       const stageMap = {
         logged_in: "当前处于已登录阶段",
-        sms_panel: "当前处于短信验证阶段",
         receive_sms_code_panel: "当前处于接收短信验证码阶段",
         identity_verify: "当前处于身份验证选择阶段",
-        face_verify: "当前处于手机刷脸验证阶段",
         qr_login: "当前处于扫码登录阶段",
         unknown: "当前阶段未知，等待页面稳定"
       };
@@ -244,29 +195,9 @@ async function waitForManualLoginFlow(
       return;
     }
 
-    if (smsVerifyMode) {
-      if (step === "identity_verify" || step === "sms_panel") {
-        await handleSmsVerificationIfPresent(page, paths, accountName, {
-          alwaysTrySmsEntry: true,
-          autoClickSentButton: true,
-          sendNotifications
-        });
-      }
-    } else if (receiveSmsCodeMode) {
-      if (step === "identity_verify" || step === "receive_sms_code_panel") {
-        await handleReceiveSmsCodeIfPresent(page, paths, accountName, {
-          alwaysTryReceiveEntry: true,
-          sendNotifications
-        });
-      }
-    } else {
-      await handleFaceVerificationIfPresent(page, paths, accountName, {
-        skipFaceVerify: false,
-        sendNotifications
-      });
-      await handleSmsVerificationIfPresent(page, paths, accountName, {
-        alwaysTrySmsEntry: false,
-        autoClickSentButton: false,
+    if (step === "identity_verify" || step === "receive_sms_code_panel") {
+      await handleReceiveSmsCodeIfPresent(page, paths, accountName, {
+        alwaysTryReceiveEntry: true,
         sendNotifications
       });
     }
@@ -293,23 +224,13 @@ async function waitForManualLoginFlow(
     }
 
     const now = Date.now();
-    const inSmsNotifyStage = step === "sms_panel";
     const inReceiveOtpStage = step === "receive_sms_code_panel";
-    const smsNotifyIntervalMs = SMS_REMIND_INTERVAL_MS;
-    const reachedSmsNotifyTime =
-      inSmsNotifyStage && now - lastSmsNotifyAt >= smsNotifyIntervalMs;
     const reachedGeneralNotifyTime =
-      !inSmsNotifyStage &&
-      !inReceiveOtpStage &&
-      now - lastGeneralNotifyAt >= resendEveryMs;
-    if (enableReminders && (reachedSmsNotifyTime || reachedGeneralNotifyTime)) {
+      !inReceiveOtpStage && now - lastGeneralNotifyAt >= resendEveryMs;
+    if (enableReminders && reachedGeneralNotifyTime) {
       console.log(`账号 [${accountName}] 仍未登录，重新截图并发送提醒邮件。`);
       await resendLoginReminderByStage(page, paths, accountName, reason);
-      if (inSmsNotifyStage) {
-        lastSmsNotifyAt = now;
-      } else {
-        lastGeneralNotifyAt = now;
-      }
+      lastGeneralNotifyAt = now;
     }
     await page.waitForTimeout(1200);
   }

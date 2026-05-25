@@ -14,7 +14,6 @@ function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigDa
     creatorExportDateStart: (data as any)?.creatorExportDateStart || null,
     creatorExportDateStartByAccount:
       data?.creatorExportDateStartByAccount || {},
-    douyinCreator: data?.douyinCreator || { loginVerifyMethod: "qr" },
     headless: data?.headless ?? false,
     creatorPublish: {
       publishEnabled: data?.creatorPublish?.publishEnabled ?? true,

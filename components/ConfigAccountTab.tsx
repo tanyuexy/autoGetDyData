@@ -1,18 +1,16 @@
 "use client";
 
-import { Tag, Input, Select, Space, Button, Form, App } from "antd";
+import { Tag, Input, Space, Button, App } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useState } from "react";
 
 interface Props {
   accounts: string[];
-  loginVerifyMethod: string;
-  onChange: (data: { accounts: string[]; loginVerifyMethod: string }) => void;
+  onChange: (data: { accounts: string[] }) => void;
 }
 
 export default function ConfigAccountTab({
   accounts: initialAccounts,
-  loginVerifyMethod,
   onChange,
 }: Props) {
   const { message } = App.useApp();
@@ -29,13 +27,13 @@ export default function ConfigAccountTab({
     const next = [...accounts, name];
     setAccounts(next);
     setInput("");
-    onChange({ accounts: next, loginVerifyMethod });
+    onChange({ accounts: next });
   }
 
   function removeAccount(name: string) {
     const next = accounts.filter((a) => a !== name);
     setAccounts(next);
-    onChange({ accounts: next, loginVerifyMethod });
+    onChange({ accounts: next });
   }
 
   return (
@@ -64,21 +62,6 @@ export default function ConfigAccountTab({
           <span style={{ color: "#999" }}>暂无账号，请添加</span>
         )}
       </div>
-
-      <Form.Item label="登录验证方式" style={{ maxWidth: 400 }}>
-        <Select
-          value={loginVerifyMethod || "qr"}
-          onChange={(v) => onChange({ accounts, loginVerifyMethod: v })}
-          options={[
-            { value: "qr", label: "扫码登录 (qr)" },
-            { value: "sms", label: "短信验证 (sms)" },
-            {
-              value: "receive_sms_code",
-              label: "接收短信验证码 (receive_sms_code)",
-            },
-          ]}
-        />
-      </Form.Item>
     </Space>
   );
 }

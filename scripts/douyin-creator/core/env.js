@@ -51,16 +51,6 @@ const LOGIN_REMIND_INTERVAL_MS = millisecondsFromEnvSecOrMs(
   "LOGIN_REMIND_INTERVAL_MS",
   60
 );
-const SMS_REMIND_INTERVAL_MS = millisecondsFromEnvSecOrMs(
-  "SMS_REMIND_INTERVAL_SEC",
-  "SMS_REMIND_INTERVAL_MS",
-  5 * 60
-);
-const SMS_SENT_CLICK_INTERVAL_MS = millisecondsFromEnvSecOrMs(
-  "SMS_SENT_CLICK_INTERVAL_SEC",
-  "SMS_SENT_CLICK_INTERVAL_MS",
-  1
-);
 const OTP_EMAIL_POLL_INTERVAL_MS = millisecondsFromEnvSecOrMs(
   "OTP_EMAIL_POLL_INTERVAL_SEC",
   "OTP_EMAIL_POLL_INTERVAL_MS",
@@ -90,38 +80,6 @@ function normalizeAccountDirName(name) {
 }
 
 const CREATOR_EXPORT_ACCOUNT_FILE = "creator-export.json";
-
-function readDouyinCreatorSection() {
-  try {
-    const data = readProjectConfigFromEnv();
-    if (data && data.douyinCreator && typeof data.douyinCreator === "object") {
-      return data.douyinCreator;
-    }
-  } catch {
-    // ignore
-  }
-  return {};
-}
-
-const LOGIN_VERIFY_METHOD = (() => {
-  const envRaw = process.env.LOGIN_VERIFY_METHOD;
-  const cfgRaw = readDouyinCreatorSection().loginVerifyMethod;
-  const raw = String(
-    (envRaw != null && String(envRaw).trim() ? envRaw : cfgRaw) || "qr"
-  )
-    .trim()
-    .toLowerCase();
-  if (raw === "sms" || raw === "qr") return raw;
-  if (
-    raw === "receive_sms_code" ||
-    raw === "receive_sms" ||
-    raw === "receive-otp" ||
-    raw === "otp"
-  ) {
-    return "receive_sms_code";
-  }
-  return "qr";
-})();
 
 /** accounts/<店>/creator-export.json 按路径 mtime 缓存 */
 const creatorExportPerAccountFileCache = new Map();
@@ -246,13 +204,10 @@ module.exports = {
   PUBLISH_BROWSER_VIEWPORT,
   LOGIN_WAIT_TIMEOUT_MS,
   LOGIN_REMIND_INTERVAL_MS,
-  SMS_REMIND_INTERVAL_MS,
-  SMS_SENT_CLICK_INTERVAL_MS,
   OTP_EMAIL_POLL_INTERVAL_MS,
   OTP_EMAIL_MAX_AGE_MS,
   OTP_RESEND_INTERVAL_MS,
   LOGIN_PAGE_GOTO_TIMEOUT_MS,
-  LOGIN_VERIFY_METHOD,
   HEADLESS,
   PUBLISH_WAIT_MULTIPLIER,
   getPublishBrowserLaunchOptions,

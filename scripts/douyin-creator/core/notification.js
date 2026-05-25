@@ -536,60 +536,6 @@ async function sendAlertEmail({ accountName, screenshotPath, reason }) {
   console.log(`账号 [${accountName}] 已发送扫码提醒邮件到: ${cfg.to}`);
 }
 
-async function sendSmsVerifyEmail({
-  accountName,
-  maskedPhone,
-  smsContent,
-  smsTarget
-}) {
-  const wecomSent = await sendWeComSafely("短信验证", accountName, async () =>
-    sendWeComMarkdown(
-      [
-        "### 抖音发送短信验证",
-        `账号：\`${accountName}\``,
-        `手机号：\`${maskedPhone || "未识别"}\``,
-        `短信内容：\`${smsContent || "未识别"}\``,
-        `发送至：\`${smsTarget || "未识别"}\``,
-        `时间：${formatNow()}`,
-        "",
-        "请按页面要求用对应手机号发送以上短信内容。"
-      ].join("\n")
-    )
-  );
-  if (wecomSent) return;
-
-  const cfg = getMailConfig();
-  if (!cfg.enabled) {
-    console.log("邮件告警已关闭，跳过发送。");
-    return;
-  }
-  if (!cfg.user || !cfg.pass || !cfg.from || !cfg.to) {
-    console.log("邮件配置不完整，跳过发送短信验证提醒。");
-    return;
-  }
-
-  const transporter = createSmtpTransport(cfg);
-
-  const subject = `[抖音短信验证] 账号${accountName}需要发送验证短信`;
-  const html = `
-    <div>
-      <p>账号 <b>${accountName}</b> 登录后触发身份验证，请发送短信。</p>
-      <p>手机号(掩码): <b>${maskedPhone || "未识别"}</b></p>
-      <p>短信内容: <b>${smsContent || "未识别"}</b></p>
-      <p>发送至: <b>${smsTarget || "未识别"}</b></p>
-      <p>时间: ${formatNow()}</p>
-    </div>
-  `;
-
-  await transporter.sendMail({
-    from: cfg.from,
-    to: cfg.to,
-    subject,
-    html
-  });
-  console.log(`账号 [${accountName}] 已发送短信验证提醒邮件到: ${cfg.to}`);
-}
-
 async function sendReceiveOtpEmail({ accountName, maskedPhone, reason }) {
   const subject = buildOtpReplySubject(accountName);
   const reasonText = reason || "等待用户填写验证码";
@@ -892,61 +838,6 @@ async function fetchOtpCode({ accountName, requestId, sinceMs }) {
   };
 }
 
-async function sendFaceVerifyEmail({ accountName, screenshotPath, reason }) {
-  const wecomSent = await sendWeComSafely("刷脸验证", accountName, async () => {
-    const text = [
-      "### 抖音刷脸验证",
-      `账号：\`${accountName}\``,
-      `说明：${reason || "需要刷脸验证"}`,
-      `时间：${formatNow()}`,
-      "",
-      "请使用抖音 App 扫描刷脸二维码并完成人脸验证。"
-    ].join("\n");
-    const sent = await sendWeComMarkdown(text);
-    if (screenshotPath) {
-      await sendWeComImageFromFile(screenshotPath);
-    }
-    return sent;
-  });
-  if (wecomSent) return;
-
-  const cfg = getMailConfig();
-  if (!cfg.enabled) {
-    console.log("邮件告警已关闭，跳过发送。");
-    return;
-  }
-  if (!cfg.user || !cfg.pass || !cfg.from || !cfg.to) {
-    console.log("邮件配置不完整，跳过发送刷脸验证提醒。");
-    return;
-  }
-
-  const transporter = createSmtpTransport(cfg);
-
-  const subject = `[抖音刷脸验证] 账号${accountName}需要手机刷脸扫码`;
-  const html = `
-    <div>
-      <p>账号 <b>${accountName}</b> 已进入 <b>手机刷脸验证</b> 阶段。</p>
-      <p>请使用抖音 App 扫描刷脸二维码并完成人脸验证。</p>
-      <p>说明: ${reason || "需要刷脸验证"}</p>
-      <p>时间: ${formatNow()}</p>
-    </div>
-  `;
-
-  await transporter.sendMail({
-    from: cfg.from,
-    to: cfg.to,
-    subject,
-    html,
-    attachments: [
-      {
-        filename: path.basename(screenshotPath),
-        path: screenshotPath
-      }
-    ]
-  });
-  console.log(`账号 [${accountName}] 已发送刷脸验证提醒邮件到: ${cfg.to}`);
-}
-
 module.exports = {
   getMailConfig,
   createSmtpTransport,
@@ -955,9 +846,7 @@ module.exports = {
   getOtpReplyToAddress,
   buildOtpReplyMailtoUrl,
   sendAlertEmail,
-  sendSmsVerifyEmail,
   sendReceiveOtpEmail,
-  sendFaceVerifyEmail,
   fetchOtpCode,
   fetchOtpCodeFromEmail: fetchOtpCodeFromEmailOnly
 };

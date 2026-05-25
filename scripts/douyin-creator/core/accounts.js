@@ -176,18 +176,10 @@ function printAccountExecutionSummary(results) {
   };
 }
 
-function printExportChannelSummary(withAuth, withoutAuth, loginVerifyMethod) {
+function printExportChannelSummary(withAuth, withoutAuth) {
   console.log(`导出通道A(已有登录态): ${withAuth.length} 个账号`);
   console.log(`导出通道B(需登录验证): ${withoutAuth.length} 个账号`);
-  console.log(
-    `登录验证方式: ${
-      loginVerifyMethod === "sms"
-        ? "发送短信验证"
-        : loginVerifyMethod === "receive_sms_code"
-          ? "接收短信验证码(邮件回填)"
-          : "二维码/默认流程"
-    }`
-  );
+  console.log("登录验证方式: 接收短信验证码");
 }
 
 module.exports = {

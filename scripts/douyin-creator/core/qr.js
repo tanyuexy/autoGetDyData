@@ -621,172 +621,6 @@ async function tryCaptureQrFromDataUrl(page, screenshotPath) {
   return false;
 }
 
-async function tryCaptureFaceQrFromDom(page, screenshotPath) {
-  const domDataUrls = await page
-    .evaluate(() => {
-      const urls = [];
-      const seen = new Set();
-      const imgs = Array.from(
-        document.querySelectorAll("img[aria-label='二维码'][src^='data:image/']")
-      );
-      for (const img of imgs) {
-        const parent = img.parentElement;
-        const container = parent?.parentElement || parent;
-        if (!parent || !container) continue;
-
-        let hasHowToScanSibling = false;
-        for (const node of Array.from(container.children)) {
-          if (node === parent || node === img) continue;
-          const text = (node.textContent || "").replace(/\s+/g, "");
-          if (text.includes("如何扫码")) {
-            hasHowToScanSibling = true;
-            break;
-          }
-        }
-        if (!hasHowToScanSibling) continue;
-
-        const src = img.getAttribute("src") || "";
-        if (!/^data:image\/(?:png|jpe?g);base64,/i.test(src)) continue;
-        if (!src || src.length < 2000) continue;
-        if (seen.has(src)) continue;
-        seen.add(src);
-        urls.push(src);
-      }
-      return urls;
-    })
-    .catch(() => []);
-
-  for (const item of domDataUrls) {
-    const ok = await saveDataUrlPng(item, screenshotPath, {
-      minBytes: 1500,
-      minSide: 180,
-      maxAspectDiff: 0.25
-    }).catch(() => false);
-    if (ok) return true;
-  }
-  return false;
-}
-
-async function captureVerifyDialogScreenshot(page, paths, accountName, suffix) {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const screenshotPath = path.join(paths.alertDir, `${timestamp}-${suffix}.png`);
-  const dialog = page.locator("[role='dialog']").last();
-  const dialogVisible = await dialog
-    .isVisible({ timeout: 800 })
-    .catch(() => false);
-  if (dialogVisible) {
-    await dialog.screenshot({ path: screenshotPath }).catch(() => {});
-  }
-  if (!(await fse.pathExists(screenshotPath))) {
-    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
-  }
-  console.log(`账号 [${accountName}] 已保存验证截图: ${screenshotPath}`);
-  return screenshotPath;
-}
-
-async function captureFaceQrScreenshot(page, paths, accountName) {
-  await fse.ensureDir(paths.alertDir);
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const screenshotPath = path.join(
-    paths.alertDir,
-    `${timestamp}-face-verify.png`
-  );
-
-  if (await tryCaptureFaceQrFromDom(page, screenshotPath)) {
-    console.log(
-      `账号 [${accountName}] 已通过 DOM 保存刷脸二维码: ${screenshotPath}`
-    );
-    return screenshotPath;
-  }
-
-  const clipAroundBox = (box, viewport, pad = 14) => {
-    const x = Math.max(0, Math.floor(box.x - pad));
-    const y = Math.max(0, Math.floor(box.y - pad));
-    const width = Math.max(
-      1,
-      Math.min(Math.ceil(box.width + pad * 2), viewport.width - x)
-    );
-    const height = Math.max(
-      1,
-      Math.min(Math.ceil(box.height + pad * 2), viewport.height - y)
-    );
-    return { x, y, width, height };
-  };
-
-  const tryCaptureLocator = async (locator) => {
-    const visible = await locator.isVisible({ timeout: 800 }).catch(() => false);
-    if (!visible) return false;
-
-    await locator.scrollIntoViewIfNeeded().catch(() => {});
-    await page.waitForTimeout(120);
-
-    const box = await locator.boundingBox().catch(() => null);
-    if (!box) return false;
-    if (box.width < 100 || box.height < 100) return false;
-
-    const ratioDiff =
-      Math.abs(box.width - box.height) / Math.max(box.width, box.height);
-    if (ratioDiff > 0.3) return false;
-
-    const viewport = page.viewportSize() || BROWSER_VIEWPORT;
-    const clip = clipAroundBox(box, viewport, 14);
-    await page.screenshot({ path: screenshotPath, clip }).catch(() => {});
-    if (await fse.pathExists(screenshotPath)) {
-      return true;
-    }
-
-    await locator.screenshot({ path: screenshotPath }).catch(() => {});
-    return fse.pathExists(screenshotPath);
-  };
-
-  const qrSelectors = [
-    "#uc_verification_animate_qrcode_container img[aria-label='二维码']",
-    "[id*='uc_verification_animate_qrcode_container'] img[aria-label='二维码']",
-    "div:has-text('手机刷脸验证') img[aria-label='二维码']",
-    "div:has-text('如何扫码') ~ div img[aria-label='二维码']",
-    "div:has-text('手机刷脸验证') [class*='animate_qrcode_container'] img",
-    "div:has-text('手机刷脸验证') [class*='qrcode'] img",
-    "div:has-text('手机刷脸验证') [class*='qrcode'] canvas",
-    "img[aria-label='二维码']",
-    "img[src*='qrcode']",
-    "[class*='qrcode'] img",
-    "[class*='qrcode'] canvas",
-    "canvas"
-  ];
-
-  for (const selector of qrSelectors) {
-    const locator = page.locator(selector);
-    const count = Math.min(await locator.count().catch(() => 0), 4);
-    for (let i = 0; i < count; i += 1) {
-      if (await tryCaptureLocator(locator.nth(i))) {
-        console.log(
-          `账号 [${accountName}] 已保存刷脸二维码截图: ${screenshotPath}`
-        );
-        return screenshotPath;
-      }
-    }
-  }
-
-  const faceDialog = page
-    .locator("[role='dialog']")
-    .filter({ hasText: "手机刷脸验证" })
-    .last();
-  const dialogVisible = await faceDialog
-    .isVisible({ timeout: 600 })
-    .catch(() => false);
-  if (dialogVisible) {
-    await faceDialog.screenshot({ path: screenshotPath }).catch(() => {});
-    if (await fse.pathExists(screenshotPath)) {
-      console.log(
-        `账号 [${accountName}] 已保存刷脸验证弹窗截图: ${screenshotPath}`
-      );
-      return screenshotPath;
-    }
-  }
-
-  return captureVerifyDialogScreenshot(page, paths, accountName, "face-verify");
-}
-
 async function hasVisibleQr(page) {
   const qrSelectors = [
     "img[src*='qrcode']",
@@ -795,7 +629,6 @@ async function hasVisibleQr(page) {
     "[class*='qrcode'] canvas",
     "[aria-label='二维码']",
     "div:has-text('扫码登录') canvas",
-    "div:has-text('手机刷脸验证') canvas",
     "[role='dialog'] canvas"
   ];
   for (const selector of qrSelectors) {
@@ -990,7 +823,5 @@ async function captureLoginQrScreenshot(page, paths, accountName) {
 module.exports = {
   attachQrDataUrlSniffer,
   captureLoginQrScreenshot,
-  captureVerifyDialogScreenshot,
-  captureFaceQrScreenshot,
   hasVisibleQr
 };

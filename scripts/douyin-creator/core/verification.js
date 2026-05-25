@@ -1,21 +1,11 @@
 const {
-  SMS_SENT_CLICK_INTERVAL_MS,
   OTP_RESEND_INTERVAL_MS,
   OTP_EMAIL_POLL_INTERVAL_MS
 } = require("./env");
+const { sendReceiveOtpEmail, fetchOtpCode } = require("./notification");
 const {
-  sendFaceVerifyEmail,
-  sendSmsVerifyEmail,
-  sendReceiveOtpEmail,
-  fetchOtpCode
-} = require("./notification");
-const { captureFaceQrScreenshot } = require("./qr");
-const {
-  smsNotifySentByAccount,
   receiveOtpNotifySentByAccount,
-  faceNotifySentByAccount,
   loginStageHintByAccount,
-  lastSmsConfirmClickAtByAccount,
   otpRequestIdByAccount,
   otpRequestSinceByAccount,
   otpLastPollAtByAccount,
@@ -24,19 +14,6 @@ const {
   otpLastResendAtByAccount,
   otpReceiveWaitLoggedByAccount
 } = require("./state");
-
-async function readSmsVerifyInfoFromPage(page) {
-  const bodyText = await page.locator("body").innerText().catch(() => "");
-  const phoneMatch = bodyText.match(/请使用手机号\s*([0-9*]+)\s*发送短信验证/);
-  const smsContentMatch = bodyText.match(/编辑短信内容[:：]\s*([A-Za-z0-9]+)/);
-  const smsTargetMatch = bodyText.match(/发送至[:：]\s*([0-9]+)/);
-
-  return {
-    maskedPhone: phoneMatch ? phoneMatch[1] : "",
-    smsContent: smsContentMatch ? smsContentMatch[1] : "",
-    smsTarget: smsTargetMatch ? smsTargetMatch[1] : ""
-  };
-}
 
 async function readReceiveOtpInfoFromPage(page) {
   const bodyText = await page.locator("body").innerText().catch(() => "");
@@ -55,75 +32,6 @@ async function readReceiveOtpInfoFromPage(page) {
   return {
     maskedPhone
   };
-}
-
-async function clickSmsSentButtonIfNeeded(page, accountName) {
-  const now = Date.now();
-  const lastClickAt = lastSmsConfirmClickAtByAccount.get(accountName) || 0;
-  if (now - lastClickAt < SMS_SENT_CLICK_INTERVAL_MS) {
-    return false;
-  }
-
-  const clickedByDomExactText = await page
-    .evaluate(() => {
-      const normalize = (s) => String(s || "").replace(/\s+/g, "");
-      const panels = Array.from(document.querySelectorAll("article"));
-      for (const panel of panels) {
-        const title = panel.querySelector("[class*='title']");
-        if (!title || normalize(title.textContent) !== "发送短信验证") continue;
-        const btns = Array.from(
-          panel.querySelectorAll("[class*='btn'], [class*='primary']")
-        );
-        for (const btn of btns) {
-          if (normalize(btn.textContent) !== "我已发送") continue;
-          const el = /** @type {HTMLElement} */ (btn);
-          el.click();
-          return true;
-        }
-      }
-      return false;
-    })
-    .catch(() => false);
-  if (!clickedByDomExactText) {
-    const sentBtnCandidates = [
-      page
-        .locator("article:has-text('发送短信验证') [class*='primary']")
-        .filter({ hasText: /^我已发送$/ })
-        .first(),
-      page
-        .locator("[class*='footer'] [class*='btn']")
-        .filter({ hasText: /^我已发送$/ })
-        .first(),
-      page.getByText("我已发送", { exact: true }).first()
-    ];
-    let clicked = false;
-    for (const btn of sentBtnCandidates) {
-      const visible = await btn.isVisible({ timeout: 250 }).catch(() => false);
-      if (!visible) continue;
-      await btn.click().catch(() => {});
-      clicked = true;
-      break;
-    }
-    if (!clicked) return false;
-  }
-
-  lastSmsConfirmClickAtByAccount.set(accountName, now);
-  console.log(`账号 [${accountName}] 已尝试点击“我已发送”。`);
-  return true;
-}
-
-async function isSmsVerifyPanelVisible(page) {
-  const markers = [
-    page.locator("text=编辑短信内容").first(),
-    page.locator("text=发送至").first(),
-    page.getByText("我已发送", { exact: true }).first()
-  ];
-  for (const marker of markers) {
-    if (await marker.isVisible({ timeout: 300 }).catch(() => false)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 async function isReceiveOtpPanelVisible(page) {
@@ -175,7 +83,6 @@ async function fillReceiveOtpCodeAndSubmit(page, otpCode) {
   }
   if (!filledInput) return false;
 
-  // 等待验证按钮变为可用（输入足够位数后 disabled class 移除）
   const verifyBtn = page
     .locator("article:has-text('接收短信验证码') [class*='primary']")
     .filter({ hasText: /(确认|提交|登录|验证|完成)/ })
@@ -192,13 +99,11 @@ async function fillReceiveOtpCodeAndSubmit(page, otpCode) {
     await page.waitForTimeout(300);
   }
 
-  // 点击验证按钮
   if (btnEnabled) {
     await verifyBtn.click().catch(() => {});
     await page.waitForTimeout(500);
   }
 
-  // 兜底：如果按钮未启用，尝试在输入框上按 Enter
   if (!btnEnabled) {
     await filledInput.press("Enter").catch(() => {});
     await page.waitForTimeout(500);
@@ -241,7 +146,6 @@ async function clickReceiveOtpResendButton(page) {
         const input = panel.querySelector("input[placeholder*='验证码']");
         if (!input) continue;
 
-        // 优先点击验证码输入框同一行的“重新发送”按钮，避免误点同名元素。
         const inputRow =
           input.closest("[class*='button_input']") ||
           input.closest("[class*='input']") ||
@@ -396,126 +300,8 @@ async function clickVerifyEntryByText(page, targetText) {
   return false;
 }
 
-async function clickSmsVerifyEntry(page) {
-  return clickVerifyEntryByText(page, "发送短信验证");
-}
-
 async function clickReceiveOtpEntry(page) {
   return clickVerifyEntryByText(page, "接收短信验证码");
-}
-
-async function handleFaceVerificationIfPresent(page, paths, accountName, options = {}) {
-  const { skipFaceVerify = false, sendNotifications = true } = options;
-  if (skipFaceVerify) {
-    return false;
-  }
-
-  const identityVisible = await page
-    .locator("text=身份验证")
-    .first()
-    .isVisible({ timeout: 800 })
-    .catch(() => false);
-  if (identityVisible) {
-    const faceEntry = page.getByText("手机刷脸验证").first();
-    const faceEntryVisible = await faceEntry
-      .isVisible({ timeout: 600 })
-      .catch(() => false);
-    if (faceEntryVisible) {
-      await faceEntry.click().catch(() => {});
-      await page.waitForTimeout(600);
-    }
-  }
-
-  const faceTitleVisible = await page
-    .locator("text=手机刷脸验证")
-    .first()
-    .isVisible({ timeout: 800 })
-    .catch(() => false);
-  if (!faceTitleVisible) {
-    return false;
-  }
-
-  loginStageHintByAccount.set(accountName, "当前处于手机刷脸验证阶段");
-  if (faceNotifySentByAccount.has(accountName)) {
-    return true;
-  }
-
-  if (sendNotifications) {
-    const screenshotPath = await captureFaceQrScreenshot(page, paths, accountName);
-    await sendFaceVerifyEmail({
-      accountName,
-      screenshotPath,
-      reason: "检测到手机刷脸验证弹窗"
-    }).catch((error) => {
-      console.error(
-        `账号 [${accountName}] 发送刷脸验证邮件失败:`,
-        error.message || error
-      );
-    });
-  }
-  faceNotifySentByAccount.add(accountName);
-  return true;
-}
-
-async function handleSmsVerificationIfPresent(page, paths, accountName, options = {}) {
-  const {
-    alwaysTrySmsEntry = false,
-    autoClickSentButton = false,
-    sendNotifications = true
-  } = options;
-  const identityVisible = await page
-    .locator("text=身份验证")
-    .first()
-    .isVisible({ timeout: 800 })
-    .catch(() => false);
-  let smsPanelVisible = await isSmsVerifyPanelVisible(page);
-  if (!smsPanelVisible && !identityVisible) {
-    return false;
-  }
-
-  if (!smsPanelVisible && identityVisible) {
-    const clicked = await clickSmsVerifyEntry(page);
-    if (!clicked && !alwaysTrySmsEntry) {
-      const hasFaceEntry = await page
-        .getByText("手机刷脸验证")
-        .first()
-        .isVisible({ timeout: 400 })
-        .catch(() => false);
-      if (hasFaceEntry) {
-        return false;
-      }
-    }
-    smsPanelVisible = await isSmsVerifyPanelVisible(page);
-  }
-
-  if (!smsPanelVisible) {
-    return false;
-  }
-
-  loginStageHintByAccount.set(accountName, "当前处于短信验证阶段");
-  const { maskedPhone, smsContent, smsTarget } = await readSmsVerifyInfoFromPage(page);
-
-  const notifyKey = `${accountName}:${maskedPhone}:${smsContent}:${smsTarget}`;
-  if (sendNotifications && !smsNotifySentByAccount.has(notifyKey)) {
-    await sendSmsVerifyEmail({
-      accountName,
-      maskedPhone,
-      smsContent,
-      smsTarget
-    }).catch((error) => {
-      console.error(
-        `账号 [${accountName}] 发送短信验证邮件失败:`,
-        error.message || error
-      );
-    });
-
-    smsNotifySentByAccount.add(notifyKey);
-  }
-
-  if (autoClickSentButton) {
-    await clickSmsSentButtonIfNeeded(page, accountName);
-  }
-  return true;
 }
 
 async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options = {}) {
@@ -642,12 +428,8 @@ async function handleReceiveSmsCodeIfPresent(page, paths, accountName, options =
 }
 
 module.exports = {
-  isSmsVerifyPanelVisible,
   isReceiveOtpPanelVisible,
   readReceiveOtpInfoFromPage,
-  readSmsVerifyInfoFromPage,
   fillReceiveOtpCodeAndSubmit,
-  handleFaceVerificationIfPresent,
-  handleSmsVerificationIfPresent,
   handleReceiveSmsCodeIfPresent
 };
