@@ -467,58 +467,69 @@ export default function ConfigPage() {
                 </Space.Compact>
               </Space>
 
-              <Space align="center" size={16}>
-                <Space orientation="vertical" size={0}>
-                  <Typography.Text strong>飞书 AI 正文模型</Typography.Text>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    「AI生成正文」按钮使用；写入 app_config
-                  </Typography.Text>
-                </Space>
-                <Select
-                  value={publishConfig.feishuAiProvider ?? "siliconflow"}
-                  onChange={(value) =>
-                    autoSave({
-                      creatorPublish: {
-                        ...publishConfig,
-                        feishuAiProvider: normalizeFeishuAiProvider(value),
-                      },
-                    })
-                  }
-                  style={{ width: 160 }}
-                  options={FEISHU_AI_PROVIDER_OPTIONS}
-                />
-              </Space>
-
-              <Space align="center" size={16}>
-                <Space orientation="vertical" size={0}>
-                  <Typography.Text strong>飞书 AI 正文并发数</Typography.Text>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    同时向 LLM 发起多少条正文生成请求；仅「AI生成正文」使用
-                  </Typography.Text>
-                </Space>
-                <Space.Compact>
-                  <InputNumber
-                    min={1}
-                    max={FEISHU_AI_CONTENT_MAX_CONCURRENT_HARD_MAX}
-                    value={normalizeFeishuAiContentMaxConcurrent(
-                      publishConfig.feishuAiContentMaxConcurrent
-                    )}
-                    onChange={(v) =>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "flex-start",
+                  justifyContent: "flex-start",
+                  gap: 16,
+                  width: "100%",
+                }}
+              >
+                <Space align="center" size={16}>
+                  <Space orientation="vertical" size={0}>
+                    <Typography.Text strong>飞书 AI 正文模型</Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      「AI生成正文」按钮使用；写入 app_config
+                    </Typography.Text>
+                  </Space>
+                  <Select
+                    value={publishConfig.feishuAiProvider ?? "siliconflow"}
+                    onChange={(value) =>
                       autoSave({
                         creatorPublish: {
                           ...publishConfig,
-                          feishuAiContentMaxConcurrent:
-                            v == null || !Number.isFinite(Number(v))
-                              ? normalizeFeishuAiContentMaxConcurrent(undefined)
-                              : normalizeFeishuAiContentMaxConcurrent(Number(v)),
+                          feishuAiProvider: normalizeFeishuAiProvider(value),
                         },
                       })
                     }
-                    style={{ width: 92 }}
+                    style={{ width: 160 }}
+                    options={FEISHU_AI_PROVIDER_OPTIONS}
                   />
-                  <Button disabled>个</Button>
-                </Space.Compact>
-              </Space>
+                </Space>
+
+                <Space align="center" size={16}>
+                  <Space orientation="vertical" size={0}>
+                    <Typography.Text strong>飞书 AI 正文并发数</Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      同时向 LLM 发起多少条正文生成请求；仅「AI生成正文」使用
+                    </Typography.Text>
+                  </Space>
+                  <Space.Compact>
+                    <InputNumber
+                      min={1}
+                      max={FEISHU_AI_CONTENT_MAX_CONCURRENT_HARD_MAX}
+                      value={normalizeFeishuAiContentMaxConcurrent(
+                        publishConfig.feishuAiContentMaxConcurrent
+                      )}
+                      onChange={(v) =>
+                        autoSave({
+                          creatorPublish: {
+                            ...publishConfig,
+                            feishuAiContentMaxConcurrent:
+                              v == null || !Number.isFinite(Number(v))
+                                ? normalizeFeishuAiContentMaxConcurrent(undefined)
+                                : normalizeFeishuAiContentMaxConcurrent(Number(v)),
+                          },
+                        })
+                      }
+                      style={{ width: 92 }}
+                    />
+                    <Button disabled>个</Button>
+                  </Space.Compact>
+                </Space>
+              </div>
             </Space>
           </SettingSection>
 
