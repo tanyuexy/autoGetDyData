@@ -1,4 +1,5 @@
 const { DOM_LOAD_TIMEOUT_MS } = require("./env");
+const { logWarn } = require("./shop-log");
 
 const STAGES = Object.freeze({
   CAPTCHA: "CAPTCHA",
@@ -37,8 +38,8 @@ async function waitForDomLoaded(page, options = {}) {
     await page.waitForLoadState("load", { timeout });
     return true;
   } catch (error) {
-    const msg = error?.message || String(error);
-    console.warn(`[${tag}] 等待 DOM load 超时（${timeout}ms），继续: ${msg}`);
+    const msg = (error?.message || String(error)).split("\n")[0];
+    logWarn(`[${tag}] 等待 DOM load 超时（${timeout}ms），继续: ${msg}`);
     return false;
   }
 }
@@ -214,7 +215,7 @@ async function retryableGoto(page, url, opts = {}) {
       }
 
       if (opts.expectedUrlRe && opts.expectedUrlRe.test(curUrl)) {
-        console.warn(
+        logWarn(
           `[network] goto(${url.slice(0, 50)}) 抛错但 URL 已到达目标域(${curUrl.slice(0, 50)})，视为成功`
         );
         return true;
@@ -230,7 +231,7 @@ async function retryableGoto(page, url, opts = {}) {
       }
 
       const delay = backoffMs(baseBackoff, attempt);
-      console.warn(
+      logWarn(
         `[network] goto(${url.slice(0, 50)}) 网络错误第 ${attempt + 1}/${maxRetries} 次重试，${delay}ms 后重试: ${error.message.slice(0, 100)}`
       );
       await page.waitForTimeout(delay).catch(() => {});
@@ -370,6 +371,135 @@ async function clickPrevMonthBtn(scope) {
   return false;
 }
 
+
+function parseTargetDate(dataDate) {
+  const text = String(dataDate || "").trim();
+  const m = text.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const day = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(day)) {
+    return null;
+  }
+  if (mo < 1 || mo > 12 || day < 1 || day > 31) return null;
+  return { y, mo, day };
+}
+
+function compareYearMonth(a, b) {
+  if (!a || !b) return 0;
+  if (a.y !== b.y) return a.y - b.y;
+  return a.mo - b.mo;
+}
+
+async function clickNextMonthBtn(scope) {
+  const nextSelectors = [
+    ".ecom-picker-header-next-btn",
+    ".ecom-picker-super-next-btn",
+    "button.ecom-picker-header-btn:last-of-type",
+    ".ecom-picker-header button:last-of-type",
+    '[class*="next"]'
+  ];
+
+  for (const sel of nextSelectors) {
+    const btn = scope.locator(sel).first();
+    if (await btn.isVisible({ timeout: 500 }).catch(() => false)) {
+      await btn.click({ timeout: 2000 }).catch(() => {});
+      return true;
+    }
+  }
+
+  const headerBtns = scope.locator(".ecom-picker-header button");
+  const btnCount = await headerBtns.count().catch(() => 0);
+  if (btnCount >= 2) {
+    await headerBtns.nth(btnCount - 1).click({ timeout: 2000 }).catch(() => {});
+    return true;
+  }
+
+  return false;
+}
+
+async function navigateCalendarToMonth(page, scope, targetYearMonth) {
+  for (let hop = 0; hop < 24; hop += 1) {
+    const current = await readCalendarYearMonth(scope);
+    const cmp = compareYearMonth(current, targetYearMonth);
+    if (cmp === 0) return true;
+    const moved =
+      cmp > 0
+        ? await clickPrevMonthBtn(scope)
+        : await clickNextMonthBtn(scope);
+    if (!moved) return false;
+    await page.waitForTimeout(300);
+  }
+  return compareYearMonth(await readCalendarYearMonth(scope), targetYearMonth) === 0;
+}
+
+async function pickCalendarDayByTargetDate(page, scopeRoot, targetDateStr) {
+  const parsed = parseTargetDate(targetDateStr);
+  if (!parsed) {
+    return { ok: false, dataDate: null, reason: "invalid-date" };
+  }
+
+  const scope = scopeRoot || page;
+  const targetYearMonth = { y: parsed.y, mo: parsed.mo };
+  const isoDay = `${parsed.y}-${String(parsed.mo).padStart(2, "0")}-${String(parsed.day).padStart(2, "0")}`;
+
+  await page
+    .locator(".ecom-picker-body")
+    .first()
+    .waitFor({ state: "visible", timeout: 8000 })
+    .catch(() => {});
+
+  const navigated = await navigateCalendarToMonth(page, scope, targetYearMonth);
+  if (!navigated) {
+    return { ok: false, dataDate: null, reason: "month-nav-failed" };
+  }
+
+  const titleCell = scope
+    .locator(
+      `td.ecom-picker-cell-in-view[title*="${isoDay}"], td.ecom-picker-cell-in-view[title*="${targetDateStr}"]`
+    )
+    .first();
+  if (await titleCell.isVisible({ timeout: 500 }).catch(() => false)) {
+    const disabled = await titleCell
+      .evaluate((el) => el.classList.contains("ecom-picker-cell-disabled"))
+      .catch(() => true);
+    if (disabled) {
+      return { ok: false, dataDate: null, reason: "disabled" };
+    }
+    const inner = titleCell.locator(".ecom-picker-cell-inner").first();
+    await inner.click({ timeout: 2000 }).catch(() => {});
+    return {
+      ok: true,
+      dataDate: formatCalendarDate(targetYearMonth, parsed.day)
+    };
+  }
+
+  const cells = scope.locator("td.ecom-picker-cell-in-view");
+  const count = await cells.count().catch(() => 0);
+  for (let i = 0; i < count; i += 1) {
+    const cell = cells.nth(i);
+    const inner = cell.locator(".ecom-picker-cell-inner").first();
+    const dayStr = (await inner.innerText().catch(() => "")).trim();
+    if (parseInt(dayStr, 10) !== parsed.day) continue;
+
+    const disabled = await cell
+      .evaluate((el) => el.classList.contains("ecom-picker-cell-disabled"))
+      .catch(() => true);
+    if (disabled) {
+      return { ok: false, dataDate: null, reason: "disabled" };
+    }
+
+    await inner.click({ timeout: 2000 }).catch(() => {});
+    return {
+      ok: true,
+      dataDate: formatCalendarDate(targetYearMonth, parsed.day)
+    };
+  }
+
+  return { ok: false, dataDate: null, reason: "day-not-found" };
+}
+
 async function readCalendarYearMonth(scope) {
   const header = scope.locator(".ecom-picker-header").first();
   const text = (await header.innerText().catch(() => "")).trim();
@@ -392,5 +522,6 @@ module.exports = {
   retryableGoto,
   retryableDownload,
   pickLatestSelectableCalendarDay,
+  pickCalendarDayByTargetDate,
   readCalendarYearMonth
 };

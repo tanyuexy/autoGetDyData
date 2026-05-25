@@ -2,7 +2,7 @@ const path = require("path");
 const fse = require("fs-extra");
 
 const {
-  pickLatestSelectableCalendarDay,
+  pickCalendarDayByTargetDate,
   retryableDownload,
   retryableGoto
 } = require("./page-utils");
@@ -18,13 +18,16 @@ const VIDEO_SELF_URL =
   "https://compass.jinritemai.com/shop/video/self";
 const VIDEO_READY_TIMEOUT_MS = Number(process.env.SHOP_VIDEO_READY_TIMEOUT_MS || 60000);
 
-function logStep(tag, msg, started) {
-  const dur = started ? ` (+${Date.now() - started}ms)` : "";
-  console.log(`[${tag}] ${msg}${dur}`);
-}
+const { logInfo, logWarn: logWarnLine, buildShopStepMeta } = require("./shop-log");
+
+function logStep() {}
 
 function logWarn(tag, msg) {
-  console.warn(`[${tag}] ${msg}`);
+  logWarnLine(`[${tag}] ${msg}`);
+}
+
+function logSaved(tag, savePath) {
+  logInfo(`[${tag}] 已保存 ${path.basename(savePath)}`);
 }
 
 async function waitForVideoSelfReady(page, tag, timeoutMs = 20000) {
@@ -104,11 +107,9 @@ async function gotoVideoSelf(page, tag) {
 }
 
 /**
- * 视频明细：悬浮「更多」→ 左侧选「自然日」→ 日历里点「当前可选的最后一个自然日 - dayOffset」
- * dayOffset=0 最新一天，dayOffset=1 前一天，以此类推。
- * 适用于需要回溯导出多天数据的场景。
+ * 视频明细：悬浮「更多」→ 左侧选「自然日」→ 日历里按 targetDate (YYYY/MM/DD) 精准选日。
  */
-async function selectDateRangeYesterday(page, tag, dayOffset = 0) {
+async function selectDateRangeYesterday(page, tag, targetDate) {
   const started = Date.now();
 
   const moreTrigger = page
@@ -174,16 +175,18 @@ async function selectDateRangeYesterday(page, tag, dayOffset = 0) {
     ? rightPanel
     : page;
 
-  const pickResult = await pickLatestSelectableCalendarDay(page, scope, dayOffset);
+  const pickResult = await pickCalendarDayByTargetDate(page, scope, targetDate);
   const clicked = Boolean(pickResult.ok);
   const dataDate = pickResult.dataDate || null;
   if (clicked) {
-    logStep(tag, `已选择日历第${dayOffset + 1}个可选自然日`);
+    logStep(tag, `已选择自然日 ${targetDate}`);
     if (dataDate) {
       logStep(tag, `解析到的数据日期: ${dataDate}`);
     }
+  } else if (pickResult.reason === "disabled") {
+    logWarn(tag, `目标日期 ${targetDate} 在日历中不可选（数据可能未产出）`);
   } else {
-    logWarn(tag, "日历中未找到可点击的日期格");
+    logWarn(tag, `日历中未能选中目标日期 ${targetDate}`);
   }
 
   await page.waitForTimeout(400);
@@ -191,8 +194,8 @@ async function selectDateRangeYesterday(page, tag, dayOffset = 0) {
   await page.mouse.move(10, 10).catch(() => {});
   await page.waitForTimeout(300);
 
-  logStep(tag, `selectDateRangeYesterday(offset=${dayOffset}) ${clicked ? "成功" : "失败"}`, started);
-  return { ok: clicked, dataDate };
+  logStep(tag, `selectDateRangeYesterday(${targetDate}) ${clicked ? "成功" : "失败"}`, started);
+  return { ok: clicked, dataDate, reason: pickResult.reason || null };
 }
 
 async function ensureVideoDetailTab(page, tag) {
@@ -310,7 +313,7 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   const savePath = path.join(saveDir, `${batchPrefix}${ts}-${exportLabel}-${safeName}`);
 
   await download.saveAs(savePath);
-  logStep(tag, `明细文件已保存: ${savePath}`, started);
+  logSaved(tag, savePath);
   return savePath;
 }
 
@@ -322,6 +325,18 @@ function calcDataDate(dayOffset) {
   const mo = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}/${mo}/${day}`;
+}
+
+function buildTargetDateSet(targetDates) {
+  if (!Array.isArray(targetDates) || targetDates.length === 0) return null;
+  const values = new Set();
+  for (const item of targetDates) {
+    const raw = String(item || "").trim();
+    if (!raw) continue;
+    values.add(raw);
+    values.add(raw.replace(/-/g, "/"));
+  }
+  return values.size > 0 ? values : null;
 }
 
 /**
@@ -341,19 +356,69 @@ async function downloadVideoSelfDetail(page, {
   exportBatchId = null,
   accountEmail = "",
   targetDates = null,
-  targetKinds = null
+  targetKinds = null,
+  stepRunner = null,
+  stepIndexBase = 100,
+  shopIndex = null,
+  shopTotal = null
 }) {
   const startedAll = Date.now();
   logStep(tag, `视频下载开始，目标店铺: ${shopName || "(未指定)"}，循环天数: ${daysToExport}`);
 
-  const dateSet = Array.isArray(targetDates) && targetDates.length > 0 ? new Set(targetDates) : null;
+  const dateSet = buildTargetDateSet(targetDates);
   const kindSet = Array.isArray(targetKinds) && targetKinds.length > 0 ? new Set(targetKinds) : null;
+  const runStep = stepRunner?.runStep;
+  const stepMeta = (fields = {}) =>
+    buildShopStepMeta({
+      shopName,
+      kind: "video",
+      shopIndex,
+      shopTotal,
+      daysToExport,
+      ...fields
+    });
+  const withStep = async (index, title, stepTag, action, verifyOrOptions, maybeOptions) => {
+    if (typeof runStep === "function") {
+      return await runStep(index, title, stepTag, action, verifyOrOptions, maybeOptions);
+    }
+    if (typeof action === "function") await action();
+    const verify = verifyOrOptions && typeof verifyOrOptions === "object"
+      ? verifyOrOptions.verify
+      : verifyOrOptions;
+    if (typeof verify === "function") await verify();
+  };
+
   if (kindSet && !kindSet.has("video")) {
     logStep(tag, "补跑目标不包含视频，跳过视频下载");
+    await withStep(
+      stepIndexBase,
+      "跳过短视频明细下载",
+      "video-skipped-by-target-kind",
+      null,
+      {
+        skipped: true,
+        skipReason: "补跑目标不包含 video",
+        meta: stepMeta()
+      }
+    );
     return { savePath: null, dataDate: null, allResults: [], failures: [], targetCount: 0 };
   }
 
-  await gotoVideoSelf(page, tag);
+  await withStep(
+    stepIndexBase,
+    "进入短视频明细页",
+    "video-open-page",
+    async () => {
+      await gotoVideoSelf(page, tag);
+    },
+    {
+      verify: async () => {
+        const ok = await waitForVideoSelfReady(page, tag, 10000);
+        if (!ok) throw new Error("短视频明细页筛选区未就绪");
+      },
+      meta: stepMeta()
+    }
+  );
 
   const results = [];
   let targetCount = 0;
@@ -364,11 +429,63 @@ async function downloadVideoSelfDetail(page, {
     const expectedDate = calcDataDate(offset);
     if (dateSet && !dateSet.has(expectedDate)) {
       logStep(tag, `跳过非补跑目标日期: ${expectedDate}`);
+      await withStep(
+        stepIndexBase + 1 + offset * 4,
+        "跳过短视频非目标日期",
+        `video-skip-date-${offset + 1}`,
+        null,
+        {
+          skipped: true,
+          skipReason: `非补跑目标日期: ${expectedDate}`,
+          meta: stepMeta({ dataDate: expectedDate, offset })
+        }
+      );
       continue;
     }
     targetCount += 1;
 
-    const { ok: datePicked, dataDate } = await selectDateRangeYesterday(page, tag, offset);
+    let datePicked = false;
+    let dataDate = null;
+    let pickReason = null;
+    await withStep(
+      stepIndexBase + 1 + offset * 4,
+      "选择短视频自然日",
+      `video-select-date-${offset + 1}`,
+      async () => {
+        const selected = await selectDateRangeYesterday(page, tag, expectedDate);
+        datePicked = Boolean(selected.ok);
+        dataDate = selected.dataDate || null;
+        pickReason = selected.reason || null;
+      },
+      {
+        verify: async () => {
+          if (!datePicked || !dataDate) {
+            if (pickReason === "disabled") {
+              throw new Error(`目标日期 ${expectedDate} 在日历中不可选（数据可能未产出）`);
+            }
+            throw new Error(`未能选择或解析日期，预期 ${expectedDate}`);
+          }
+          if (dataDate !== expectedDate) {
+            throw new Error(`日历选中 ${dataDate} ≠ 预期 ${expectedDate}`);
+          }
+        },
+        meta: stepMeta({ dataDate: expectedDate, offset })
+      }
+    ).catch(async (error) => {
+      const msg = error?.message || String(error);
+      await markFailed({
+        runId: exportBatchId,
+        accountEmail,
+        shopName: shopName || "unknown",
+        kind: "video",
+        dataDate: expectedDate,
+        expectedDate
+      }, msg);
+      results.push({ savePath: null, dataDate: dataDate || null, expectedDate, dateMatch: false, error: msg });
+    });
+    if (results.some((r) => r.expectedDate === expectedDate && r.dateMatch === false && !r.savePath)) {
+      continue;
+    }
     const item = {
       runId: exportBatchId,
       accountEmail,
@@ -378,23 +495,19 @@ async function downloadVideoSelfDetail(page, {
       expectedDate
     };
     await markRunning(item);
-    const dateMatch = datePicked && dataDate === expectedDate;
-    if (!datePicked || !dataDate) {
-      const error = `视频日期选择失败：未能选择或解析日期，预期 ${expectedDate} (offset=${offset})`;
-      logWarn(tag, error);
-      await markFailed(item, error);
-      results.push({ savePath: null, dataDate: dataDate || null, expectedDate, dateMatch: false, error });
-      continue;
-    }
-    if (!dateMatch) {
-      const error = `视频日期选择不符：日历选中 ${dataDate} ≠ 预期 ${expectedDate} (offset=${offset})`;
-      logWarn(tag, error);
-      await markFailed(item, error);
-      results.push({ savePath: null, dataDate, expectedDate, dateMatch: false, error });
-      continue;
-    }
+    const dateMatch = true;
 
-    await selectNonAdTab(page, tag);
+    await withStep(
+      stepIndexBase + 2 + offset * 4,
+      "切换短视频非投放",
+      `video-select-non-ad-${offset + 1}`,
+      async () => {
+        await selectNonAdTab(page, tag);
+      },
+      {
+        meta: stepMeta({ dataDate: expectedDate, offset })
+      }
+    );
 
     await page.waitForTimeout(1200);
 
@@ -403,26 +516,61 @@ async function downloadVideoSelfDetail(page, {
       : saveDir;
     let savePath;
     try {
-      savePath = await clickDownloadAndSave(page, tag, targetDir, {
-        exportLabel: "视频明细",
-        exportBatchId
-      });
+      await withStep(
+        stepIndexBase + 3 + offset * 4,
+        "下载短视频明细文件",
+        `video-download-file-${offset + 1}`,
+        async () => {
+          savePath = await clickDownloadAndSave(page, tag, targetDir, {
+            exportLabel: "视频明细",
+            exportBatchId
+          });
+        },
+        {
+          verify: async () => {
+            if (!savePath) throw new Error("短视频明细未返回保存路径");
+            const stat = await fse.stat(savePath).catch(() => null);
+            if (!stat || stat.size <= 0) {
+              throw new Error(`短视频明细文件不存在或为空: ${savePath}`);
+            }
+          },
+          meta: stepMeta({ dataDate: expectedDate, offset })
+        }
+      );
     } catch (error) {
       const msg = error?.message || String(error);
-      logWarn(tag, `视频明细下载失败: ${msg}`);
       await markFailed(item, msg);
       results.push({ savePath: null, dataDate: expectedDate, expectedDate, dateMatch: false, error: msg });
       continue;
     }
 
     const dateToWrite = expectedDate;
-    try {
-      appendDataDateColumn(savePath, dateToWrite);
-      logStep(tag, `数据日期写入: ${dateToWrite}`);
-    } catch (e) {
-      logWarn(tag, `写入「数据日期」列失败: ${e.message || e}`);
+    await withStep(
+      stepIndexBase + 4 + offset * 4,
+      "写入短视频数据日期",
+      `video-write-data-date-${offset + 1}`,
+      async () => {
+        appendDataDateColumn(savePath, dateToWrite);
+        logStep(tag, `数据日期写入: ${dateToWrite}`);
+        await markSuccess(item, savePath);
+      },
+      {
+        verify: async () => {
+          const stat = await fse.stat(savePath).catch(() => null);
+          if (!stat || stat.size <= 0) {
+            throw new Error(`短视频明细文件写入后不可用: ${savePath}`);
+          }
+        },
+        meta: stepMeta({ dataDate: expectedDate, offset })
+      }
+    ).catch(async (e) => {
+      const msg = e?.message || String(e);
+      await markFailed(item, msg);
+      results.push({ savePath: null, dataDate: expectedDate, expectedDate, dateMatch: false, error: msg });
+    });
+    if (results.some((r) => r.expectedDate === expectedDate && r.dateMatch === false && !r.savePath)) {
+      continue;
     }
-    await markSuccess(item, savePath);
 
     results.push({ savePath, dataDate: dateToWrite, dateMatch });
 

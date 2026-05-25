@@ -25,60 +25,52 @@ function buildRemainingTargetsResolver(preferredList, processedNames) {
   };
 }
 
+const { logInfo, logWarn } = require("./shop-log");
+
 function printResultSummary(results) {
   const okCount = results.filter((r) => r.ok).length;
-  console.log(`\n完成: 成功 ${okCount} / ${results.length}`);
+  logInfo(`完成: 成功 ${okCount} / ${results.length}`);
 
-  console.log(`\n最终结果明细:`);
   for (const item of results) {
     if (!item.ok) {
-      console.log(`  [${item.account}] 登录失败: ${item.error}`);
+      logWarn(`[${item.account}] 登录失败: ${item.error}`);
       continue;
     }
     const downloads = Array.isArray(item.downloads) ? item.downloads : [];
     if (downloads.length === 0) {
-      console.log(`  [${item.account}] 无数据导出`);
+      logWarn(`[${item.account}] 无数据导出`);
       continue;
     }
     for (const d of downloads) {
       const name = d.shopName || "未知店铺";
-      const videoIcon = d.videoDays === d.daysToExport ? '✓' : '✗';
-      const graphicIcon = d.graphicDays === d.daysToExport ? '✓' : '✗';
-      const status = d.videoPath && d.graphicPath ? '全部完成' :
-        d.videoPath ? '仅视频完成' :
-          d.graphicPath ? '仅图文完成' : '全部失败';
-      console.log(
-        `  ✓ [${item.account}] ${name}` +
-        ` | 视频 ${d.videoDays || 0}/${d.daysToExport || 1}天 ${videoIcon}` +
-        ` | 图文 ${d.graphicDays || 0}/${d.daysToExport || 1}天 ${graphicIcon}` +
-        ` | ${status}`
-      );
-      if (d.videoError) console.log(`      视频错误: ${d.videoError}`);
-      if (d.graphicError) console.log(`      图文错误: ${d.graphicError}`);
-      if (d.videoPath) console.log(`      视频文件: ${d.videoPath}`);
-      if (d.graphicPath) console.log(`      图文文件: ${d.graphicPath}`);
+      const videoIcon = d.videoDays === d.daysToExport ? "✓" : "✗";
+      const graphicIcon = d.graphicDays === d.daysToExport ? "✓" : "✗";
+      const extras = [];
+      if (d.videoError) extras.push(`视频: ${d.videoError}`);
+      if (d.graphicError) extras.push(`图文: ${d.graphicError}`);
       const vdm = Array.isArray(d.videoDateMismatches) ? d.videoDateMismatches : [];
       const gdm = Array.isArray(d.graphicDateMismatches) ? d.graphicDateMismatches : [];
-      if (vdm.length) console.log(`      ⚠ 视频日期不符（日历选中≠预期）: ${vdm.join(', ')}`);
-      if (gdm.length) console.log(`      ⚠ 图文日期不符（日历选中≠预期）: ${gdm.join(', ')}`);
+      if (vdm.length) extras.push(`视频日期不符: ${vdm.join(", ")}`);
+      if (gdm.length) extras.push(`图文日期不符: ${gdm.join(", ")}`);
       if (d.failures && d.failures.length) {
         const grouped = {};
-        for (const f of d.failures) {
-          grouped[f.step] = (grouped[f.step] || 0) + 1;
-        }
-        console.log(`      ⚠ 表单操作失败详情:`);
-        for (const [step, count] of Object.entries(grouped)) {
-          console.log(`          - ${step}${count > 1 ? ` (共${count}次)` : ''}`);
-        }
+        for (const f of d.failures) grouped[f.step] = (grouped[f.step] || 0) + 1;
+        const parts = Object.entries(grouped).map(([step, count]) =>
+          count > 1 ? `${step}(${count}次)` : step
+        );
+        extras.push(`表单失败: ${parts.join(", ")}`);
       }
+      const tail = extras.length ? ` | ${extras.join("; ")}` : "";
+      logInfo(
+        `  ✓ [${item.account}] ${name} | 视频 ${d.videoDays || 0}/${d.daysToExport || 1}天 ${videoIcon} | 图文 ${d.graphicDays || 0}/${d.daysToExport || 1}天 ${graphicIcon}${tail}`
+      );
     }
   }
 
   const failed = results.filter((r) => !r.ok);
   if (failed.length > 0) {
-    console.log("失败账号:");
     for (const item of failed) {
-      console.log(`- ${item.account}: ${item.error}`);
+      logWarn(`失败账号: ${item.account}: ${item.error}`);
     }
     process.exitCode = 1;
   }

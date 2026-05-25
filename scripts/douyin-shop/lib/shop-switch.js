@@ -69,14 +69,12 @@ const SWITCH_MODAL_ROOT = "#ecom-login-account-modal";
 const DROPDOWN_READY_TIMEOUT_MS = 6000;
 const SWITCH_ENTRY_READY_TIMEOUT_MS = 7500;
 
-function nowLog(tag, msg) {
-  // eslint-disable-next-line no-console
-  console.log(`[${tag}] ${msg}`);
-}
+const { logMilestone, logWarn } = require("./shop-log");
+
+function nowLog() {}
 
 function warnLog(tag, msg) {
-  // eslint-disable-next-line no-console
-  console.warn(`[${tag}] ${msg}`);
+  logWarn(`[${tag}] ${msg}`);
 }
 
 /**
@@ -655,7 +653,7 @@ async function switchToNextPreferredShop(page, options = {}) {
 
   await waitForDomLoaded(page, { tag });
 
-  nowLog(tag, `店铺切换完成 (${Date.now() - t0}ms)`);
+  logMilestone(tag, `切店 → ${hit.item.name} (${Date.now() - t0}ms)`);
 
   return {
     switched: true,

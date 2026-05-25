@@ -1,4 +1,5 @@
 const { waitForDomLoaded } = require("./page-utils");
+const { logMilestone, logWarn } = require("./shop-log");
 const { readProjectConfigFromEnv } = require("../../common/project-config");
 
 const DEFAULT_ACCOUNTS_FILE = "Mongo app_config";
@@ -13,7 +14,7 @@ async function loadPreferredShopNames(file = DEFAULT_ACCOUNTS_FILE) {
     const arr = Array.isArray(json?.accounts) ? json.accounts : [];
     return arr.map((s) => String(s).trim()).filter(Boolean);
   } catch (error) {
-    console.warn(`读取 Mongo app_config accounts 失败: ${error.message}`);
+    logWarn(`读取 Mongo app_config accounts 失败: ${error.message}`);
     return [];
   }
 }
@@ -144,9 +145,7 @@ async function selectShopIfPicker(page, options = {}) {
       : await loadPreferredShopNames();
 
   if (preferredList.length === 0) {
-    console.warn(
-      `[${tag}] 检测到店铺选择页，但未配置优先级名单（Mongo app_config accounts），跳过自动选店`
-    );
+    logWarn(`[${tag}] 检测到店铺选择页，但未配置优先级名单，跳过自动选店`);
     return { picked: false };
   }
 
@@ -159,25 +158,15 @@ async function selectShopIfPicker(page, options = {}) {
 
   const items = await waitForShopItems(page, 60000);
   const availableNames = items.map((it) => it.name).filter(Boolean);
-  console.log(
-    `[${tag}] 店铺选择页展示 ${items.length} 个店铺，前 5 个: ${availableNames
-      .slice(0, 5)
-      .join(" | ")}${availableNames.length > 5 ? " ..." : ""}`
-  );
+
 
   const hit = pickShopByPreference(items, preferredList);
   if (!hit) {
-    console.warn(
-      `[${tag}] 未在页面中找到优先级名单里的任一店铺。名单: ${preferredList.join(
-        ", "
-      )}`
-    );
+    logWarn(`[${tag}] 未在页面中找到优先级名单里的任一店铺`);
     return { picked: false, availableNames };
   }
 
-  console.log(
-    `[${tag}] 命中店铺 "${hit.item.name}"（匹配优先级项 "${hit.preferred}"），点击进入`
-  );
+  logMilestone(tag, `选店 → ${hit.item.name}`);
 
   // 点击店铺项后页面可能出现多段重定向/SPA 切换。
   // 仅等待一次 navigation 并不可靠：有时不会触发 navigation 事件，

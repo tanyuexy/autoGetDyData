@@ -147,8 +147,8 @@ export default function ShopPage() {
     [setSelectedShopNames, shopNames]
   );
 
-  async function handleAction(action: "export" | "feishu-sync" | "sync-feishu" | "retry-failed") {
-    if (action !== "retry-failed" && !shopsSanitized.length) {
+  async function handleAction(action: "export" | "feishu-sync" | "sync-feishu") {
+    if (!shopsSanitized.length) {
       message.warning("请先选择店铺");
       return;
     }
@@ -157,33 +157,28 @@ export default function ShopPage() {
       return;
     }
 
-    if (action !== "retry-failed") {
-      try {
-        window.localStorage.setItem(
-          SHOP_SELECTION_CACHE_KEY,
-          JSON.stringify(shopsSanitized)
-        );
-      } catch {}
-    }
+    try {
+      window.localStorage.setItem(
+        SHOP_SELECTION_CACHE_KEY,
+        JSON.stringify(shopsSanitized)
+      );
+    } catch {}
 
     const endpoints: Record<string, string> = {
       export: "/api/shop/export",
       "feishu-sync": "/api/shop/feishu-sync",
       "sync-feishu": "/api/shop/sync-feishu",
-      "retry-failed": "/api/shop/retry-failed",
     };
     try {
       await startTask(
         endpoints[action],
-        action === "retry-failed"
-          ? {}
-          : action === "export"
-            ? {
-                shopNames: shopsSanitized,
-                startDate: exportDateRange?.[0]?.format("YYYY-MM-DD"),
-                endDate: exportDateRange?.[1]?.format("YYYY-MM-DD"),
-              }
-            : { shopNames: shopsSanitized },
+        action === "export"
+          ? {
+              shopNames: shopsSanitized,
+              startDate: exportDateRange?.[0]?.format("YYYY-MM-DD"),
+              endDate: exportDateRange?.[1]?.format("YYYY-MM-DD"),
+            }
+          : { shopNames: shopsSanitized },
         "shop-export"
       );
       message.info("任务已启动");
@@ -279,12 +274,6 @@ export default function ShopPage() {
             disabled={shopNames.length === 0 || isNamespaceBusy("shop-export")}
           >
             导出并推送
-          </Button>
-          <Button
-            onClick={() => handleAction("retry-failed")}
-            disabled={isNamespaceBusy("shop-export")}
-          >
-            补跑失败项
           </Button>
         </Space>
         </div>

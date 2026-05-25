@@ -64,10 +64,6 @@ const ROUTES = {
     script: "scripts/douyin-shop/cli.js",
     argv: ["sync-feishu"]
   },
-  "shop:retry-failed": {
-    script: "scripts/douyin-shop/cli.js",
-    argv: ["retry-failed"]
-  },
   "shop:verify": {
     script: "scripts/douyin-shop/verify.js",
     argv: []

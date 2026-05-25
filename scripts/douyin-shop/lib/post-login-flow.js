@@ -1,4 +1,3 @@
-const path = require("path");
 const fse = require("fs-extra");
 const {
   selectShopIfPicker,
@@ -12,6 +11,33 @@ const {
   STAGES,
   detectStage,
 } = require("./page-utils");
+const { saveDebugArtifacts } = require("./debug");
+const { logMilestone, logWarn, logError } = require("./shop-log");
+
+function buildShopExportIncompleteError(round, shopTag) {
+  const parts = [
+    `视频 ${round.videoDays}/${round.videoTargetCount}天`,
+    `图文 ${round.graphicDays}/${round.graphicTargetCount}天`
+  ];
+  if (round.videoDateMismatches?.length) {
+    parts.push(`视频日期失败: ${round.videoDateMismatches.join(", ")}`);
+  }
+  if (round.graphicDateMismatches?.length) {
+    parts.push(`图文日期失败: ${round.graphicDateMismatches.join(", ")}`);
+  }
+  if (round.videoError) parts.push(`视频错误: ${round.videoError}`);
+  if (round.graphicError) parts.push(`图文错误: ${round.graphicError}`);
+  if (round.failures?.length) {
+    const grouped = {};
+    for (const f of round.failures) grouped[f.step] = (grouped[f.step] || 0) + 1;
+    parts.push(
+      `步骤失败: ${Object.entries(grouped)
+        .map(([step, n]) => (n > 1 ? `${step}(${n}次)` : step))
+        .join(", ")}`
+    );
+  }
+  return new Error(`[${shopTag}] 店铺导出不完整，终止任务：${parts.join("；")}`);
+}
 
 async function saveStorageState(context, paths) {
   await context.storageState({ path: paths.storageStatePath });
@@ -28,31 +54,14 @@ async function saveStorageState(context, paths) {
   }
 }
 
-async function captureFailureShot(page, debugDir, kind) {
-  try {
-    const ts = new Date()
-      .toISOString()
-      .replace(/[:.]/g, "-")
-      .replace("T", "_")
-      .slice(0, 19);
-    const shot = path.join(debugDir, `${kind}-${ts}.png`);
-    await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
-    return shot;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * 下载当前店铺的短视频明细 + 图文明细；二者独立 try/catch，互不影响。
  * 店铺名只使用上游传入的目标店铺名。
  */
 async function downloadCurrentShop(page, tag, paths, options = {}) {
   const shopName = String(options.shopNameHint || "").trim();
-  if (shopName) {
-    console.log(`[${tag}] 当前目标店铺: ${shopName}`);
-  } else {
-    console.warn(`[${tag}] 缺少上游目标店铺名，将以 "unknown" 归档`);
+  if (!shopName) {
+    logWarn(`[${tag}] 缺少上游目标店铺名，将以 "unknown" 归档`);
   }
 
   const shopTag = shopName ? `${tag}|${shopName}` : tag;
@@ -62,6 +71,9 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
   const accountEmail = options.accountEmail || "";
   const targetDates = Array.isArray(options.targetDates) ? options.targetDates : null;
   const targetKinds = Array.isArray(options.targetKinds) ? options.targetKinds : null;
+  const stepRunner = options.stepRunner || null;
+  const stepIndexBase = Number(options.stepIndexBase || 100);
+  const debugOptions = options.debugOptions || {};
 
   let videoPaths = [];
   let graphicPaths = [];
@@ -82,7 +94,11 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       exportBatchId,
       accountEmail,
       targetDates,
-      targetKinds
+      targetKinds,
+      stepRunner,
+      stepIndexBase: stepIndexBase + 10,
+      shopIndex: options.shopIndex,
+      shopTotal: options.shopTotal
     });
     if (result.failures && result.failures.length) {
       allFailures.push(...result.failures);
@@ -101,13 +117,13 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     }
   } catch (error) {
     videoError = error?.message || String(error);
-    console.error(`[${shopTag}] 视频明细下载失败: ${videoError}`);
-    const shot = await captureFailureShot(
+    logError(`[${shopTag}] 视频明细下载失败: ${videoError}`);
+    await saveDebugArtifacts(
       page,
-      paths.debugDir,
-      "download-video-failed"
-    );
-    if (shot) console.error(`[${shopTag}] 失败截图: ${shot}`);
+      accountEmail || tag,
+      `download-video-failed-${stepIndexBase}`,
+      debugOptions
+    ).catch(() => {});
   }
 
   try {
@@ -119,7 +135,11 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       exportBatchId,
       accountEmail,
       targetDates,
-      targetKinds
+      targetKinds,
+      stepRunner,
+      stepIndexBase: stepIndexBase + 50,
+      shopIndex: options.shopIndex,
+      shopTotal: options.shopTotal
     });
     if (result.failures && result.failures.length) {
       allFailures.push(...result.failures);
@@ -138,13 +158,13 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     }
   } catch (error) {
     graphicError = error?.message || String(error);
-    console.error(`[${shopTag}] 图文明细下载失败: ${graphicError}`);
-    const shot = await captureFailureShot(
+    logError(`[${shopTag}] 图文明细下载失败: ${graphicError}`);
+    await saveDebugArtifacts(
       page,
-      paths.debugDir,
-      "download-graphic-failed"
-    );
-    if (shot) console.error(`[${shopTag}] 失败截图: ${shot}`);
+      accountEmail || tag,
+      `download-graphic-failed-${stepIndexBase}`,
+      debugOptions
+    ).catch(() => {});
   }
 
   const ok = videoPaths.length === videoTargetCount && graphicPaths.length === graphicTargetCount;
@@ -167,13 +187,13 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     }
   }
 
-  console.log(
-    `[${shopTag}] ─── 导出汇总: 视频 ${videoDaysOk}/${videoTargetCount}天 ${videoDaysOk === videoTargetCount ? '✓' : '✗'} | ` +
-    `图文 ${graphicDaysOk}/${graphicTargetCount}天 ${graphicDaysOk === graphicTargetCount ? '✓' : '✗'}` +
-    (!dateOk ? ` | ⚠ ${dateMismatchWarn.join('; ')}` : '') +
-    (videoError ? ` | 视频错误: ${videoError}` : '') +
-    (graphicError ? ` | 图文错误: ${graphicError}` : '') +
-    (failedStepsDetail.length ? ` | 表单失败项: ${failedStepsDetail.join(', ')}` : '')
+  logMilestone(
+    shopTag,
+    `导出汇总 视频 ${videoDaysOk}/${videoTargetCount}天 ${videoDaysOk === videoTargetCount ? "✓" : "✗"} | 图文 ${graphicDaysOk}/${graphicTargetCount}天 ${graphicDaysOk === graphicTargetCount ? "✓" : "✗"}` +
+    (!dateOk ? ` | ⚠ ${dateMismatchWarn.join("; ")}` : "") +
+    (videoError ? ` | 视频错误: ${videoError}` : "") +
+    (graphicError ? ` | 图文错误: ${graphicError}` : "") +
+    (failedStepsDetail.length ? ` | 表单失败: ${failedStepsDetail.join(", ")}` : "")
   );
 
   return {
@@ -205,6 +225,19 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
  * 每一步都尽量独立捕获异常，避免因后置步骤失败而否定登录动作本身的成果。
  */
 async function runPostLoginFlow(page, tag, paths, options = {}) {
+  const stepRunner = options.stepRunner || null;
+  const runStep = stepRunner?.runStep;
+  const withStep = async (index, title, stepTag, action, verifyOrOptions, maybeOptions) => {
+    if (typeof runStep === "function") {
+      return await runStep(index, title, stepTag, action, verifyOrOptions, maybeOptions);
+    }
+    if (typeof action === "function") await action();
+    const verify = verifyOrOptions && typeof verifyOrOptions === "object"
+      ? verifyOrOptions.verify
+      : verifyOrOptions;
+    if (typeof verify === "function") await verify();
+  };
+
   const processed =
     options.processedNames instanceof Set
       ? options.processedNames
@@ -233,30 +266,55 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
     }
     return true;
   });
-  console.log(
-    `[${tag}] 优先级名单总计 ${fullPreferredList.length}，已处理 ${processed.size}，本轮待处理 ${preferredList.length}: ${preferredList.join(", ") || "(空)"}`
+  logMilestone(
+    tag,
+    `待处理 ${preferredList.length}/${fullPreferredList.length} 店${preferredList.length ? ": " + preferredList.slice(0, 5).join(", ") + (preferredList.length > 5 ? " ..." : "") : ""}`
   );
 
   if (preferredList.length === 0) {
-    console.log(`[${tag}] 本账号无新店铺可处理，跳过登录后流程`);
+    logMilestone(tag, "本账号无新店铺，跳过");
     return result;
   }
 
-  const entryStage = await detectStage(page);
-  console.log(
-    `[${tag}] 进入 post-login 流程，当前阶段=${entryStage.stage} url=${entryStage.url}`
+  let entryStage = null;
+  await withStep(
+    10,
+    "识别登录后页面阶段",
+    "post-login-detect-stage",
+    async () => {
+      entryStage = await detectStage(page);
+    },
+    {
+      verify: async () => {
+        if (!entryStage?.stage) throw new Error("未能识别登录后页面阶段");
+      },
+      meta: { phase: "prepare", targetShopCount: preferredList.length }
+    }
   );
 
+
   if (entryStage.stage === STAGES.LOGIN_FORM || entryStage.stage === STAGES.CAPTCHA) {
-    console.warn(
-      `[${tag}] 意外：post-login 入口仍是 ${entryStage.stage}，终止后续下载流程`
-    );
+    logWarn(`[${tag}] post-login 入口仍是 ${entryStage.stage}，终止下载`);
     return result;
   }
 
   if (entryStage.stage === STAGES.SHOP_PICKER) {
     try {
-      const pick = await selectShopIfPicker(page, { tag, preferredList });
+      let pick = null;
+      await withStep(
+        11,
+        "选择目标店铺",
+        "select-shop-from-picker",
+        async () => {
+          pick = await selectShopIfPicker(page, { tag, preferredList });
+        },
+        {
+          verify: async () => {
+            if (!pick?.picked) throw new Error("选店页未选中目标店铺");
+          },
+          meta: { phase: "prepare", targetShopCount: preferredList.length }
+        }
+      );
       if (pick.picked) {
         result.shopPicked = true;
         result.shopName = pick.name;
@@ -264,13 +322,11 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
         result.shopPicked = false;
       }
     } catch (error) {
-      console.warn(`[${tag}] 店铺选择阶段异常: ${error.message || error}`);
+      logWarn(`[${tag}] 店铺选择阶段异常: ${error.message || error}`);
       result.shopPicked = false;
     }
   } else {
-    console.log(
-      `[${tag}] 当前阶段=${entryStage.stage}，不在选店页，跳过 selectShopIfPicker`
-    );
+
     result.shopPicked = false;
   }
 
@@ -287,15 +343,29 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
   let pendingShopHint = result.shopName || null;
 
   if (!result.shopPicked && preferredList.length > 0) {
-    const sw = await switchToNextPreferredShop(page, {
-      tag,
-      processedNames: processed,
-      preferredList
-    });
+    let sw = null;
+    await withStep(
+      12,
+      "切换到第一个目标店铺",
+      "switch-first-shop",
+      async () => {
+        sw = await switchToNextPreferredShop(page, {
+          tag,
+          processedNames: processed,
+          preferredList
+        });
+      },
+      {
+        verify: async () => {
+          if (!sw?.switched && sw?.reason !== "no-match") {
+            throw new Error(`未能切换到第一个目标店铺: ${sw?.reason || "unknown"}`);
+          }
+        },
+        meta: { phase: "prepare", targetShopCount: preferredList.length }
+      }
+    );
     if (!sw.switched && sw.reason === "no-match") {
-      console.log(
-        `[${tag}] 本账号未命中任何优先级名单店铺（${preferredList.length} 项名单中无可用店铺），跳过下载`
-      );
+      logMilestone(tag, "本账号未命中优先级名单，跳过下载");
       return result;
     }
     if (sw.switched) {
@@ -304,14 +374,32 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
     }
   }
 
-  await waitForDomLoaded(page, { tag });
+  await withStep(
+    13,
+    "等待店铺页面稳定",
+    "wait-shop-dom-loaded",
+    async () => {
+      await waitForDomLoaded(page, { tag });
+    },
+    {
+      meta: { shopName: pendingShopHint || result.shopName || null, phase: "prepare" }
+    }
+  );
 
   try {
-    await gotoVideoSelf(page, tag);
-  } catch (error) {
-    console.warn(
-      `[${tag}] 进入短视频明细页失败（仍尝试在下载流程内重试）: ${error.message || error}`
+    await withStep(
+      14,
+      "预热短视频明细页",
+      "preopen-video-page",
+      async () => {
+        await gotoVideoSelf(page, tag);
+      },
+      {
+        meta: { shopName: pendingShopHint || result.shopName || null, phase: "prepare" }
+      }
     );
+  } catch (error) {
+    logWarn(`[${tag}] 预热短视频页失败（下载流程内重试）: ${error.message || error}`);
   }
 
   const maxShops = preferredList.length > 0 ? preferredList.length : 1;
@@ -319,16 +407,19 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
   for (let i = 0; i < maxShops; i += 1) {
     const daysToExport = options.daysToExport || 1;
     const currentTarget = pendingShopHint || "unknown";
-    console.log(
-      `\n[${tag}] ========== 第 ${i + 1}/${maxShops} 个目标店铺 | 当前目标: ${currentTarget} | 导出天数: ${daysToExport}天 ==========`
-    );
+    logMilestone(tag, `[${i + 1}/${maxShops}] ${currentTarget} | ${daysToExport}天`);
     const round = await downloadCurrentShop(page, tag, paths, {
       shopNameHint: pendingShopHint,
       daysToExport,
       exportBatchId: options.exportBatchId || null,
       accountEmail: options.accountEmail || "",
       targetDates: options.targetDates || null,
-      targetKinds: options.targetKinds || null
+      targetKinds: options.targetKinds || null,
+      stepRunner,
+      debugOptions: options.debugOptions || stepRunner?.debugOptions || {},
+      stepIndexBase: 1000 + i * 100,
+      shopIndex: i + 1,
+      shopTotal: maxShops
     });
     if (round.shopName) {
       processed.add(round.shopName);
@@ -336,10 +427,13 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
     }
 
     if (round.shopName && preferredList.length > 0 && !isPreferredShop(round.shopName)) {
-      console.warn(
-        `[${tag}] 本轮店铺 "${round.shopName}" 不在优先级名单内，已跳过并结束（仅下载名单店铺）`
-      );
+      logWarn(`[${tag}] 店铺 "${round.shopName}" 不在优先级名单内，结束`);
       break;
+    }
+
+    if (!round.ok) {
+      const shopTag = round.shopName ? `${tag}|${round.shopName}` : tag;
+      throw buildShopExportIncompleteError(round, shopTag);
     }
 
     result.downloads.push({
@@ -368,90 +462,69 @@ async function runPostLoginFlow(page, tag, paths, options = {}) {
       result.downloadError = round.graphicError;
     }
 
-    if (round.ok) {
-      const failDetail = (round.failures && round.failures.length) ? ` | 表单非致命告警: ${round.failures.length}项` : '';
-      console.log(
-        `[${tag}] 本轮全部成功: ${round.shopName || "unknown"} | 视频 ${round.videoDays}/${round.daysToExport}天 ✓ | 图文 ${round.graphicDays}/${round.daysToExport}天 ✓${failDetail}`
-      );
-    } else {
-      const detail = [
-        round.videoError ? `视频 ✗ ${round.videoError}` : `视频 ${round.videoDays}/${round.videoTargetCount}天 ✓`,
-        round.graphicError ? `图文 ✗ ${round.graphicError}` : `图文 ${round.graphicDays}/${round.graphicTargetCount}天 ✓`
-      ].join(" | ");
-      const failList = (round.failures && round.failures.length)
-        ? ` | 表单失败项: [${round.failures.map((f) => f.step).join(', ')}]`
-        : '';
-      console.warn(
-        `[${tag}] 本轮部分失败: ${round.shopName || "unknown"}（${detail}）${failList}`
-      );
-    }
-
     if (preferredList.length === 0) {
-      console.log(`[${tag}] 未配置优先级名单，结束循环`);
+      logMilestone(tag, "未配置优先级名单，结束循环");
       break;
     }
 
     let switchRes;
     try {
-      switchRes = await switchToNextPreferredShop(page, {
-        tag,
-        processedNames: processed,
-        preferredList
-      });
+      await withStep(
+        8000 + i,
+        "切换到下一个目标店铺",
+        `switch-next-shop-${i + 1}`,
+        async () => {
+          switchRes = await switchToNextPreferredShop(page, {
+            tag,
+            processedNames: processed,
+            preferredList
+          });
+        },
+        {
+          verify: async () => {
+            if (!switchRes) throw new Error("未返回切店结果");
+          },
+          meta: {
+            phase: "switch",
+            shopIndex: i + 1,
+            shopTotal: maxShops,
+            processedShopCount: processed.size
+          }
+        }
+      );
     } catch (error) {
-      console.warn(`[${tag}] 切换店铺阶段异常: ${error.message || error}`);
-      await captureFailureShot(page, paths.debugDir, "switch-shop-failed");
+      logWarn(`[${tag}] 切换店铺阶段异常: ${error.message || error}`);
+      await saveDebugArtifacts(
+        page,
+        options.accountEmail || tag,
+        `switch-shop-failed-${i + 1}`,
+        options.debugOptions || stepRunner?.debugOptions || {}
+      ).catch(() => {});
       break;
     }
 
     if (!switchRes.switched) {
       if (switchRes.reason === "no-match") {
-        console.log(
-          `[${tag}] 切店铺弹窗中已无匹配且未处理的店铺，结束循环（共处理 ${processed.size} 个店铺）`
-        );
+        logMilestone(tag, `无更多待切店铺，结束（已处理 ${processed.size} 家）`);
       } else if (switchRes.reason === "modal-not-opened") {
-        console.warn(
-          `[${tag}] 右上角菜单中没有"切换数据视角"入口（该账号可能只绑定 1 个自营账号），结束循环`
-        );
-        await captureFailureShot(page, paths.debugDir, "switch-entry-missing");
+        logWarn(`[${tag}] 无「切换数据视角」入口，结束循环`);
+        await saveDebugArtifacts(
+          page,
+          options.accountEmail || tag,
+          `switch-entry-missing-${i + 1}`,
+          options.debugOptions || stepRunner?.debugOptions || {}
+        ).catch(() => {});
       } else {
-        console.warn(
-          `[${tag}] 未能继续切换店铺（原因: ${switchRes.reason || "unknown"}），结束循环`
-        );
+        logWarn(`[${tag}] 切店失败 (${switchRes.reason || "unknown"})，结束循环`);
       }
       break;
     }
 
     pendingShopHint = switchRes.name || null;
-    console.log(
-      `[${tag}] 切换成功（目标店铺=${switchRes.name || "?"}），进入下一轮，当前累计已处理: ${[...processed].join(", ")}`
-    );
+
   }
 
-  console.log(
-    `\n[${tag}] ========== 多店铺循环结束: 共 ${result.downloads.length} 家店铺 ==========`
-  );
-  for (const d of result.downloads) {
-    const videoTargetCount = d.videoTargetCount ?? d.daysToExport;
-    const graphicTargetCount = d.graphicTargetCount ?? d.daysToExport;
-    const videoIcon = d.videoDays === videoTargetCount ? '✓' : '✗';
-    const graphicIcon = d.graphicDays === graphicTargetCount ? '✓' : '✗';
-    console.log(
-      `  [${d.shopName || "unknown"}] 视频 ${d.videoDays}/${videoTargetCount}天 ${videoIcon}` +
-      ` | 图文 ${d.graphicDays}/${graphicTargetCount}天 ${graphicIcon}` +
-      (d.videoError ? ` | 视频问题: ${d.videoError}` : '') +
-      (d.graphicError ? ` | 图文问题: ${d.graphicError}` : '')
-    );
-    if (d.failures && d.failures.length) {
-      const grouped = {};
-      for (const f of d.failures) {
-        grouped[f.step] = (grouped[f.step] || 0) + 1;
-      }
-      for (const [step, count] of Object.entries(grouped)) {
-        console.log(`    ⚠ 表单失败: ${step}${count > 1 ? ` (共${count}次)` : ''}`);
-      }
-    }
-  }
+  logMilestone(tag, `多店铺完成: ${result.downloads.length} 家`);
   return result;
 }
 

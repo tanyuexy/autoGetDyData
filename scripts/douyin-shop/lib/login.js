@@ -13,6 +13,8 @@ const {
   isShopPickerVisible
 } = require("./shop-picker");
 const { runPostLoginFlow } = require("./post-login-flow");
+const { saveRunFailedArtifacts } = require("./debug");
+const { createShopExportStepRunner } = require("./step-runner");
 const {
   STAGES,
   detectStage,
@@ -99,9 +101,6 @@ async function waitForStageWithActivity(page, targets, options = {}) {
       const snapshot = getPageActivitySnapshot(page);
       if (snapshot.inflight <= 0 && snapshot.idleMs >= idleGraceMs) break;
       if (!extendedLogged) {
-        console.log(
-          `[${tag}] 阶段等待超过 ${timeoutMs}ms，但页面仍有活动（inflight=${snapshot.inflight}, idle=${snapshot.idleMs}ms），继续等待`
-        );
         extendedLogged = true;
       }
     }
@@ -151,9 +150,6 @@ async function waitForLoginFormFields(page, tag, options = {}) {
         );
       }
       if (!extendedLogged) {
-        console.log(
-          `[${tag}] 登录表单字段等待超过 ${timeoutMs}ms，但页面仍有活动（inflight=${snapshot.inflight}, idle=${snapshot.idleMs}ms），继续等待`
-        );
         extendedLogged = true;
       }
     }
@@ -181,7 +177,6 @@ async function waitBrieflyForAuthenticatedStage(page, tag, reason) {
     { timeoutMs: 2500, maxWaitMs: 8000, intervalMs: 250, tag }
   );
   if (isAuthenticatedStage(stage.stage)) {
-    console.log(`[${tag}] ${reason}发现已登录 (stage=${stage.stage})，跳过账号密码流程`);
     return stage;
   }
   return null;
@@ -195,14 +190,12 @@ function getAccountPaths(email) {
     accountDir,
     storageStatePath: path.join(accountDir, "storageState.json"),
     cookiesPath: path.join(accountDir, "cookies.json"),
-    debugDir: path.join(accountDir, "debug"),
     dataDir: path.join(accountDir, "data")
   };
 }
 
 async function ensureAccountPaths(paths) {
   await fse.ensureDir(paths.accountDir);
-  await fse.ensureDir(paths.debugDir);
   await fse.ensureDir(paths.dataDir);
 }
 
@@ -281,7 +274,7 @@ async function fillCredentials(page, email, password) {
   const needRefillPassword = pwVal.length !== password.length;
 
   if (needRefillEmail || needRefillPassword) {
-    console.warn(
+    logWarn(
       `填写校验失败 → 邮箱期望"${email}"实际"${emailVal}"；密码长度期望 ${password.length} 实际 ${pwVal.length}，执行一次重填。`
     );
     if (needRefillEmail) await clearAndFill(emailInput, email);
@@ -484,9 +477,6 @@ async function waitForLoginSettled(page, timeoutMs = 15000) {
         return false;
       }
       if (!extendedLogged) {
-        console.log(
-          `[login] 登录落地等待超过 ${timeoutMs}ms，但页面仍有活动（inflight=${snapshot.inflight}, idle=${snapshot.idleMs}ms），继续等待`
-        );
         extendedLogged = true;
       }
     }
@@ -538,7 +528,6 @@ async function tryReuseCookieLogin(page, tag) {
   if (!hasCookies) return false;
 
   const probeUrl = SHOP_HOME_URL || SHOP_LOGIN_URL;
-  console.log(`[${tag}] 检测到已有 cookie，尝试直连 ${probeUrl}`);
   try {
     await retryableGoto(page, probeUrl, {
       waitUntil: "domcontentloaded",
@@ -548,7 +537,7 @@ async function tryReuseCookieLogin(page, tag) {
       expectedUrlRe: /jinritemai\.com/
     });
   } catch (error) {
-    console.warn(`[${tag}] 直连工作台失败: ${error.message || error}`);
+    logWarn(`[${tag}] 直连工作台失败: ${error.message || error}`);
     return false;
   }
 
@@ -566,7 +555,6 @@ async function tryReuseCookieLogin(page, tag) {
     ],
     { timeoutMs: 10000, maxWaitMs: 90000, intervalMs: 320, tag }
   );
-  console.log(`[${tag}] cookie 直连后阶段=${settled.stage} url=${settled.url}`);
   return isAuthenticatedStage(settled.stage);
 }
 
@@ -591,72 +579,139 @@ async function runShopLogin(context, account, options = {}) {
   const selectedShopNames = Array.isArray(options.selectedShopNames)
     ? options.selectedShopNames.map((name) => String(name || "").trim()).filter(Boolean)
     : [];
-  const postLoginOptions = { processedNames, daysToExport, exportBatchId, accountEmail, selectedShopNames };
 
   const page = await context.newPage();
   const tag = email;
   getPageActivityTracker(page);
+  const stepRunner = createShopExportStepRunner({
+    page,
+    accountName: email,
+    flow: options.loginOnly ? "shop-login" : "shop-export",
+    options: {
+      ...options,
+      task: options.task || process.env.SHOP_TASK_ID || process.env.TASK_JOB_ID,
+      exportBatchId
+    }
+  });
+  const { runStep, debugOptions } = stepRunner;
+  const postLoginOptions = {
+    processedNames,
+    daysToExport,
+    exportBatchId,
+    accountEmail,
+    selectedShopNames,
+    targetDates: Array.isArray(options.targetDates) ? options.targetDates : null,
+    targetKinds: Array.isArray(options.targetKinds) ? options.targetKinds : null,
+    stepRunner,
+    debugOptions
+  };
 
   try {
     const t0 = Date.now();
 
     // 优先走 cookie 复用：如果账号目录下已有 storageState，直接探测工作台。
     // cookie 有效就跳过整个登录流程；无效再回落到账号密码登录。
-    if (await tryReuseCookieLogin(page, tag)) {
-      console.log(`[${tag}] cookie 仍然有效，跳过账号密码登录`);
-      await saveStorageState(context, paths);
+    let reusedCookie = false;
+    await runStep(
+      1,
+      "检查缓存登录态",
+      "check-cookie-login",
+      async () => {
+        reusedCookie = await tryReuseCookieLogin(page, tag);
+      },
+      {
+        meta: { loginOnly: Boolean(options.loginOnly) }
+      }
+    );
+    if (reusedCookie) {
+      await runStep(
+        2,
+        "保存缓存登录态",
+        "save-reused-storage-state",
+        async () => {
+          await saveStorageState(context, paths);
+        },
+        {
+          meta: { reused: true }
+        }
+      );
       if (!options.loginOnly) {
         const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
         return { ok: true, reused: true, paths, ...extra };
       }
-      console.log(`[${tag}] 纯登录模式，跳过后续流程`);
       return { ok: true, reused: true, paths };
     }
 
-    console.log(`[${tag}] 打开抖店登录页 ${SHOP_LOGIN_URL}`);
-    await retryableGoto(page, SHOP_LOGIN_URL, {
-      waitUntil: "domcontentloaded",
-      timeout: 45000,
-      maxRetries: 2,
-      baseBackoff: 2500,
-      expectedUrlRe: /jinritemai\.com\/login/
-    });
+    await runStep(
+      2,
+      "打开抖店登录页",
+      "open-login-page",
+      async () => {
+        await retryableGoto(page, SHOP_LOGIN_URL, {
+          waitUntil: "domcontentloaded",
+          timeout: 45000,
+          maxRetries: 2,
+          baseBackoff: 2500,
+          expectedUrlRe: /jinritemai\.com\/login/
+        });
+      },
+      {
+        meta: { loginUrl: SHOP_LOGIN_URL }
+      }
+    );
     // 抖店页面长连接/埋点会让 networkidle 几乎永远触发不到，
     // 等到「登录表单 / 选店页 / 工作台 / 滑块」任一阶段出现即可。
-    const preFormStage = await waitForStageWithActivity(
-      page,
-      [
-        STAGES.LOGIN_FORM,
-        STAGES.SHOP_PICKER,
-        STAGES.COMPASS_VIDEO,
-        STAGES.COMPASS_GRAPHIC,
-        STAGES.COMPASS_OTHER,
-        STAGES.FXG_WORKSPACE,
-        STAGES.CAPTCHA
-      ],
-      { timeoutMs: 12000, maxWaitMs: 120000, intervalMs: 350, tag }
-    );
-    console.log(
-      `[${tag}] 登录页阶段识别: stage=${preFormStage.stage} url=${preFormStage.url}`
+    let preFormStage = null;
+    await runStep(
+      3,
+      "识别登录页阶段",
+      "detect-login-stage",
+      async () => {
+        preFormStage = await waitForStageWithActivity(
+          page,
+          [
+            STAGES.LOGIN_FORM,
+            STAGES.SHOP_PICKER,
+            STAGES.COMPASS_VIDEO,
+            STAGES.COMPASS_GRAPHIC,
+            STAGES.COMPASS_OTHER,
+            STAGES.FXG_WORKSPACE,
+            STAGES.CAPTCHA
+          ],
+          { timeoutMs: 12000, maxWaitMs: 120000, intervalMs: 350, tag }
+        );
+      },
+      {
+        verify: async () => {
+          if (!preFormStage?.stage) throw new Error("未能识别登录页阶段");
+        },
+        meta: { loginOnly: Boolean(options.loginOnly) }
+      }
     );
 
     // 快速通道：cookie/登录态直接有效（探测 URL 没跳登录页或已在选店/工作台）
     if (isAuthenticatedStage(preFormStage.stage)) {
-      console.log(
-        `[${tag}] 当前已处于登录态（阶段=${preFormStage.stage}），跳过账号密码流程`
+      await runStep(
+        4,
+        "保存已有登录态",
+        "save-existing-storage-state",
+        async () => {
+          await saveStorageState(context, paths);
+        },
+        {
+          meta: { stage: preFormStage.stage, reused: true }
+        }
       );
-      await saveStorageState(context, paths);
       if (!options.loginOnly) {
         const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
         return { ok: true, reused: true, paths, ...extra };
       }
-      console.log(`[${tag}] 纯登录模式，跳过后续流程`);
       return { ok: true, reused: true, paths };
     }
 
     // 只有在「真的处于登录表单」时才执行 tab 切换/填密码；其它阶段全部按异常走兜底路径
     if (preFormStage.stage !== STAGES.LOGIN_FORM && preFormStage.stage !== STAGES.CAPTCHA) {
-      console.warn(
+      logWarn(
         `[${tag}] 登录页阶段非预期 (${preFormStage.stage})，仍尝试按登录表单流程走一次`
       );
     }
@@ -668,12 +723,21 @@ async function runShopLogin(context, account, options = {}) {
         "登录表单出现后等待页面跳转时"
       );
       if (authenticatedStage) {
-        await saveStorageState(context, paths);
+        await runStep(
+          4,
+          "保存跳转后的登录态",
+          "save-redirected-storage-state",
+          async () => {
+            await saveStorageState(context, paths);
+          },
+          {
+            meta: { stage: authenticatedStage.stage, reused: true }
+          }
+        );
         if (!options.loginOnly) {
           const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
           return { ok: true, reused: true, paths, ...extra };
         }
-        console.log(`[${tag}] 纯登录模式，跳过后续流程`);
         return { ok: true, reused: true, paths };
       }
     }
@@ -681,189 +745,281 @@ async function runShopLogin(context, account, options = {}) {
     // === Gate: 准备填表前再确认一次阶段 ===
     const beforeFillStage = (await detectStage(page)).stage;
     if (isAuthenticatedStage(beforeFillStage)) {
-      console.log(
-        `[${tag}] 填表前发现已登录 (stage=${beforeFillStage})，跳过填表/点击登录`
+      await runStep(
+        4,
+        "保存填表前登录态",
+        "save-before-fill-storage-state",
+        async () => {
+          await saveStorageState(context, paths);
+        },
+        {
+          meta: { stage: beforeFillStage, reused: true }
+        }
       );
-      await saveStorageState(context, paths);
       if (!options.loginOnly) {
         const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
         return { ok: true, reused: true, paths, ...extra };
       }
-      console.log(`[${tag}] 纯登录模式，跳过后续流程`);
       return { ok: true, reused: true, paths };
     }
 
     if (beforeFillStage === STAGES.LOGIN_FORM) {
-      console.log(`[${tag}] 切换到邮箱登录 tab`);
-      const switchResult = await switchToEmailTab(page);
+      let switchResult = null;
+      await runStep(
+        4,
+        "切换邮箱登录并填写账号密码",
+        "fill-login-form",
+        async () => {
+          switchResult = await switchToEmailTab(page);
+          if (switchResult.authenticatedStage) return;
+          const fillResult = await fillCredentials(page, email, password);
+          if (fillResult.authenticatedStage) {
+            switchResult = fillResult;
+            return;
+          }
+          await ensureAgreementChecked(page);
+        },
+        {
+          meta: { stage: beforeFillStage }
+        }
+      );
       if (switchResult.authenticatedStage) {
-        console.log(
-          `[${tag}] 切换邮箱登录前后发现已登录 (stage=${switchResult.authenticatedStage.stage})，跳过填表/点击登录`
+        await runStep(
+          5,
+          "保存填表中发现的登录态",
+          "save-fill-detected-storage-state",
+          async () => {
+            await saveStorageState(context, paths);
+          },
+          {
+            meta: { stage: switchResult.authenticatedStage.stage, reused: true }
+          }
         );
-        await saveStorageState(context, paths);
         if (!options.loginOnly) {
           const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
           return { ok: true, reused: true, paths, ...extra };
         }
-        console.log(`[${tag}] 纯登录模式，跳过后续流程`);
         return { ok: true, reused: true, paths };
       }
-
-      console.log(`[${tag}] 填写邮箱与密码`);
-      const fillResult = await fillCredentials(page, email, password);
-      if (fillResult.authenticatedStage) {
-        console.log(
-          `[${tag}] 填写邮箱密码前发现已登录 (stage=${fillResult.authenticatedStage.stage})，跳过点击登录`
-        );
-        await saveStorageState(context, paths);
-        if (!options.loginOnly) {
-          const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
-          return { ok: true, reused: true, paths, ...extra };
-        }
-        console.log(`[${tag}] 纯登录模式，跳过后续流程`);
-        return { ok: true, reused: true, paths };
-      }
-      await ensureAgreementChecked(page);
     } else if (beforeFillStage === STAGES.CAPTCHA) {
-      console.log(`[${tag}] 进入页面即遇滑块，直接跳到滑块处理阶段`);
     } else {
-      console.warn(
+      logWarn(
         `[${tag}] 未能识别为登录表单阶段 (${beforeFillStage})，仍按标准流程执行一次填表`
       );
-      const switchResult = await switchToEmailTab(page);
+      let switchResult = null;
+      await runStep(
+        4,
+        "兜底填写登录表单",
+        "fill-login-form-fallback",
+        async () => {
+          switchResult = await switchToEmailTab(page);
+          if (switchResult.authenticatedStage) return;
+          const fillResult = await fillCredentials(page, email, password);
+          if (fillResult.authenticatedStage) {
+            switchResult = fillResult;
+            return;
+          }
+          await ensureAgreementChecked(page);
+        },
+        {
+          meta: { stage: beforeFillStage }
+        }
+      );
       if (switchResult.authenticatedStage) {
-        console.log(
-          `[${tag}] 切换邮箱登录前后发现已登录 (stage=${switchResult.authenticatedStage.stage})，跳过填表/点击登录`
+        await runStep(
+          5,
+          "保存兜底填表中发现的登录态",
+          "save-fallback-fill-detected-storage-state",
+          async () => {
+            await saveStorageState(context, paths);
+          },
+          {
+            meta: { stage: switchResult.authenticatedStage.stage, reused: true }
+          }
         );
-        await saveStorageState(context, paths);
         if (!options.loginOnly) {
           const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
           return { ok: true, reused: true, paths, ...extra };
         }
-        console.log(`[${tag}] 纯登录模式，跳过后续流程`);
         return { ok: true, reused: true, paths };
       }
-      const fillResult = await fillCredentials(page, email, password);
-      if (fillResult.authenticatedStage) {
-        console.log(
-          `[${tag}] 填写邮箱密码前发现已登录 (stage=${fillResult.authenticatedStage.stage})，跳过点击登录`
-        );
-        await saveStorageState(context, paths);
-        if (!options.loginOnly) {
-          const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
-          return { ok: true, reused: true, paths, ...extra };
-        }
-        console.log(`[${tag}] 纯登录模式，跳过后续流程`);
-        return { ok: true, reused: true, paths };
-      }
-      await ensureAgreementChecked(page);
     }
 
     // === Gate: 点击登录按钮之前再确认一次 ===
     const beforeClickStage = (await detectStage(page)).stage;
     if (isAuthenticatedStage(beforeClickStage)) {
-      console.log(
-        `[${tag}] 点登录前发现已登录 (stage=${beforeClickStage})，跳过点击`
+      await runStep(
+        5,
+        "保存点击前登录态",
+        "save-before-click-storage-state",
+        async () => {
+          await saveStorageState(context, paths);
+        },
+        {
+          meta: { stage: beforeClickStage, reused: true }
+        }
       );
-      await saveStorageState(context, paths);
       if (!options.loginOnly) {
         const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
         return { ok: true, reused: true, paths, ...extra };
       }
-      console.log(`[${tag}] 纯登录模式，跳过后续流程`);
       return { ok: true, reused: true, paths };
     }
 
     if (beforeClickStage === STAGES.LOGIN_FORM) {
-      console.log(
-        `[${tag}] 表单就绪，耗时 ${Date.now() - t0}ms，点击登录按钮`
+      await runStep(
+        5,
+        "点击登录按钮",
+        "click-login-button",
+        async () => {
+          await clickLogin(page);
+        },
+        {
+          meta: { stage: beforeClickStage }
+        }
       );
-      await clickLogin(page);
     } else if (beforeClickStage === STAGES.CAPTCHA) {
-      console.log(`[${tag}] 已直接出现滑块，跳过点击登录`);
     } else {
-      console.warn(
+      logWarn(
         `[${tag}] 点登录前阶段异常 (${beforeClickStage})，仍尝试一次点击`
       );
-      await clickLogin(page);
+      await runStep(
+        5,
+        "兜底点击登录按钮",
+        "click-login-button-fallback",
+        async () => {
+          await clickLogin(page);
+        },
+        {
+          meta: { stage: beforeClickStage }
+        }
+      );
     }
 
     // 点击后：预期进入「滑块 / 选店 / 罗盘 / 工作台」任一阶段
-    console.log(`[${tag}] 检查点击登录后的页面阶段`);
-    const afterClickStage = await waitForStageWithActivity(
-      page,
-      [
-        STAGES.CAPTCHA,
-        STAGES.SHOP_PICKER,
-        STAGES.COMPASS_VIDEO,
-        STAGES.COMPASS_GRAPHIC,
-        STAGES.COMPASS_OTHER,
-        STAGES.FXG_WORKSPACE
-      ],
-      { timeoutMs: 3500, maxWaitMs: 90000, intervalMs: 180, tag }
+    let afterClickStage = null;
+    await runStep(
+      6,
+      "识别登录后验证阶段",
+      "detect-after-login-click-stage",
+      async () => {
+        afterClickStage = await waitForStageWithActivity(
+          page,
+          [
+            STAGES.CAPTCHA,
+            STAGES.SHOP_PICKER,
+            STAGES.COMPASS_VIDEO,
+            STAGES.COMPASS_GRAPHIC,
+            STAGES.COMPASS_OTHER,
+            STAGES.FXG_WORKSPACE
+          ],
+          { timeoutMs: 3500, maxWaitMs: 90000, intervalMs: 180, tag }
+        );
+      },
+      {
+        verify: async () => {
+          if (!afterClickStage?.stage) throw new Error("未能识别点击登录后的阶段");
+        },
+        meta: { stage: beforeClickStage }
+      }
     );
-    console.log(`[${tag}] 点击后阶段: ${afterClickStage.stage}`);
 
     let passed = true;
     if (isAuthenticatedStage(afterClickStage.stage)) {
-      console.log(`[${tag}] 已直接进入登录态，跳过滑块检测`);
     } else if (afterClickStage.stage === STAGES.CAPTCHA) {
-      passed = await solveCaptchaIfPresent(page, {
-        tag,
-        maxRetry: SLIDER_MAX_RETRY,
-        paths
+      await runStep(
+        7,
+        "处理登录滑块验证",
+        "solve-login-captcha",
+        async () => {
+          passed = await solveCaptchaIfPresent(page, {
+            tag,
+            maxRetry: SLIDER_MAX_RETRY,
+            paths
+          });
+        },
+        {
+          verify: async () => {
+            if (!passed) throw new Error("自动滑块验证失败");
+          },
+          meta: { stage: afterClickStage.stage }
+        }
+      ).catch((error) => {
+        logWarn(`[${tag}] 自动滑块步骤失败: ${error.message || error}`);
+        passed = false;
       });
     } else {
       // 兜底：也许滑块在稍后才出现；让原有 solver 去做 detection + solve
-      passed = await solveCaptchaIfPresent(page, {
-        tag,
-        maxRetry: SLIDER_MAX_RETRY,
-        paths
+      await runStep(
+        7,
+        "兜底检查登录滑块",
+        "solve-login-captcha-fallback",
+        async () => {
+          passed = await solveCaptchaIfPresent(page, {
+            tag,
+            maxRetry: SLIDER_MAX_RETRY,
+            paths
+          });
+        },
+        {
+          meta: { stage: afterClickStage.stage }
+        }
+      ).catch((error) => {
+        logWarn(`[${tag}] 兜底滑块步骤失败: ${error.message || error}`);
+        passed = false;
       });
     }
 
     if (!passed) {
-      console.warn(
+      logWarn(
         `[${tag}] 自动滑块失败。请在浏览器中手动完成，脚本将持续等待 ${Math.round(
           LOGIN_TIMEOUT_MS / 1000
         )}s`
       );
     }
 
-    const ok = await waitForLoginSettled(page, LOGIN_TIMEOUT_MS);
-    if (!ok) {
-      throw new Error(
-        `等待登录跳转超时（${Math.round(LOGIN_TIMEOUT_MS / 1000)}s）`
-      );
-    }
+    let ok = false;
+    await runStep(
+      8,
+      "等待登录落地",
+      "wait-login-settled",
+      async () => {
+        ok = await waitForLoginSettled(page, LOGIN_TIMEOUT_MS);
+      },
+      {
+        verify: async () => {
+          if (!ok) {
+            throw new Error(
+              `等待登录跳转超时（${Math.round(LOGIN_TIMEOUT_MS / 1000)}s）`
+            );
+          }
+        },
+        timeoutMs: Math.max(LOGIN_TIMEOUT_MS + 30000, LOGIN_TIMEOUT_MS),
+        meta: { stage: afterClickStage.stage }
+      }
+    );
 
-    console.log(`[${tag}] 登录成功，当前 URL: ${page.url()}`);
+    logMilestone(tag, `登录成功`);
 
-    await saveStorageState(context, paths);
-    console.log(
-      `[${tag}] 登录态已保存到 ${paths.storageStatePath}`
+    await runStep(
+      9,
+      "保存登录态",
+      "save-storage-state",
+      async () => {
+        await saveStorageState(context, paths);
+      },
+      {
+        meta: { reused: false }
+      }
     );
 
     if (!options.loginOnly) {
       const extra = await runPostLoginFlow(page, tag, paths, postLoginOptions);
       return { ok: true, reused: false, paths, ...extra };
     }
-    console.log(`[${tag}] 纯登录模式，跳过后续流程`);
     return { ok: true, reused: false, paths };
   } catch (error) {
-    // 保留一张失败截图便于排查
-    try {
-      const ts = new Date()
-        .toISOString()
-        .replace(/[:.]/g, "-")
-        .replace("T", "_")
-        .slice(0, 19);
-      const shot = path.join(paths.debugDir, `login-failed-${ts}.png`);
-      await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
-      console.error(`[${tag}] 失败截图: ${shot}`);
-    } catch {
-      // 忽略
-    }
+    await saveRunFailedArtifacts(page, email, debugOptions).catch(() => {});
     throw error;
   } finally {
     // 保留页面不关闭，方便人工接管；这里选择关闭以回收资源

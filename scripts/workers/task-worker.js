@@ -461,7 +461,7 @@ function classifyChildLogLine(line, fallbackLevel) {
 
   if (
     fallbackLevel === "error" &&
-    /(继续依赖导出文件日期校验|日期范围校验未通过|首屏存在范围外日期|未采集到投稿列表文本|^\[migration\])/.test(
+    /(继续依赖导出文件日期校验|日期范围校验未通过|首屏存在范围外日期|未采集到投稿列表文本|^\[migration\]|等待 DOM load 超时|^=+$|^\s*"domcontentloaded" event fired|^=+$)/.test(
       raw
     )
   ) {
@@ -877,7 +877,12 @@ async function startJob(job) {
   const command = job.command === "node" ? process.execPath : job.command;
   const child = spawn(command, Array.isArray(job.args) ? job.args : [], {
     cwd: job.cwd || projectRoot,
-    env: { ...process.env, ...(job.env || {}) },
+    env: {
+      ...process.env,
+      TASK_JOB_ID: job.taskId,
+      TASK_NAMESPACE: job.namespace || "system",
+      ...(job.env || {})
+    },
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32"
   });

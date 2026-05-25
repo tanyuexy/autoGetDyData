@@ -2,7 +2,7 @@ const path = require("path");
 const fse = require("fs-extra");
 
 const {
-  pickLatestSelectableCalendarDay,
+  pickCalendarDayByTargetDate,
   retryableDownload,
   retryableGoto
 } = require("./page-utils");
@@ -18,19 +18,22 @@ const GRAPHIC_URL =
   "https://compass.jinritemai.com/shop/graphic/graphic-analysis";
 const GRAPHIC_READY_TIMEOUT_MS = Number(process.env.SHOP_GRAPHIC_READY_TIMEOUT_MS || 60000);
 
-function logStep(tag, msg, started) {
-  const dur = started ? ` (+${Date.now() - started}ms)` : "";
-  console.log(`[${tag}] ${msg}${dur}`);
-}
+const { logInfo, logWarn: logWarnLine, buildShopStepMeta } = require("./shop-log");
+
+function logStep() {}
 
 function logWarn(tag, msg) {
-  console.warn(`[${tag}] ${msg}`);
+  logWarnLine(`[${tag}] ${msg}`);
+}
+
+function logSaved(tag, savePath) {
+  logInfo(`[${tag}] 已保存 ${path.basename(savePath)}`);
 }
 
 /**
  * 图文分析页：在已展开的自然日面板中点击日历「最新可选日 - dayOffset」。
  */
-async function pickLatestInGraphicCalendar(page, tag, dayOffset = 0) {
+async function pickTargetInGraphicCalendar(page, tag, targetDate) {
   const started = Date.now();
   const rightPanel = page
     .locator(
@@ -43,30 +46,32 @@ async function pickLatestInGraphicCalendar(page, tag, dayOffset = 0) {
     ? rightPanel
     : page;
 
-  const pickResult = await pickLatestSelectableCalendarDay(page, scope, dayOffset);
+  const pickResult = await pickCalendarDayByTargetDate(page, scope, targetDate);
   const clicked = Boolean(pickResult.ok);
   const dataDate = pickResult.dataDate || null;
   if (clicked) {
-    logStep(tag, `图文页已选择日历第${dayOffset + 1}个可选自然日`, started);
+    logStep(tag, `图文页已选择自然日 ${targetDate}`, started);
     if (dataDate) {
       logStep(tag, `解析到的数据日期: ${dataDate}`, started);
     }
+  } else if (pickResult.reason === "disabled") {
+    logWarn(tag, `目标日期 ${targetDate} 在日历中不可选（数据可能未产出）`);
   } else {
-    logWarn(tag, "图文页日历中未找到可点击的日期格");
+    logWarn(tag, `图文页日历中未能选中目标日期 ${targetDate}`);
   }
 
   await page.waitForTimeout(400);
   await page.keyboard.press("Escape").catch(() => {});
   await page.mouse.move(10, 10).catch(() => {});
   await page.waitForTimeout(300);
-  return { ok: clicked, dataDate };
+  return { ok: clicked, dataDate, reason: pickResult.reason || null };
 }
 
 /**
  * 图文分析页：直接点顶部「自然日」触发器，弹层内确认「自然日」后，
  * 在日历中选第 (dayOffset+1) 个可选日期。
  */
-async function selectGraphicNaturalDayYesterday(page, tag, dayOffset = 0) {
+async function selectGraphicNaturalDayYesterday(page, tag, targetDate) {
   const started = Date.now();
   const nat = page
     .locator(
@@ -111,8 +116,8 @@ async function selectGraphicNaturalDayYesterday(page, tag, dayOffset = 0) {
     }
   }
 
-  const picked = await pickLatestInGraphicCalendar(page, tag, dayOffset);
-  logStep(tag, `selectGraphicNaturalDayYesterday(offset=${dayOffset}) ${picked.ok ? "完成" : "可能未点到"}`, started);
+  const picked = await pickTargetInGraphicCalendar(page, tag, targetDate);
+  logStep(tag, `selectGraphicNaturalDayYesterday(${targetDate}) ${picked.ok ? "完成" : "可能未点到"}`, started);
   return picked;
 }
 
@@ -208,7 +213,7 @@ async function clickGraphicDownloadAndSave(page, tag, saveDir, options = {}) {
   const savePath = path.join(saveDir, `${batchPrefix}${ts}-图文明细-${safeName}`);
 
   await download.saveAs(savePath);
-  logStep(tag, `图文明细已保存: ${savePath}`, started);
+  logSaved(tag, savePath);
   return savePath;
 }
 
@@ -220,6 +225,18 @@ function calcDataDate(dayOffset) {
   const mo = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}/${mo}/${day}`;
+}
+
+function buildTargetDateSet(targetDates) {
+  if (!Array.isArray(targetDates) || targetDates.length === 0) return null;
+  const values = new Set();
+  for (const item of targetDates) {
+    const raw = String(item || "").trim();
+    if (!raw) continue;
+    values.add(raw);
+    values.add(raw.replace(/-/g, "/"));
+  }
+  return values.size > 0 ? values : null;
 }
 
 /**
@@ -237,19 +254,69 @@ async function downloadGraphicDetail(page, {
   exportBatchId = null,
   accountEmail = "",
   targetDates = null,
-  targetKinds = null
+  targetKinds = null,
+  stepRunner = null,
+  stepIndexBase = 200,
+  shopIndex = null,
+  shopTotal = null
 }) {
   const startedAll = Date.now();
   logStep(tag, `图文明细下载开始，店铺: ${shopName || "(未指定)"}，循环天数: ${daysToExport}`);
 
-  const dateSet = Array.isArray(targetDates) && targetDates.length > 0 ? new Set(targetDates) : null;
+  const dateSet = buildTargetDateSet(targetDates);
   const kindSet = Array.isArray(targetKinds) && targetKinds.length > 0 ? new Set(targetKinds) : null;
+  const runStep = stepRunner?.runStep;
+  const stepMeta = (fields = {}) =>
+    buildShopStepMeta({
+      shopName,
+      kind: "graphic",
+      shopIndex,
+      shopTotal,
+      daysToExport,
+      ...fields
+    });
+  const withStep = async (index, title, stepTag, action, verifyOrOptions, maybeOptions) => {
+    if (typeof runStep === "function") {
+      return await runStep(index, title, stepTag, action, verifyOrOptions, maybeOptions);
+    }
+    if (typeof action === "function") await action();
+    const verify = verifyOrOptions && typeof verifyOrOptions === "object"
+      ? verifyOrOptions.verify
+      : verifyOrOptions;
+    if (typeof verify === "function") await verify();
+  };
+
   if (kindSet && !kindSet.has("graphic")) {
     logStep(tag, "补跑目标不包含图文，跳过图文明细下载");
+    await withStep(
+      stepIndexBase,
+      "跳过图文明细下载",
+      "graphic-skipped-by-target-kind",
+      null,
+      {
+        skipped: true,
+        skipReason: "补跑目标不包含 graphic",
+        meta: stepMeta()
+      }
+    );
     return { savePath: null, dataDate: null, allResults: [], failures: [], targetCount: 0 };
   }
 
-  await gotoGraphic(page, tag);
+  await withStep(
+    stepIndexBase,
+    "进入图文分析页",
+    "graphic-open-page",
+    async () => {
+      await gotoGraphic(page, tag);
+    },
+    {
+      verify: async () => {
+        const ok = await waitForGraphicPageReady(page, tag, 10000);
+        if (!ok) throw new Error("图文分析页主体未就绪");
+      },
+      meta: stepMeta()
+    }
+  );
 
   const results = [];
   let targetCount = 0;
@@ -260,11 +327,63 @@ async function downloadGraphicDetail(page, {
     const expectedDate = calcDataDate(offset);
     if (dateSet && !dateSet.has(expectedDate)) {
       logStep(tag, `跳过非补跑目标日期: ${expectedDate}`);
+      await withStep(
+        stepIndexBase + 1 + offset * 3,
+        "跳过图文非目标日期",
+        `graphic-skip-date-${offset + 1}`,
+        null,
+        {
+          skipped: true,
+          skipReason: `非补跑目标日期: ${expectedDate}`,
+          meta: stepMeta({ dataDate: expectedDate, offset })
+        }
+      );
       continue;
     }
     targetCount += 1;
 
-    const { ok: datePicked, dataDate } = await selectGraphicNaturalDayYesterday(page, tag, offset);
+    let datePicked = false;
+    let dataDate = null;
+    let pickReason = null;
+    await withStep(
+      stepIndexBase + 1 + offset * 3,
+      "选择图文自然日",
+      `graphic-select-date-${offset + 1}`,
+      async () => {
+        const selected = await selectGraphicNaturalDayYesterday(page, tag, expectedDate);
+        datePicked = Boolean(selected.ok);
+        dataDate = selected.dataDate || null;
+        pickReason = selected.reason || null;
+      },
+      {
+        verify: async () => {
+          if (!datePicked || !dataDate) {
+            if (pickReason === "disabled") {
+              throw new Error(`目标日期 ${expectedDate} 在日历中不可选（数据可能未产出）`);
+            }
+            throw new Error(`未能选择或解析日期，预期 ${expectedDate}`);
+          }
+          if (dataDate !== expectedDate) {
+            throw new Error(`日历选中 ${dataDate} ≠ 预期 ${expectedDate}`);
+          }
+        },
+        meta: stepMeta({ dataDate: expectedDate, offset })
+      }
+    ).catch(async (error) => {
+      const msg = error?.message || String(error);
+      await markFailed({
+        runId: exportBatchId,
+        accountEmail,
+        shopName: shopName || "unknown",
+        kind: "graphic",
+        dataDate: expectedDate,
+        expectedDate
+      }, msg);
+      results.push({ savePath: null, dataDate: dataDate || null, expectedDate, dateMatch: false, error: msg });
+    });
+    if (results.some((r) => r.expectedDate === expectedDate && r.dateMatch === false && !r.savePath)) {
+      continue;
+    }
     const item = {
       runId: exportBatchId,
       accountEmail,
@@ -274,21 +393,7 @@ async function downloadGraphicDetail(page, {
       expectedDate
     };
     await markRunning(item);
-    const dateMatch = datePicked && dataDate === expectedDate;
-    if (!datePicked || !dataDate) {
-      const error = `图文日期选择失败：未能选择或解析日期，预期 ${expectedDate} (offset=${offset})`;
-      logWarn(tag, error);
-      await markFailed(item, error);
-      results.push({ savePath: null, dataDate: dataDate || null, expectedDate, dateMatch: false, error });
-      continue;
-    }
-    if (!dateMatch) {
-      const error = `图文日期选择不符：日历选中 ${dataDate} ≠ 预期 ${expectedDate} (offset=${offset})`;
-      logWarn(tag, error);
-      await markFailed(item, error);
-      results.push({ savePath: null, dataDate, expectedDate, dateMatch: false, error });
-      continue;
-    }
+    const dateMatch = true;
 
     await page.waitForTimeout(1200);
 
@@ -297,25 +402,60 @@ async function downloadGraphicDetail(page, {
       : saveDir;
     let savePath;
     try {
-      savePath = await clickGraphicDownloadAndSave(page, tag, targetDir, {
-        exportBatchId
-      });
+      await withStep(
+        stepIndexBase + 2 + offset * 3,
+        "下载图文明细文件",
+        `graphic-download-file-${offset + 1}`,
+        async () => {
+          savePath = await clickGraphicDownloadAndSave(page, tag, targetDir, {
+            exportBatchId
+          });
+        },
+        {
+          verify: async () => {
+            if (!savePath) throw new Error("图文明细未返回保存路径");
+            const stat = await fse.stat(savePath).catch(() => null);
+            if (!stat || stat.size <= 0) {
+              throw new Error(`图文明细文件不存在或为空: ${savePath}`);
+            }
+          },
+          meta: stepMeta({ dataDate: expectedDate, offset })
+        }
+      );
     } catch (error) {
       const msg = error?.message || String(error);
-      logWarn(tag, `图文明细下载失败: ${msg}`);
       await markFailed(item, msg);
       results.push({ savePath: null, dataDate: expectedDate, expectedDate, dateMatch: false, error: msg });
       continue;
     }
 
     const dateToWrite = expectedDate;
-    try {
-      appendDataDateColumn(savePath, dateToWrite);
-      logStep(tag, `图文数据日期写入: ${dateToWrite}`);
-    } catch (e) {
-      logWarn(tag, `写入「数据日期」列失败: ${e.message || e}`);
+    await withStep(
+      stepIndexBase + 3 + offset * 3,
+      "写入图文数据日期",
+      `graphic-write-data-date-${offset + 1}`,
+      async () => {
+        appendDataDateColumn(savePath, dateToWrite);
+        logStep(tag, `图文数据日期写入: ${dateToWrite}`);
+        await markSuccess(item, savePath);
+      },
+      {
+        verify: async () => {
+          const stat = await fse.stat(savePath).catch(() => null);
+          if (!stat || stat.size <= 0) {
+            throw new Error(`图文明细文件写入后不可用: ${savePath}`);
+          }
+        },
+        meta: stepMeta({ dataDate: expectedDate, offset })
+      }
+    ).catch(async (e) => {
+      const msg = e?.message || String(e);
+      await markFailed(item, msg);
+      results.push({ savePath: null, dataDate: expectedDate, expectedDate, dateMatch: false, error: msg });
+    });
+    if (results.some((r) => r.expectedDate === expectedDate && r.dateMatch === false && !r.savePath)) {
+      continue;
     }
-    await markSuccess(item, savePath);
 
     results.push({ savePath, dataDate: dateToWrite, dateMatch });
 

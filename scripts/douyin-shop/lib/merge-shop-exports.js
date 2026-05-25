@@ -409,6 +409,8 @@ async function collectShopRows(dataRoot, shopName, options = {}) {
 
   processLatestFiles(latestVideoFiles, pushVideoRows, "视频", videoDates);
   processLatestFiles(latestGraphicFiles, pushGraphicRows, "图文", graphicDates);
+  for (const date of videoDates) collectedDates.add(date);
+  for (const date of graphicDates) collectedDates.add(date);
 
   // 按(作品名, 日期, 成交类型)去重，保留第一条
   const deduped = [];

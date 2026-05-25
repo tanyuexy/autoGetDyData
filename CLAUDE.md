@@ -21,7 +21,7 @@ npx tsc --noEmit     # TypeScript type check
 - `creator:publish-video` / `creator:publish-article` — publish content
 - `creator:open` — open browser to creator center (interactive)
 - `creator:review` — scrape review/audit status of published posts
-- `shop:export` / `shop:login` / `shop:sync-feishu` / `shop:retry-failed` — shop equivalents
+- `shop:export` / `shop:login` / `shop:sync-feishu` — shop equivalents
 
 ## Architecture
 
