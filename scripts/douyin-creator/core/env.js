@@ -49,7 +49,7 @@ const LOGIN_WAIT_TIMEOUT_MS = millisecondsFromEnvSecOrMs(
 const LOGIN_REMIND_INTERVAL_MS = millisecondsFromEnvSecOrMs(
   "LOGIN_REMIND_INTERVAL_SEC",
   "LOGIN_REMIND_INTERVAL_MS",
-  60
+  45
 );
 const OTP_EMAIL_POLL_INTERVAL_MS = millisecondsFromEnvSecOrMs(
   "OTP_EMAIL_POLL_INTERVAL_SEC",

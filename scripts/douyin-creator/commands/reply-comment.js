@@ -10,6 +10,7 @@ const { chromium } = require("../../common/stealth-browser");
 const { getAccountPaths } = require("../core/accounts");
 const { BROWSER_VIEWPORT, HEADLESS } = require("../core/env");
 const { openTargetAndEnsureLogin } = require("../core/browser-login");
+const { ensureQrSnifferAttached } = require("../core/qr");
 
 const COMMENT_PAGE_URL = "https://creator.douyin.com/creator-micro/interactive/comment";
 
@@ -74,6 +75,7 @@ async function replyCommentForAccount(browser, accountName, awemeId, text, reply
 
   try {
     page = await context.newPage();
+    ensureQrSnifferAttached(page);
     console.log(`\n[reply] 开始处理账号: ${accountName} (${replyToCid ? "回复评论" : "店铺评论"})`);
 
     await openTargetAndEnsureLogin(page, paths, accountName, {

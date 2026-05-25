@@ -5,13 +5,21 @@ const {
   LOGIN_REMIND_INTERVAL_MS
 } = require("./env");
 const { sendAlertEmail } = require("./notification");
-const { captureLoginQrScreenshot, hasVisibleQr } = require("./qr");
+const {
+  captureLoginQrScreenshot,
+  hasVisibleQr,
+  trackLoginQrVisibility
+} = require("./qr");
 const {
   isReceiveOtpPanelVisible,
   handleReceiveSmsCodeIfPresent,
   readReceiveOtpInfoFromPage
 } = require("./verification");
-const { loginStageHintByAccount } = require("./state");
+const {
+  loginStageHintByAccount,
+  lastPushedLoginQrFingerprintByAccount,
+  loginQrFirstSeenAtByAccount
+} = require("./state");
 
 async function isLoggedInAtTarget(page) {
   const url = page.url() || "";
@@ -128,6 +136,12 @@ async function notifyLoginRequired(page, paths, accountName, reason) {
     paths,
     accountName
   );
+  if (!screenshotPath) {
+    console.warn(
+      `账号 [${accountName}] 未能捕获有效登录二维码，跳过扫码提醒推送。`
+    );
+    return;
+  }
   await sendAlertEmail({ accountName, screenshotPath, reason }).catch((error) => {
     console.error(`账号 [${accountName}] 邮件发送失败:`, error.message || error);
   });
@@ -193,6 +207,10 @@ async function waitForManualLoginFlow(
         await onLoggedIn(page);
       }
       return;
+    }
+
+    if (step === "qr_login") {
+      await trackLoginQrVisibility(page, accountName);
     }
 
     if (step === "identity_verify" || step === "receive_sms_code_panel") {
@@ -270,6 +288,8 @@ async function openTargetAndEnsureLogin(page, paths, accountName, options) {
       await saveAuth(context, paths, accountName, {
         verifiedDetail: "登录流程中验证通过"
       });
+      lastPushedLoginQrFingerprintByAccount.delete(accountName);
+      loginQrFirstSeenAtByAccount.delete(accountName);
       trySaveAuth._done = true;
     } catch (error) {
       console.warn(

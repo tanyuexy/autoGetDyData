@@ -13,6 +13,7 @@ const fse = require("fs-extra");
 const { getAccountPaths } = require("../core/accounts");
 const { BROWSER_VIEWPORT, HEADLESS } = require("../core/env");
 const { openTargetAndEnsureLogin } = require("../core/browser-login");
+const { ensureQrSnifferAttached } = require("../core/qr");
 const { postInternalApi } = require("../../common/internal-api-client");
 
 const COMMENT_TARGET_URL = "https://creator.douyin.com/creator-micro/interactive/comment";
@@ -30,6 +31,7 @@ async function fetchCommentsForAccount(browser, accountName, maxWorks) {
 
   try {
     page = await context.newPage();
+    ensureQrSnifferAttached(page);
     console.log(`\n[comment] 开始处理账号: ${accountName}`);
 
     await openTargetAndEnsureLogin(page, paths, accountName, {

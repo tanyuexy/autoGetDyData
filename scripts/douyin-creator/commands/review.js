@@ -14,6 +14,7 @@ const fse = require("fs-extra");
 const { getAccountPaths } = require("../core/accounts");
 const { BROWSER_VIEWPORT, HEADLESS } = require("../core/env");
 const { openTargetAndEnsureLogin } = require("../core/browser-login");
+const { ensureQrSnifferAttached } = require("../core/qr");
 const { setPostListDateRange } = require("../export/exporter");
 
 const CONTENT_PAGE_URL = "https://creator.douyin.com/creator-micro/data-center/content";
@@ -383,6 +384,7 @@ async function scrapeReviewForAccount(browser, accountName) {
 
   try {
     page = await context.newPage();
+    ensureQrSnifferAttached(page);
     console.log(`\n[review] 开始处理账号: ${accountName}`);
 
     await openTargetAndEnsureLogin(page, paths, accountName, {
