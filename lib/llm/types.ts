@@ -64,4 +64,4 @@ export interface StructuredResult<T extends JsonValue = JsonValue> {
   };
 }
 
-export type LlmProvider = "siliconflow" | "deepseek";
+export type LlmProvider = "siliconflow" | "deepseek" | "minimax";

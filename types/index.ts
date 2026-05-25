@@ -26,7 +26,7 @@ export interface FeishuTokenStatus {
   hasToken: boolean;
 }
 
-export type FeishuAiProvider = "siliconflow" | "deepseek";
+export type FeishuAiProvider = "siliconflow" | "deepseek" | "minimax";
 
 export interface ConfigData {
   accounts: string[];

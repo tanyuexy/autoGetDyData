@@ -5,13 +5,18 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { MongoClient } from "mongodb";
 import { readBitable } from "./core/readBitable";
-import { downloadAttachment, updateBitableRecord } from "./core/bitable";
+import { updateBitableRecord } from "./core/bitable";
+import {
+  downloadFeishuAttachmentCached,
+  localMaterialFileKeysExist,
+} from "./attachment-download-cache";
 import { loadFeishuBitableConfigForProfile } from "./core/config";
 import { getValidAccessToken } from "./core/oauth";
 import {
   formatFeishuScheduleFailureStatus,
   validateScheduleAt,
 } from "@/lib/publishScheduleValidation";
+import { normalizeDescriptionForPublish } from "@/lib/publishDescription";
 
 dotenv.config({ quiet: true });
 
@@ -26,19 +31,6 @@ function ensureDir(dir) {
 
 function generateTaskId() {
   return crypto.randomBytes(8).toString("hex");
-}
-
-function makeUniqueFileName(originalName, dir) {
-  const ext = path.extname(originalName);
-  const base = path.basename(originalName, ext);
-  const candidates = new Set(fse.existsSync(dir) ? fse.readdirSync(dir) : []);
-  let name = originalName;
-  let i = 1;
-  while (candidates.has(name)) {
-    name = `${base}-${i}${ext}`;
-    i++;
-  }
-  return name;
 }
 
 async function getMongoDb() {
@@ -88,66 +80,6 @@ async function loadExistingTasksByFeishuRecordId(db) {
       .filter((doc) => doc && doc.feishuRecordId)
       .map((doc) => [doc.feishuRecordId, doc])
   );
-}
-
-const MAX_RECOGNIZED_HASHTAG_LENGTH = 10;
-
-function cleanHashtag(tag) {
-  return String(tag || "").replace(/\s+/g, "").trim();
-}
-
-function getHashtagLength(tag) {
-  return Array.from(tag).length;
-}
-
-/** 去掉 # 与标签名之间的空白，便于识别 `# 好物` 这类写法 */
-function stripSpacesAfterHash(text) {
-  return String(text || "").replace(/#(\s+)/g, "#");
-}
-
-/**
- * 与 scripts/douyin-creator/publish/editor.js 的 splitDescription 保持一致。
- * 从正文中提取 #话题，短话题（≤10字）从正文移除，长话题保留在正文中。
- */
-function splitDescription(text) {
-  const hashtags = [];
-  const plainHashtags = [];
-
-  let body = stripSpacesAfterHash(text)
-    .replace(/#([^\s#]+)/g, (_matched, rawTag) => {
-      const tag = cleanHashtag(rawTag);
-      if (!tag) return "";
-
-      if (getHashtagLength(tag) > MAX_RECOGNIZED_HASHTAG_LENGTH) {
-        if (!plainHashtags.includes(tag)) {
-          plainHashtags.push(tag);
-        }
-        return rawTag.trim();
-      }
-
-      if (!hashtags.includes(tag)) {
-        hashtags.push(tag);
-      }
-      return "";
-    })
-    .replace(/(^|\s)#(?=\s|$)/g, " ")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
-
-  if (!body && hashtags.length === 0 && plainHashtags.length === 0) {
-    body = String(text || "").trim();
-  }
-
-  return { body, hashtags, plainHashtags };
-}
-
-function normalizeDescriptionForPublish(text) {
-  const { body, hashtags } = splitDescription(text);
-  const topicText = hashtags.map((tag) => `#${tag}`).join(" ");
-  const normalizedText = [body, topicText].filter(Boolean).join("\n\n");
-  return { body, hashtags, normalizedText };
 }
 
 function inferType(attachments) {
@@ -338,19 +270,6 @@ function taskMaterialFileNames(task) {
   return [];
 }
 
-function snapshotAttachmentNames(snapshot) {
-  return normalizeAttachmentSignature(snapshot.attachments)
-    .map((att) => String(att.name || "").trim())
-    .filter(Boolean);
-}
-
-function materialNamesMatch(existingTask, snapshot) {
-  const currentNames = taskMaterialFileNames(existingTask);
-  const nextNames = snapshotAttachmentNames(snapshot);
-  if (currentNames.length !== nextNames.length) return false;
-  return currentNames.every((name, index) => name === nextNames[index]);
-}
-
 function getExistingTaskSyncState(existingTask, snapshot, contentHash) {
   if (!existingTask) return { action: "create" };
   if (existingTask.status === "running") return { action: "skip-running" };
@@ -361,7 +280,10 @@ function getExistingTaskSyncState(existingTask, snapshot, contentHash) {
 
   if (taskContentHash === snapshotContentHash) {
     if (existingTask.feishuContentHash === contentHash) {
-      if (existingTask.status === "failed" && !materialNamesMatch(existingTask, snapshot)) {
+      if (
+        existingTask.status === "failed" &&
+        !localMaterialFileKeysExist(taskMaterialFileNames(existingTask))
+      ) {
         return { action: "update" };
       }
       return { action: "skip-unchanged" };
@@ -863,15 +785,14 @@ async function syncPublishTasks(options = {}) {
         const downloaded = [];
         for (const att of snapshot.attachments) {
           if (!att.file_token) continue;
-          log(`    下载附件: ${att.name} (${(att.size / 1024).toFixed(0)} KB)`);
-          const uniqueName = makeUniqueFileName(att.name, MATERIALS_DIR);
-          const result = await downloadAttachment(
-            feishuCfg,
+          const sizeKb = att.size ? `${(att.size / 1024).toFixed(0)} KB` : "-";
+          log(`    准备素材: ${att.name} (${sizeKb})`);
+          const result = await downloadFeishuAttachmentCached({
+            config: feishuCfg,
             accessToken,
-            att.file_token,
-            MATERIALS_DIR,
-            uniqueName
-          );
+            attachment: att,
+            log: (message) => log(`    ${message}`),
+          });
           downloaded.push(result.fileName);
         }
 

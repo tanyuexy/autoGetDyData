@@ -8,13 +8,13 @@ import type { LlmProvider } from "@/lib/llm";
 export const maxDuration = 0;
 
 function isValidProvider(value: unknown): value is LlmProvider {
-  return value === "siliconflow" || value === "deepseek";
+  return value === "siliconflow" || value === "deepseek" || value === "minimax";
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({} as any));
-    const provider = isValidProvider(body?.provider) ? body.provider : "siliconflow";
+    const provider = isValidProvider(body?.provider) ? body.provider : "minimax";
 
     if (!(await canStartTask("creator-publish"))) {
       return NextResponse.json(

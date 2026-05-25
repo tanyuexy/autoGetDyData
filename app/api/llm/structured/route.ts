@@ -25,7 +25,7 @@ function isValidRole(value: unknown): value is LlmMessage["role"] {
 }
 
 function isValidProvider(value: unknown): value is LlmProvider {
-  return value === "siliconflow" || value === "deepseek";
+  return value === "siliconflow" || value === "deepseek" || value === "minimax";
 }
 
 function normalizeMessages(input: unknown): LlmMessage[] {
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json().catch(() => ({}))) as StructuredRequestBody;
 
-    const provider = body.provider || "siliconflow";
+    const provider = body.provider || "minimax";
     if (!isValidProvider(provider)) {
       return NextResponse.json({ error: "invalid provider" }, { status: 400 });
     }

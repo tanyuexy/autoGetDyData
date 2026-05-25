@@ -158,7 +158,7 @@ export async function runFeishuPublishImportPipeline(options: {
 }
 
 export async function generateFeishuTaskAiContent(options: {
-  provider?: "siliconflow" | "deepseek";
+  provider?: import("@/types").FeishuAiProvider;
   maxConcurrent?: number;
   recordIds?: string[];
   logger?: (...args: unknown[]) => void;

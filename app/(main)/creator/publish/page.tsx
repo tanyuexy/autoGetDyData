@@ -215,7 +215,7 @@ export default function CreatorPublishPage() {
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [feishuAiProvider, setFeishuAiProvider] = useState<FeishuAiProvider>("siliconflow");
+  const [feishuAiProvider, setFeishuAiProvider] = useState<FeishuAiProvider>("minimax");
   const [generatingFeishuAi, setGeneratingFeishuAi] = useState(false);
 
   const [type, setType] = useState<TaskType>("video");
@@ -260,7 +260,7 @@ export default function CreatorPublishPage() {
           normalizeFeishuAiProvider(cfg.creatorPublish?.feishuAiProvider)
         );
       } catch {
-        /* 保持默认 siliconflow */
+        /* 保持默认 minimax */
       }
     })();
     return () => {

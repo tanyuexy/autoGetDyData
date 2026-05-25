@@ -29,7 +29,7 @@ const DEFAULT_CREATOR_PUBLISH_CONFIG: CreatorPublishConfig = {
   publishEnabled: true,
   publishWaitSec: 3,
   publishMaxConcurrent: PUBLISH_MAX_CONCURRENT_DEFAULT,
-  feishuAiProvider: "siliconflow",
+  feishuAiProvider: "minimax",
   feishuAiContentMaxConcurrent: FEISHU_AI_CONTENT_MAX_CONCURRENT_DEFAULT,
   automation: {
     enabled: false,
@@ -485,7 +485,7 @@ export default function ConfigPage() {
                     </Typography.Text>
                   </Space>
                   <Select
-                    value={publishConfig.feishuAiProvider ?? "siliconflow"}
+                    value={publishConfig.feishuAiProvider ?? "minimax"}
                     onChange={(value) =>
                       autoSave({
                         creatorPublish: {

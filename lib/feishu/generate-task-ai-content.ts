@@ -1,10 +1,18 @@
 import type { LlmProvider, JsonValue } from "@/lib/llm";
 import { callStructuredLlm } from "@/lib/llm";
+import { bufferToImageDataUrl, understandMiniMaxImage } from "@/lib/llm/minimax-vision";
 import { normalizeFeishuAiContentMaxConcurrent } from "@/lib/feishuAiContentConcurrency";
 import { readBitable } from "@/lib/feishu/core/readBitable";
 import { loadFeishuBitableConfigForProfile } from "@/lib/feishu/core/config";
 import { getValidAccessToken } from "@/lib/feishu/core/oauth";
 import { updateBitableRecord } from "@/lib/feishu/core/bitable";
+import { downloadFeishuAttachmentCached } from "@/lib/feishu/attachment-download-cache";
+import {
+  FEISHU_AI_CONTENT_FORMAT_HINT,
+  validateFeishuAiGeneratedContent,
+} from "@/lib/publishDescription";
+import path from "node:path";
+import fse from "fs-extra";
 
 type FeishuRecord = {
   record_id?: string;
@@ -19,6 +27,14 @@ type TaskCandidate = {
   productRecordIds: string[];
   title: string;
   rowLabel: string;
+  attachments: FeishuAttachment[];
+};
+
+type FeishuAttachment = {
+  fileToken: string;
+  name: string;
+  type: string;
+  size: number;
 };
 
 type ProductInfo = {
@@ -33,6 +49,19 @@ const AI_CONTENT_TIMEOUT_MS = (() => {
   const raw = Number(process.env.FEISHU_AI_CONTENT_TIMEOUT_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : 180_000;
 })();
+
+const AI_IMAGE_MAX_COUNT = (() => {
+  const raw = Number(process.env.FEISHU_AI_MAX_IMAGES);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(Math.round(raw), 20) : 1;
+})();
+
+const AI_CONTENT_MAX_RETRIES = (() => {
+  const raw = Number(process.env.FEISHU_AI_CONTENT_MAX_RETRIES);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(Math.round(raw), 5) : 3;
+})();
+
+const IMAGE_MATERIAL_ANALYSIS_PROMPT =
+  "请详细描述这张抖音图文素材图片，供撰写发布正文参考：可见的产品/包装、文字信息、场景、人物动作、色调氛围、卖点线索。只描述能看清的内容，不要编造。";
 
 type ProductIndexes = {
   byRecordId: Map<string, ProductInfo>;
@@ -91,6 +120,49 @@ function compositeKey(shopName: string, productName: string): string {
   return `${normalizeKey(shopName)}::${normalizeKey(productName)}`;
 }
 
+function parseFeishuAttachments(value: unknown): FeishuAttachment[] {
+  if (!Array.isArray(value)) return [];
+
+  const attachments: FeishuAttachment[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const fileToken = String(obj.file_token || obj.fileToken || "").trim();
+    if (!fileToken) continue;
+    attachments.push({
+      fileToken,
+      name: String(obj.name || fileToken).trim(),
+      type: String(obj.type || "").trim(),
+      size: Number(obj.size || 0),
+    });
+  }
+  return attachments;
+}
+
+function isImageAttachment(att: FeishuAttachment): boolean {
+  const mime = att.type.toLowerCase();
+  if (mime.startsWith("image/")) return true;
+  const ext = path.extname(att.name).toLowerCase();
+  return [".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(ext);
+}
+
+function isVideoAttachment(att: FeishuAttachment): boolean {
+  const mime = att.type.toLowerCase();
+  if (mime.startsWith("video/")) return true;
+  const ext = path.extname(att.name).toLowerCase();
+  return [".mp4", ".mov", ".webm", ".avi", ".mkv"].includes(ext);
+}
+
+function shouldAnalyzeImageMaterials(attachments: FeishuAttachment[]): boolean {
+  const images = attachments.filter(isImageAttachment);
+  if (images.length === 0) return false;
+  return !attachments.some(isVideoAttachment);
+}
+
+function selectImagesForAnalysis(attachments: FeishuAttachment[]): FeishuAttachment[] {
+  return attachments.filter(isImageAttachment).slice(0, AI_IMAGE_MAX_COUNT);
+}
+
 function parseTaskRecord(record: FeishuRecord): TaskCandidate | null {
   const fields = record.fields || {};
   const recordId = String(record.record_id || "").trim();
@@ -111,7 +183,15 @@ function parseTaskRecord(record: FeishuRecord): TaskCandidate | null {
   const title = normalizeText(fields["标题（可为空）"]);
   const rowLabel = [shopName, productText, title].filter(Boolean).join(" | ") || recordId;
 
-  return { recordId, shopName, productText, productRecordIds, title, rowLabel };
+  return {
+    recordId,
+    shopName,
+    productText,
+    productRecordIds,
+    title,
+    rowLabel,
+    attachments: parseFeishuAttachments(fields["视频/图文内容"]),
+  };
 }
 
 function parseProductRecord(record: FeishuRecord): ProductInfo | null {
@@ -178,19 +258,107 @@ function resolveModelName(provider: LlmProvider): string {
   if (provider === "deepseek") {
     return process.env.DEEPSEEK_MODEL?.trim() || "(未设置 DEEPSEEK_MODEL)";
   }
+  if (provider === "minimax") {
+    return process.env.MINIMAX_MODEL?.trim() || "MiniMax-M2.7";
+  }
   return process.env.SILICONFLOW_MODEL?.trim() || "(未设置 SILICONFLOW_MODEL)";
 }
 
-async function generateContent(
-  provider: LlmProvider,
-  task: TaskCandidate,
-  product: ProductInfo,
-  log: (...args: unknown[]) => void
-): Promise<string> {
-  const model = resolveModelName(provider);
-  log(`    [AI] 厂商=${provider}，模型=${model}`);
-  log(`    [AI] 提示词: ${product.copyPrompt.slice(0, 120)}${product.copyPrompt.length > 120 ? "..." : ""}`);
+async function buildImageMaterialContext(options: {
+  attachments: FeishuAttachment[];
+  taskCfg: ReturnType<typeof loadFeishuBitableConfigForProfile>;
+  accessToken: string;
+  log: (...args: unknown[]) => void;
+}): Promise<string> {
+  if (!shouldAnalyzeImageMaterials(options.attachments)) return "";
 
+  const allImages = options.attachments.filter(isImageAttachment);
+  const images = selectImagesForAnalysis(options.attachments);
+  if (images.length === 0) return "";
+
+  if (allImages.length > images.length) {
+    options.log(
+      `    [AI] 素材共 ${allImages.length} 张图，按配置仅理解前 ${images.length} 张`
+    );
+  }
+
+  const sections: string[] = [];
+
+  for (let index = 0; index < images.length; index++) {
+    const att = images[index];
+    try {
+      options.log(`    [AI] 准备素材图 ${index + 1}/${images.length}: ${att.name}`);
+      const cached = await downloadFeishuAttachmentCached({
+        config: options.taskCfg,
+        accessToken: options.accessToken,
+        attachment: {
+          fileToken: att.fileToken,
+          name: att.name,
+          type: att.type,
+          size: att.size,
+        },
+        log: (message) => options.log(`    [AI] ${message}`),
+      });
+      const buffer = await fse.readFile(cached.filePath);
+      const dataUrl = bufferToImageDataUrl(buffer, att.type, att.name);
+      const description = await understandMiniMaxImage({
+        prompt: IMAGE_MATERIAL_ANALYSIS_PROMPT,
+        imageUrl: dataUrl,
+        timeoutMs: AI_CONTENT_TIMEOUT_MS,
+      });
+      sections.push(`【图${index + 1} · ${att.name}】\n${description.trim()}`);
+      options.log(
+        `    [AI] 素材图理解完成 ${index + 1}/${images.length}: ${att.name}${cached.reused ? "（缓存）" : ""}`
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      options.log(`    [AI] ⚠️ 素材图理解失败: ${att.name}，${message}`);
+    }
+  }
+
+  if (sections.length === 0) return "";
+  return `\n素材图片理解（共${sections.length}张）：\n${sections.join("\n\n")}`;
+}
+
+function buildAiContentSystemPrompt(hasImageMaterial: boolean): string {
+  const base = hasImageMaterial
+    ? "你是抖音电商内容文案助手。请结合商品信息、文案提示词和素材图片理解结果，生成可直接发布的中文内容。正文应与图片内容一致；"
+    : "你是抖音电商内容文案助手。请根据商品信息和文案提示词生成可直接发布的中文内容。";
+
+  return (
+    `${base}文案自然、有种草感；不要夸大功效，不要编造未提供的信息；若遇药品/保健品，只写合规种草表述，不要拒答。` +
+    `正文不要出现店铺名称、店名或账号名。` +
+    `${FEISHU_AI_CONTENT_FORMAT_HINT}按文案提示词要求的风格撰写正文，不要输出解释。`
+  );
+}
+
+function buildAiContentUserMessage(options: {
+  task: TaskCandidate;
+  product: ProductInfo;
+  imageMaterialContext: string;
+  formatRetryHint?: string;
+}): string {
+  return [
+    options.formatRetryHint,
+    `商品名：${options.product.productName}`,
+    options.task.title ? `任务标题：${options.task.title}` : "任务标题：未提供",
+    `文案提示词：${options.product.copyPrompt}`,
+    options.imageMaterialContext,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function requestAiContentOnce(
+  provider: LlmProvider,
+  options: {
+    task: TaskCandidate;
+    product: ProductInfo;
+    imageMaterialContext: string;
+    systemPrompt: string;
+    userContent: string;
+  }
+): Promise<{ content: string; usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number } }> {
   const result = await callStructuredLlm<GeneratedContent>(provider, {
     schemaName: "feishu_task_content",
     schema: {
@@ -199,7 +367,8 @@ async function generateContent(
       properties: {
         content: {
           type: "string",
-          description: "可直接写入飞书任务表正文字段的中文发布正文",
+          description:
+            "抖音发布描述：正文段落 + 空行 + 末行 #话题标签（空格分隔）；正文与标签都必须存在",
           minLength: 1,
         },
       },
@@ -208,17 +377,11 @@ async function generateContent(
     messages: [
       {
         role: "system",
-        content:
-          "你是抖音电商内容文案助手。请根据商品信息和文案提示词生成可直接发布的中文正文。只输出正文，不要解释；文案自然、有种草感；不要夸大功效，不要编造未提供的信息。",
+        content: options.systemPrompt,
       },
       {
         role: "user",
-        content: [
-          `所属店铺：${task.shopName || product.shopName || "未提供"}`,
-          `商品名：${product.productName}`,
-          task.title ? `任务标题：${task.title}` : "任务标题：未提供",
-          `文案提示词：${product.copyPrompt}`,
-        ].join("\n"),
+        content: options.userContent,
       },
     ],
     temperature: 0.7,
@@ -226,14 +389,74 @@ async function generateContent(
     validate: isGeneratedContent,
   });
 
-  const content = result.data.content.trim();
-  const usage = result.usage;
-  log(`    [AI] 返回正文(${content.length}字): ${content.slice(0, 200)}${content.length > 200 ? "..." : ""}`);
-  if (usage) {
-    log(`    [AI] Token用量: prompt=${usage.promptTokens ?? "-"}, completion=${usage.completionTokens ?? "-"}, total=${usage.totalTokens ?? "-"}`);
+  return { content: result.data.content.trim(), usage: result.usage };
+}
+
+async function generateContent(
+  provider: LlmProvider,
+  task: TaskCandidate,
+  product: ProductInfo,
+  imageMaterialContext: string,
+  log: (...args: unknown[]) => void
+): Promise<string> {
+  const model = resolveModelName(provider);
+  log(`    [AI] 厂商=${provider}，模型=${model}`);
+  if (imageMaterialContext) {
+    const analyzedCount = selectImagesForAnalysis(task.attachments).length;
+    log(`    [AI] 已结合 ${analyzedCount} 张素材图理解结果`);
+  }
+  log(`    [AI] 提示词: ${product.copyPrompt.slice(0, 120)}${product.copyPrompt.length > 120 ? "..." : ""}`);
+
+  const systemPrompt = buildAiContentSystemPrompt(Boolean(imageMaterialContext));
+  let formatRetryHint = "";
+  let lastReason = "未知错误";
+
+  for (let attempt = 1; attempt <= AI_CONTENT_MAX_RETRIES; attempt++) {
+    if (attempt > 1) {
+      log(`    [AI] 第 ${attempt}/${AI_CONTENT_MAX_RETRIES} 次重试…`);
+    }
+
+    try {
+      const { content, usage } = await requestAiContentOnce(provider, {
+        task,
+        product,
+        imageMaterialContext,
+        systemPrompt,
+        userContent: buildAiContentUserMessage({
+          task,
+          product,
+          imageMaterialContext,
+          formatRetryHint,
+        }),
+      });
+
+      log(`    [AI] 返回正文(${content.length}字): ${content.slice(0, 200)}${content.length > 200 ? "..." : ""}`);
+      if (usage) {
+        log(
+          `    [AI] Token用量: prompt=${usage.promptTokens ?? "-"}, completion=${usage.completionTokens ?? "-"}, total=${usage.totalTokens ?? "-"}`
+        );
+      }
+
+      const validation = validateFeishuAiGeneratedContent(content);
+      if (validation.ok) {
+        if (validation.parts.normalizedText !== content) {
+          log(`    [AI] 已规范化正文格式（正文 + 末行话题标签）`);
+        }
+        return validation.parts.normalizedText;
+      }
+
+      lastReason = validation.reason;
+      log(`    [AI] 格式校验失败(${attempt}/${AI_CONTENT_MAX_RETRIES}): ${lastReason}`);
+      formatRetryHint =
+        `【格式修正】上次输出未通过校验：${lastReason}。请重新生成并严格遵守：${FEISHU_AI_CONTENT_FORMAT_HINT}`;
+    } catch (error: unknown) {
+      lastReason = error instanceof Error ? error.message : String(error);
+      log(`    [AI] 请求失败(${attempt}/${AI_CONTENT_MAX_RETRIES}): ${lastReason}`);
+      if (attempt >= AI_CONTENT_MAX_RETRIES) break;
+    }
   }
 
-  return content;
+  throw new Error(`AI 正文生成失败（已尝试 ${AI_CONTENT_MAX_RETRIES} 次）: ${lastReason}`);
 }
 
 async function loadAiContentCandidateContext() {
@@ -368,7 +591,19 @@ async function runGeneratableWithConcurrency(options: {
 
       try {
         log(`  [${displayIndex}/${generatableCount}] ✎ 生成: ${task.rowLabel} -> ${product.productName}`);
-        const content = await generateContent(provider, task, product, log);
+        const imageMaterialContext = await buildImageMaterialContext({
+          attachments: task.attachments,
+          taskCfg,
+          accessToken,
+          log,
+        });
+        const content = await generateContent(
+          provider,
+          task,
+          product,
+          imageMaterialContext,
+          log
+        );
         await updateBitableRecord(taskCfg, accessToken, task.recordId, { 正文: content });
         localGenerated++;
         log(`  [${displayIndex}/${generatableCount}] ✓ 写回成功: ${task.rowLabel} (recordId=${task.recordId})`);
@@ -404,7 +639,7 @@ export async function generateTaskAiContentToFeishu(options: {
   isCancelled?: () => boolean;
   summaryPrefix?: string;
 } = {}) {
-  const provider = options.provider || "siliconflow";
+  const provider = options.provider || "minimax";
   const log = options.logger || console.log;
   const isCancelled = options.isCancelled || (() => false);
   const summaryPrefix = options.summaryPrefix || "[generate-feishu-ai-content]";
