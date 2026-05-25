@@ -116,7 +116,7 @@ async function resolveExportDatePlan() {
   try {
     daysToExport = await calcDaysToExport();
   } catch (e) {
-    console.warn(`读取备份表失败（使用默认值 1 天）: ${e.message}`);
+    console.warn(`读取飞书表日期失败（使用默认值 1 天）: ${e.message}`);
   }
 
   const targetDatesByRule = [];
@@ -253,7 +253,7 @@ async function runShopSyncFeishuAttempt(accounts, preferredList) {
   try {
     daysToExport = await calcDaysToExport();
   } catch (e) {
-    console.warn(`读取备份表失败（sync-feishu 使用默认值 1 天）: ${e.message}`);
+    console.warn(`读取飞书表日期失败（sync-feishu 使用默认值 1 天）: ${e.message}`);
   }
 
   const exportBatchId = createExportBatchId();
@@ -480,7 +480,7 @@ async function main() {
     try {
       daysToExport = await calcDaysToExport();
     } catch (e) {
-      console.warn(`读取备份表失败（merge 使用默认值 1 天）: ${e.message}`);
+      console.warn(`读取飞书表日期失败（merge 使用默认值 1 天）: ${e.message}`);
     }
     await mergeAllShopExportsToData({
       daysToExport,

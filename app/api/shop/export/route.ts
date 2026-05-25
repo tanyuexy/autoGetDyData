@@ -1,6 +1,10 @@
 import dotenv from "dotenv";
 import { NextRequest, NextResponse } from "next/server";
-import { calcDaysToExport } from "@/scripts/douyin-shop/lib/merge-shop-exports";
+import {
+  buildShopExportDateRange,
+  calcDaysToExportFromMaxDate,
+  readShopMaxDateFromFeishu,
+} from "@/lib/feishu/shopExportDate";
 import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
@@ -49,20 +53,22 @@ export async function GET() {
   try {
     dotenv.config();
     let daysToExport = 1;
+    let maxFeishuDate: string | null = null;
     try {
-      daysToExport = await calcDaysToExport();
+      const maxDate = await readShopMaxDateFromFeishu();
+      if (maxDate) {
+        maxFeishuDate = formatDateYmd(maxDate);
+      }
+      daysToExport = calcDaysToExportFromMaxDate(maxDate);
     } catch {}
 
-    const end = new Date();
-    end.setDate(end.getDate() - 1);
-    end.setHours(0, 0, 0, 0);
-    const start = new Date(end);
-    start.setDate(start.getDate() - Math.max(0, daysToExport - 1));
+    const { startDate, endDate } = buildShopExportDateRange(daysToExport);
 
     return NextResponse.json({
-      startDate: formatDateYmd(start),
-      endDate: formatDateYmd(end),
+      startDate,
+      endDate,
       daysToExport,
+      maxFeishuDate,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

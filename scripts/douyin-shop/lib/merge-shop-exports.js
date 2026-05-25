@@ -2,7 +2,7 @@ const fse = require("fs-extra");
 const path = require("path");
 const XLSX = require("xlsx");
 const { ACCOUNTS_DIR } = require("./env");
-const { startAndWaitInternalApiTask } = require("../../common/internal-api-client");
+const { getInternalApiBaseUrl } = require("../../common/internal-api-client");
 
 const OUTPUT_DIR = (() => {
   const envVal = process.env.EXPORTS_DIR;
@@ -109,94 +109,20 @@ function appendDataDateColumn(filePath, dataDate) {
   XLSX.writeFile(workbook, filePath);
 }
 
-async function readBackupMaxDate() {
-  const backupFile = path.join(OUTPUT_DIR, BACKUP_FILE_NAME);
-  let stat;
-  try {
-    stat = await fse.stat(backupFile);
-  } catch {
-    return null;
-  }
-  if (!stat.isFile()) return null;
-
-  const wb = XLSX.readFile(backupFile, { cellDates: true, raw: false });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
-
-  let maxDate = null;
-  for (const row of rows) {
-    const raw = row["日期"];
-    if (raw === undefined || raw === null) continue;
-    let d = null;
-    if (typeof raw === "number" && Number.isFinite(raw)) {
-      const ms = raw > 1e15 ? raw / 1000 : raw;
-      d = new Date(ms);
-    } else {
-      const s = String(raw).trim();
-      if (!s) continue;
-      const m = s.match(/(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/);
-      if (m) {
-        d = new Date(+m[1], +m[2] - 1, +m[3]);
-      } else {
-        d = new Date(s.replace(/\//g, "-"));
-      }
-    }
-    if (d && !isNaN(d.getTime())) {
-      d.setHours(0, 0, 0, 0);
-      if (!maxDate || d > maxDate) maxDate = d;
-    }
-  }
-  return maxDate;
-}
-
-async function ensureBackupExists() {
-  const backupFile = path.join(OUTPUT_DIR, BACKUP_FILE_NAME);
-  try {
-    await fse.stat(backupFile);
-    return;
-  } catch {
-    console.log("未找到飞书备份表（抖店-飞书表备份.xlsx），先执行备份…");
-    await startAndWaitInternalApiTask(
-      "/api/feishu/backup",
-      { profiles: "shop" },
-      { timeoutMs: 30 * 60 * 1000 }
-    );
-    console.log("备份完成。");
-  }
-}
-
 async function calcDaysToExport() {
-  await ensureBackupExists();
-
-  const maxDate = await readBackupMaxDate();
-  if (!maxDate) {
-    console.log("备份表中未找到有效日期，默认导出最近 1 天");
-    return 1;
+  const baseUrl = getInternalApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/shop/export`, { cache: "no-store" });
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text };
   }
-
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  yesterday.setHours(0, 0, 0, 0);
-
-  if (maxDate >= yesterday) {
-    console.log(
-      `备份表最后日期: ${fmtDateYMD(maxDate)}，已覆盖到最新可导出的昨日数据，` +
-      `本次仍刷新导出昨天 ${fmtDateYMD(yesterday)} 1 天数据`
-    );
-    return 1;
+  if (!response.ok) {
+    throw new Error(data.error || data.raw || `HTTP ${response.status}`);
   }
-
-  const startDate = new Date(maxDate);
-  startDate.setDate(startDate.getDate() + 1);
-
-  const diffMs = yesterday.getTime() - startDate.getTime();
-  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
-
-  console.log(
-    `备份表最后日期: ${fmtDateYMD(maxDate)}，从 ${fmtDateYMD(startDate)} 开始导出，` +
-    `昨天为 ${fmtDateYMD(yesterday)}，共需导出 ${days} 天数据`
-  );
-  return days;
+  return Number(data.daysToExport) > 0 ? Number(data.daysToExport) : 1;
 }
 
 function parsePaymentYuan(value) {

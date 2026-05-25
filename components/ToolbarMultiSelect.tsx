@@ -1,5 +1,5 @@
-import { Select } from "antd";
 import type { ToolbarSelectOption } from "@/hooks/useToolbarMultiSelect";
+import { MultiSelectWithTooltip } from "@/components/MultiSelectWithTooltip";
 
 type ToolbarMultiSelectProps = {
   value: string[];
@@ -23,8 +23,7 @@ export function ToolbarMultiSelect({
   maxTagCount = 3,
 }: ToolbarMultiSelectProps) {
   return (
-    <Select
-      mode="multiple"
+    <MultiSelectWithTooltip
       allowClear
       style={{ minWidth }}
       value={value}

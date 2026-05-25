@@ -11,6 +11,7 @@ import {
   Typography,
   Upload,
 } from "antd";
+import { MultiSelectWithTooltip } from "@/components/MultiSelectWithTooltip";
 import dayjs from "dayjs";
 import {
   SCHEDULE_SHOW_TIME,
@@ -116,8 +117,7 @@ export function CreatePublishTaskForm(props: CreatePublishTaskFormProps) {
                   </span>
                 }
               >
-                <Select
-                  mode="multiple"
+                <MultiSelectWithTooltip
                   allowClear
                   value={accountNames}
                   onChange={setAccountNames}

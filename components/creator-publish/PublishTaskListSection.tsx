@@ -1,4 +1,5 @@
 import { Button, Popconfirm, Popover, Select, Space, Table, Typography } from "antd";
+import { MultiSelectWithTooltip } from "@/components/MultiSelectWithTooltip";
 import type { ColumnsType } from "antd/es/table";
 import {
   ON_ROW_STYLE,
@@ -107,8 +108,7 @@ export function PublishTaskListSection({
             placeholder="全部状态"
             aria-label="按状态筛选任务"
           />
-          <Select
-            mode="multiple"
+          <MultiSelectWithTooltip
             allowClear
             maxTagCount="responsive"
             value={taskShopFilters}
