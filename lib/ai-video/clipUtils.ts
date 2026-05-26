@@ -141,6 +141,10 @@ export function formatClipStatusLabel(status: string) {
   return labels[normalized] || status || "未知";
 }
 
+export function isClipCompleted(status: string) {
+  return ["succeeded", "success", "completed", "done"].includes(status.toLowerCase());
+}
+
 export function isFinished(status: string) {
   return ["succeeded", "success", "completed", "done", "failed", "error", "cancelled", "canceled"].includes(
     status.toLowerCase()

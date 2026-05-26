@@ -1,4 +1,5 @@
 import type { AiVideoClip } from "@/types";
+import { isClipCompleted } from "@/lib/ai-video/clipUtils";
 import { archiveClipVideo, isLocalGeneratedVideoUrl } from "@/lib/aiVideoMedia";
 import { getDb } from "./db/mongo";
 
@@ -114,6 +115,11 @@ export async function updateAiVideoClipFromTask(
 
 export async function deleteAiVideoClip(id: string): Promise<boolean> {
   const db = await getDb();
+  const existing = normalizeClip(await db.collection(COLLECTION).findOne({ id }));
+  if (!existing) return false;
+  if (!isClipCompleted(existing.status)) {
+    throw new Error("仅可删除已完成状态的片段");
+  }
   const result = await db.collection(COLLECTION).deleteOne({ id });
   return result.deletedCount > 0;
 }

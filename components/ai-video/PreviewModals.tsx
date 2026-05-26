@@ -2,27 +2,33 @@
 
 import { Image, Modal, Space, Typography } from "antd";
 import type { AiVideoComposedFilm } from "@/types";
-import type { ClipGenerationMaterial } from "@/lib/ai-video/clipMaterials";
-import { getReferenceKindLabel } from "@/lib/ai-video/clipUtils";
+import {
+  AiVideoMaterialPreviewModal,
+  type MaterialPreviewSession,
+} from "@/components/ai-video/AiVideoMaterialPreviewModal";
 import { resolveMediaUrl } from "@/lib/ai-video/media";
 import type { ClipItem } from "@/lib/ai-video/types";
 
 export interface PreviewModalsProps {
   previewFilm: AiVideoComposedFilm | null;
   previewClip: ClipItem | null;
-  previewMaterial: ClipGenerationMaterial | null;
+  materialPreview: MaterialPreviewSession | null;
   onCloseFilm: () => void;
   onCloseClip: () => void;
   onCloseMaterial: () => void;
+  onMaterialPreviewPrev: () => void;
+  onMaterialPreviewNext: () => void;
 }
 
 export function PreviewModals({
   previewFilm,
   previewClip,
-  previewMaterial,
+  materialPreview,
   onCloseFilm,
   onCloseClip,
   onCloseMaterial,
+  onMaterialPreviewPrev,
+  onMaterialPreviewNext,
 }: PreviewModalsProps) {
   return (
     <>
@@ -91,61 +97,12 @@ export function PreviewModals({
         ) : null}
       </Modal>
 
-      <Modal
-        open={Boolean(previewMaterial)}
-        destroyOnHidden
-        centered
-        title={
-          previewMaterial
-            ? `素材预览 · ${getReferenceKindLabel(previewMaterial.kind)} · ${previewMaterial.label}`
-            : "素材预览"
-        }
-        footer={null}
-        width={previewMaterial?.kind === "audio" ? 520 : 760}
-        onCancel={onCloseMaterial}
-      >
-        {previewMaterial?.kind === "image" ? (
-          <Image
-            src={resolveMediaUrl(previewMaterial.url)}
-            alt={previewMaterial.name}
-            style={{
-              width: "100%",
-              maxHeight: "70vh",
-              objectFit: "contain",
-              borderRadius: 8,
-              background: "#111",
-            }}
-          />
-        ) : null}
-        {previewMaterial?.kind === "video" ? (
-          <video
-            key={previewMaterial.id}
-            controls
-            autoPlay
-            src={resolveMediaUrl(previewMaterial.url)}
-            style={{
-              width: "100%",
-              maxHeight: "70vh",
-              borderRadius: 8,
-              background: "#000",
-            }}
-          />
-        ) : null}
-        {previewMaterial?.kind === "audio" ? (
-          <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {previewMaterial.name}
-            </Typography.Text>
-            <audio
-              key={previewMaterial.id}
-              controls
-              autoPlay
-              src={resolveMediaUrl(previewMaterial.url)}
-              style={{ width: "100%" }}
-            />
-          </Space>
-        ) : null}
-      </Modal>
+      <AiVideoMaterialPreviewModal
+        session={materialPreview}
+        onClose={onCloseMaterial}
+        onPrev={onMaterialPreviewPrev}
+        onNext={onMaterialPreviewNext}
+      />
     </>
   );
 }

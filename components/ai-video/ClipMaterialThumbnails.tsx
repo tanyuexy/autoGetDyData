@@ -10,7 +10,7 @@ export function ClipMaterialThumbnails({
   onPreviewMaterial,
 }: {
   clip: ClipItem;
-  onPreviewMaterial: (material: ClipGenerationMaterial) => void;
+  onPreviewMaterial: (material: ClipGenerationMaterial, clip: ClipItem) => void;
 }) {
   const materials = getClipGenerationMaterials(clip);
 
@@ -28,7 +28,7 @@ export function ClipMaterialThumbnails({
         <ClipMaterialThumbnail
           key={material.id}
           material={material}
-          onClick={() => onPreviewMaterial(material)}
+          onClick={() => onPreviewMaterial(material, clip)}
         />
       ))}
     </Space>

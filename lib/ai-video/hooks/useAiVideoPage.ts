@@ -5,7 +5,8 @@ import type { AiVideoComposedFilm } from "@/types";
 import type { ComposeFilmModalResult } from "@/components/ComposeFilmModal";
 import type { SeedancePromptVersion } from "@/components/ai-video/GeneratePromptModal";
 import { buildClipTableColumns } from "@/components/ai-video/clipTableColumns";
-import type { ClipGenerationMaterial } from "@/lib/ai-video/clipMaterials";
+import { getClipGenerationMaterials, type ClipGenerationMaterial } from "@/lib/ai-video/clipMaterials";
+import type { MaterialPreviewSession } from "@/components/ai-video/AiVideoMaterialPreviewModal";
 import { buildFilmTableColumns } from "@/components/ai-video/filmTableColumns";
 import {
   deleteClipFromServer,
@@ -34,6 +35,7 @@ import {
   ensureUploadFilesFromUrl,
   getFirstImageReference,
   getReferenceLabel,
+  isClipCompleted,
   isFinished,
   normalizeReferencePrompt,
   resolveClipRestoreSnapshot,
@@ -98,7 +100,7 @@ const [composedFilms, setComposedFilms] = useState<AiVideoComposedFilm[]>([]);
 const [filmsHydrated, setFilmsHydrated] = useState(false);
 const [previewFilm, setPreviewFilm] = useState<AiVideoComposedFilm | null>(null);
 const [previewClip, setPreviewClip] = useState<ClipItem | null>(null);
-const [previewMaterial, setPreviewMaterial] = useState<ClipGenerationMaterial | null>(null);
+const [materialPreview, setMaterialPreview] = useState<MaterialPreviewSession | null>(null);
 const [dragActive, setDragActive] = useState(false);
 const [draggingReferenceId, setDraggingReferenceId] = useState<string | null>(null);
 const [dragOverReferenceId, setDragOverReferenceId] = useState<string | null>(null);
@@ -1263,8 +1265,27 @@ const handleReferenceDrop = useCallback(
     setPreviewClip(clip);
   }, []);
 
-  const handlePreviewMaterial = useCallback((material: ClipGenerationMaterial) => {
-    setPreviewMaterial(material);
+  const handlePreviewMaterial = useCallback((material: ClipGenerationMaterial, clip: ClipItem) => {
+    const materials = getClipGenerationMaterials(clip);
+    const index = materials.findIndex((item) => item.id === material.id);
+    setMaterialPreview({
+      materials,
+      index: index >= 0 ? index : 0,
+    });
+  }, []);
+
+  const handleMaterialPreviewPrev = useCallback(() => {
+    setMaterialPreview((prev) => {
+      if (!prev || prev.index <= 0) return prev;
+      return { ...prev, index: prev.index - 1 };
+    });
+  }, []);
+
+  const handleMaterialPreviewNext = useCallback(() => {
+    setMaterialPreview((prev) => {
+      if (!prev || prev.index >= prev.materials.length - 1) return prev;
+      return { ...prev, index: prev.index + 1 };
+    });
   }, []);
 
   const handleDeleteFilm = useCallback(
@@ -1278,6 +1299,10 @@ const handleReferenceDrop = useCallback(
 
   const handleDeleteClip = useCallback(
     (record: ClipItem) => {
+      if (!isClipCompleted(record.status)) {
+        message.warning("仅可删除已完成状态的片段");
+        return;
+      }
       void (async () => {
         try {
           await deleteClipFromServer(record.id);
@@ -1389,8 +1414,10 @@ const handleReferenceDrop = useCallback(
     setPreviewFilm,
     previewClip,
     setPreviewClip,
-    previewMaterial,
-    setPreviewMaterial,
+    materialPreview,
+    setMaterialPreview,
+    handleMaterialPreviewPrev,
+    handleMaterialPreviewNext,
     dragActive,
     draggingReferenceId,
     dragOverReferenceId,

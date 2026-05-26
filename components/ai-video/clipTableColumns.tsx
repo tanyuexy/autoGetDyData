@@ -10,6 +10,7 @@ import { antdTagPresetStyle } from "@/lib/semanticTagStyles";
 import {
   formatClipStatusLabel,
   getStatusPreset,
+  isClipCompleted,
   isFinished,
 } from "@/lib/ai-video/clipUtils";
 import type { ClipItem } from "@/lib/ai-video/types";
@@ -18,7 +19,7 @@ export interface BuildClipTableColumnsDeps {
   composeOrderMap: Map<string, number>;
   onCopyPrompt: (text: string) => void;
   onPreviewClip: (clip: ClipItem) => void;
-  onPreviewMaterial: (material: ClipGenerationMaterial) => void;
+  onPreviewMaterial: (material: ClipGenerationMaterial, clip: ClipItem) => void;
   onPollTask: (clipId: string, taskId: string) => void;
   onDownloadClip: (clip: ClipItem) => void;
   onRestoreFormFromClip: (clip: ClipItem) => void;
@@ -197,6 +198,7 @@ export function buildClipTableColumns(
       align: "center",
       render: (_, record) => {
         const canRestore = record.model !== "manual";
+        const canDelete = isClipCompleted(record.status);
 
         return (
           <Space size={2} wrap style={{ justifyContent: "center" }} className="ai-video-clip-actions">
@@ -230,12 +232,13 @@ export function buildClipTableColumns(
                 />
               </Tooltip>
             ) : null}
-            <Tooltip title="从列表移除">
+            <Tooltip title={canDelete ? "从列表移除" : "仅已完成状态的片段可删除"}>
               <Button
                 danger
                 size="small"
                 icon={<DeleteOutlined />}
                 aria-label="删除片段"
+                disabled={!canDelete}
                 onClick={() => onDeleteClip(record)}
               />
             </Tooltip>
