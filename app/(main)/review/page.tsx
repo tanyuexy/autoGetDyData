@@ -1,16 +1,18 @@
 "use client";
 
-import { Button, Select, Space, Table } from "antd";
+import { Button, Select, Table } from "antd";
 import { LinkOutlined } from "@ant-design/icons";
 import { ReviewToolbar } from "@/components/review/ReviewToolbar";
+import { useTableBodyScrollY } from "@/hooks/useTableBodyScrollY";
 import { STATUS_FILTER_OPTIONS } from "@/lib/review/constants";
 import { useReviewPage } from "@/lib/review/hooks/useReviewPage";
 
 export default function ReviewPage() {
   const vm = useReviewPage();
+  const { containerRef, scrollY } = useTableBodyScrollY();
 
   return (
-    <div style={{ width: "100%" }}>
+    <div className="app-page-fill">
       <ReviewToolbar
         toolbarAccountsSanitized={vm.toolbarAccountsSanitized}
         onToolbarAccountChange={vm.handleToolbarAccountSelectChange}
@@ -30,7 +32,7 @@ export default function ReviewPage() {
         rejectedCount={vm.rejectedCount}
       />
 
-      <div style={{ marginBottom: 10, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ marginBottom: 10, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", flexShrink: 0 }}>
         <Select
           size="small"
           style={{ width: 120 }}
@@ -67,23 +69,25 @@ export default function ReviewPage() {
         </Button>
       </div>
 
-      <Table
-        rowKey="id"
-        size="small"
-        bordered
-        loading={vm.loadingItems}
-        dataSource={vm.filteredItems}
-        columns={vm.columns as never[]}
-        tableLayout="fixed"
-        rowSelection={{
-          selectedRowKeys: vm.selectedRowKeys,
-          onChange: (keys) => vm.setSelectedRowKeys(keys),
-        }}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
-        scroll={{ x: 900, y: "calc(100vh - 260px)" }}
-        locale={{ emptyText: "暂无作品记录，请先选择账号并点击「获取作品信息」" }}
-        style={{ width: "100%" }}
-      />
+      <div ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
+        <Table
+          rowKey="id"
+          size="small"
+          bordered
+          loading={vm.loadingItems}
+          dataSource={vm.filteredItems}
+          columns={vm.columns as never[]}
+          tableLayout="fixed"
+          rowSelection={{
+            selectedRowKeys: vm.selectedRowKeys,
+            onChange: (keys) => vm.setSelectedRowKeys(keys),
+          }}
+          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+          scroll={{ x: 900, y: scrollY }}
+          locale={{ emptyText: "暂无作品记录，请先选择账号并点击「获取作品信息」" }}
+          style={{ width: "100%" }}
+        />
+      </div>
     </div>
   );
 }

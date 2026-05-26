@@ -34,6 +34,38 @@ function stripThinkingTags(content: string): string {
   return content.replace(/<think>[\s\S]*?<\/redacted_thinking>/gi, "").trim();
 }
 
+function extractMiniMaxMessageContent(response: unknown, providerLabel: string): string {
+  const root = response && typeof response === "object" ? (response as Record<string, unknown>) : {};
+  const choices = Array.isArray(root.choices) ? root.choices : [];
+  const firstChoice =
+    choices[0] && typeof choices[0] === "object" ? (choices[0] as Record<string, unknown>) : {};
+  const message =
+    firstChoice.message && typeof firstChoice.message === "object"
+      ? (firstChoice.message as Record<string, unknown>)
+      : {};
+
+  let directContent = "";
+  try {
+    directContent = extractMessageContent(response, providerLabel);
+  } catch {
+    directContent = "";
+  }
+  if (directContent.trim()) return directContent;
+
+  const reasoningDetails = Array.isArray(message.reasoning_details) ? message.reasoning_details : [];
+  const reasoningText = reasoningDetails
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
+      const record = item as Record<string, unknown>;
+      return typeof record.text === "string" ? record.text : "";
+    })
+    .join("\n")
+    .trim();
+  if (reasoningText) return reasoningText;
+
+  throw new Error(`${providerLabel} 返回中缺少 choices[0].message.content`);
+}
+
 function buildMinimaxStructuredPayload(request: StructuredRequest, model: string) {
   const base = buildStructuredPayload({ ...request, model }) as Record<string, unknown>;
   const { max_tokens: maxTokens, response_format: _responseFormat, ...rest } = base;
@@ -58,6 +90,10 @@ function parseMiniMaxStructuredContent<T extends JsonValue>(
       const content = rawContent.trim();
       if (content) return { content };
     }
+    if (request.schemaName === "seedance_video_prompts") {
+      const content = rawContent.trim();
+      if (content) return { _rawMarkdown: content };
+    }
     throw error;
   }
 }
@@ -67,7 +103,7 @@ function finalizeMiniMaxStructuredResult<T extends JsonValue>(
   request: StructuredRequest<T>,
 ): StructuredResult<T> {
   request.onRawResponse?.(response);
-  const rawContent = stripThinkingTags(extractMessageContent(response, PROVIDER_LABEL));
+  const rawContent = stripThinkingTags(extractMiniMaxMessageContent(response, PROVIDER_LABEL));
   request.onRawContent?.(rawContent);
   const parsed = parseMiniMaxStructuredContent(rawContent, request);
   if (request.validate && !request.validate(parsed)) {

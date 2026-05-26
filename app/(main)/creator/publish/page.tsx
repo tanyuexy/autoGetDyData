@@ -9,7 +9,7 @@ export default function CreatorPublishPage() {
   const vm = useCreatorPublishPage();
 
   return (
-    <>
+    <div className="app-page-fill">
       <PublishPageTabs vm={vm} />
       <MaterialPreviewModal
         task={vm.materialPreviewTask}
@@ -28,6 +28,6 @@ export default function CreatorPublishPage() {
         onClose={vm.closeEditTask}
         onSave={() => void vm.handleSaveEditTask()}
       />
-    </>
+    </div>
   );
 }

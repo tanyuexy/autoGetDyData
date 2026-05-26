@@ -282,7 +282,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             borderRadius: 12,
             minHeight: 0,
             height: "calc(100dvh - 24px)",
-            overflow: "auto",
           }}
         >
           {children}

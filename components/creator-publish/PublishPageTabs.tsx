@@ -88,11 +88,12 @@ export function PublishPageTabs({ vm }: PublishPageTabsProps) {
 
   return (
     <Tabs
+      className="page-fill-tabs"
       defaultActiveKey="tasks"
       items={tabItems}
       size="small"
       style={{ width: "100%" }}
-      tabBarStyle={{ marginBottom: 12 }}
+      tabBarStyle={{ marginBottom: 12, flexShrink: 0 }}
       onChange={(key) => {
         if (key === "tasks") void vm.fetchTasks();
       }}

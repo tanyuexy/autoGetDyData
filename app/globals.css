@@ -48,13 +48,8 @@ body {
   height: 100%;
 }
 
-html {
-  scrollbar-gutter: stable;
-}
-
 body {
   overflow: hidden;
-  scrollbar-gutter: stable;
 }
 
 /* Modal 打开时 rc-portal 可能改写 body 宽度/内边距，统一禁止补偿抖动 */
@@ -69,11 +64,85 @@ body:has(.ant-modal-wrap) {
   padding-right: 0 !important;
   margin-right: 0 !important;
   width: 100% !important;
+}
+
+/* 主内容区容器：默认由子页面滚动；配置页等 app-page-scroll 时改为容器自身滚动 */
+.app-main-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 主内容区 flex 子页面：表格页占满剩余高度，表单页自行滚动 */
+.app-main-content>* {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  /* 内容与右侧滚动条留出间距，避免贴边 */
+  padding-inline-end: 10px;
+  box-sizing: border-box;
+}
+
+.app-main-content>*:not(.app-page-fill) {
   scrollbar-gutter: stable;
 }
 
-.app-main-content {
+/* 配置管理等表单页：内容自然撑高，滚动条在主内容区（页面级） */
+.app-main-content:has(> .app-page-scroll) {
+  overflow: auto;
   scrollbar-gutter: stable;
+}
+
+.app-main-content>.app-page-scroll {
+  flex: none;
+  min-height: auto;
+  height: auto;
+  overflow: visible;
+  padding-inline-end: 0;
+  scrollbar-gutter: auto;
+}
+
+.app-page-fill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  overflow: hidden;
+}
+
+.page-fill-tabs.ant-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-fill-tabs .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+}
+
+.page-fill-tabs .ant-tabs-content,
+.page-fill-tabs .ant-tabs-tabpane {
+  height: 100%;
+}
+
+.page-fill-tabs .ant-tabs-tabpane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 表格内滚动时，最后一列与滚动条留出间距 */
+.app-page-fill .ant-table-body {
+  scrollbar-gutter: stable;
+}
+
+.app-page-fill .ant-table-wrapper {
+  padding-inline-end: 4px;
+  box-sizing: border-box;
 }
 
 body {

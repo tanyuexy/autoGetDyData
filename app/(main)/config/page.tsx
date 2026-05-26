@@ -295,7 +295,7 @@ export default function ConfigPage() {
   ];
 
   return (
-    <div style={configPageWrapStyle}>
+    <div className="app-page-scroll" style={configPageWrapStyle}>
       <div style={{ marginBottom: 16 }}>
         <Typography.Title level={4} style={{ margin: 0 }}>
           配置管理

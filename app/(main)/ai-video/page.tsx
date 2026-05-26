@@ -4,6 +4,7 @@ import { Space, Spin, Typography } from "antd";
 import { AiVideoListTabs } from "@/components/ai-video/AiVideoListTabs";
 import { AiVideoTableStyles } from "@/components/ai-video/AiVideoTableStyles";
 import { GenerationFormSection } from "@/components/ai-video/GenerationFormSection";
+import { GeneratePromptModal } from "@/components/ai-video/GeneratePromptModal";
 import { GroupAssignModal } from "@/components/ai-video/GroupAssignModal";
 import { PreviewModals } from "@/components/ai-video/PreviewModals";
 import { useAiVideoPage } from "@/lib/ai-video/hooks/useAiVideoPage";
@@ -35,7 +36,7 @@ export default function AiVideoPage() {
               AI 视频生成
             </Typography.Title>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              接入火山 Seedance 模型，生成片段后在列表里选择并组合成片
+              接入火山 Seedance 模型；支持 MiniMax + seedance skill 生成提示词，生成片段后可组合成片
             </Typography.Text>
           </div>
 
@@ -97,6 +98,7 @@ export default function AiVideoPage() {
             setCallbackUrl={vm.setCallbackUrl}
             submitting={vm.submitting}
             onSubmitTask={() => void vm.submitTask()}
+            onOpenGeneratePrompt={vm.openGeneratePromptModal}
             dragActive={vm.dragActive}
             onFrameDragEnter={vm.handleFrameDragEnter}
             onFrameDragLeave={vm.handleFrameDragLeave}
@@ -131,6 +133,23 @@ export default function AiVideoPage() {
           />
         </Space>
       )}
+
+      <GeneratePromptModal
+        open={vm.generatePromptOpen}
+        loading={vm.generatingPrompt}
+        hasMiniMaxApiKey={vm.hasMiniMaxApiKey}
+        llmModel={vm.promptLlmModel}
+        mode={vm.mode}
+        duration={vm.duration}
+        ratio={vm.ratio}
+        resolution={vm.resolution}
+        referenceResources={vm.referenceResources}
+        existingPrompt={vm.prompt}
+        versions={vm.promptVersions}
+        onCancel={() => vm.setGeneratePromptOpen(false)}
+        onGenerate={vm.handleGeneratePrompt}
+        onApply={vm.applyGeneratedPrompt}
+      />
 
       <GroupAssignModal
         open={vm.groupAssignOpen}

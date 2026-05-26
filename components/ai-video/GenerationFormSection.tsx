@@ -20,8 +20,10 @@ import {
   DeleteOutlined,
   PaperClipOutlined,
   PlayCircleOutlined,
+  RobotOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
+import { VideoFrameThumbnail } from "@/components/ai-video/ClipVideoThumbnail";
 import { ReferenceResourcesList } from "@/components/ai-video/ReferenceResourcesList";
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from "@/lib/ai-video/constants";
 import { getReferenceLabel } from "@/lib/ai-video/clipUtils";
@@ -96,6 +98,7 @@ export interface GenerationFormSectionProps {
   setCallbackUrl: (url: string) => void;
   submitting: boolean;
   onSubmitTask: () => void;
+  onOpenGeneratePrompt: () => void;
   dragActive: boolean;
   onFrameDragEnter?: (event: React.DragEvent) => void;
   onFrameDragLeave?: (event: React.DragEvent) => void;
@@ -206,6 +209,7 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
     setCallbackUrl,
     submitting,
     onSubmitTask,
+    onOpenGeneratePrompt,
     dragActive,
     onFrameDragEnter,
     onFrameDragLeave,
@@ -335,6 +339,12 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
         ) : null}
 
         <Space orientation="vertical" size={4} style={{ width: "100%" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <Typography.Text strong>视频提示词</Typography.Text>
+            <Button icon={<RobotOutlined />} onClick={onOpenGeneratePrompt}>
+              AI 生成提示词
+            </Button>
+          </div>
           <div style={{ position: "relative", width: "100%" }}>
             <Input.TextArea
               ref={(node) => {
@@ -408,6 +418,14 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
                               flexShrink: 0,
                             }}
                           />
+                        ) : resource.kind === "video" ? (
+                          <VideoFrameThumbnail
+                            videoUrl={resource.url}
+                            width={28}
+                            height={28}
+                            borderRadius={4}
+                            showPlayIcon={false}
+                          />
                         ) : (
                           <span
                             style={{
@@ -422,7 +440,7 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
                               flexShrink: 0,
                             }}
                           >
-                            {resource.kind === "video" ? <PlayCircleOutlined /> : <PaperClipOutlined />}
+                            <PaperClipOutlined />
                           </span>
                         )}
                         <Typography.Text strong style={{ width: 58, flexShrink: 0 }}>

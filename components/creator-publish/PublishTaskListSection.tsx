@@ -1,5 +1,6 @@
 import { Button, Popconfirm, Popover, Select, Space, Table, Typography } from "antd";
 import { MultiSelectWithTooltip } from "@/components/MultiSelectWithTooltip";
+import { useTableBodyScrollY } from "@/hooks/useTableBodyScrollY";
 import type { ColumnsType } from "antd/es/table";
 import {
   ON_ROW_STYLE,
@@ -68,9 +69,10 @@ export function PublishTaskListSection({
   rowSelection,
 }: PublishTaskListSectionProps) {
   const handleRow = () => ({ style: ON_ROW_STYLE });
+  const { containerRef, scrollY } = useTableBodyScrollY();
 
   return (
-    <>
+    <div className="app-page-fill">
       <div
         style={{
           marginBottom: 8,
@@ -197,25 +199,27 @@ export function PublishTaskListSection({
           </Button>
         </Space>
       </div>
-      <Table
-        rowKey="id"
-        size="small"
-        bordered
-        loading={loadingTasks}
-        dataSource={filteredTasks}
-        columns={columns}
-        tableLayout="fixed"
-        pagination={{ pageSize: 20, showSizeChanger: false }}
-        scroll={{ x: 1388, y: "calc(100vh - 220px)" }}
-        onChange={(_pagination, _filters, sorter, extra) => {
-          if (extra.action !== "sort") return;
-          const s = Array.isArray(sorter) ? sorter[0] : sorter;
-          setScheduleColumnSortOrder((s?.order ?? null) as "ascend" | "descend" | null);
-        }}
-        rowSelection={rowSelection}
-        style={{ width: "100%" }}
-        onRow={handleRow}
-      />
-    </>
+      <div ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
+        <Table
+          rowKey="id"
+          size="small"
+          bordered
+          loading={loadingTasks}
+          dataSource={filteredTasks}
+          columns={columns}
+          tableLayout="fixed"
+          pagination={{ pageSize: 20, showSizeChanger: false }}
+          scroll={{ x: 1388, y: scrollY }}
+          onChange={(_pagination, _filters, sorter, extra) => {
+            if (extra.action !== "sort") return;
+            const s = Array.isArray(sorter) ? sorter[0] : sorter;
+            setScheduleColumnSortOrder((s?.order ?? null) as "ascend" | "descend" | null);
+          }}
+          rowSelection={rowSelection}
+          style={{ width: "100%" }}
+          onRow={handleRow}
+        />
+      </div>
+    </div>
   );
 }

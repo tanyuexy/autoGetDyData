@@ -3,6 +3,7 @@ import { App, Upload, type UploadProps } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 import type { AiVideoComposedFilm } from "@/types";
 import type { ComposeFilmModalResult } from "@/components/ComposeFilmModal";
+import type { SeedancePromptVersion } from "@/components/ai-video/GeneratePromptModal";
 import { buildClipTableColumns } from "@/components/ai-video/clipTableColumns";
 import { buildFilmTableColumns } from "@/components/ai-video/filmTableColumns";
 import {
@@ -103,28 +104,40 @@ const [promptAtIndex, setPromptAtIndex] = useState<number | null>(null);
 const [resourcePickerActiveIndex, setResourcePickerActiveIndex] = useState(0);
 const promptTextAreaRef = useRef<HTMLTextAreaElement | null>(null);
 const dragCounterRef = useRef(0);
+const draggingReferenceIdRef = useRef<string | null>(null);
 const clipsRef = useRef<ClipItem[]>([]);
 const hasRestoredPollingRef = useRef(false);
+const [generatePromptOpen, setGeneratePromptOpen] = useState(false);
+const [generatingPrompt, setGeneratingPrompt] = useState(false);
+const [promptVersions, setPromptVersions] = useState<SeedancePromptVersion[]>([]);
+const [hasMiniMaxApiKey, setHasMiniMaxApiKey] = useState(false);
+const [promptLlmModel, setPromptLlmModel] = useState("");
 
 useEffect(() => {
   let cancelled = false;
-  fetch("/api/ai-video/seedance", { cache: "no-store" })
-    .then((res) => res.json())
-    .then((data) => {
-      if (cancelled) return;
-      if (Array.isArray(data.models) && data.models.length) setModels(data.models);
-      setHasServerApiKey(Boolean(data.hasServerApiKey));
-      if (Boolean(data.showCallbackUrl)) {
-        setShowCallbackUrl(true);
-        if (!cachedConfig.callbackUrl && typeof data.defaultCallbackUrl === "string" && data.defaultCallbackUrl.trim()) {
-          setCallbackUrl(data.defaultCallbackUrl.trim());
+  Promise.all([
+      fetch("/api/ai-video/seedance", { cache: "no-store" }).then((res) => res.json()),
+      fetch("/api/ai-video/generate-prompt", { cache: "no-store" }).then((res) => res.json()).catch(() => ({})),
+    ])
+      .then(([seedanceData, promptData]) => {
+        if (cancelled) return;
+        if (Array.isArray(seedanceData.models) && seedanceData.models.length) setModels(seedanceData.models);
+        setHasServerApiKey(Boolean(seedanceData.hasServerApiKey));
+        setHasMiniMaxApiKey(Boolean(promptData?.hasMiniMaxApiKey));
+        if (typeof promptData?.model === "string" && promptData.model.trim()) {
+          setPromptLlmModel(promptData.model.trim());
         }
-      }
-    })
-    .catch(() => {})
-    .finally(() => {
-      if (!cancelled) setPageReady(true);
-    });
+        if (Boolean(seedanceData.showCallbackUrl)) {
+          setShowCallbackUrl(true);
+          if (!cachedConfig.callbackUrl && typeof seedanceData.defaultCallbackUrl === "string" && seedanceData.defaultCallbackUrl.trim()) {
+            setCallbackUrl(seedanceData.defaultCallbackUrl.trim());
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setPageReady(true);
+      });
   return () => {
     cancelled = true;
   };
@@ -436,6 +449,77 @@ const restoreFormFromClip = useCallback(
   },
   [message]
 );
+
+const openGeneratePromptModal = useCallback(() => {
+  setPromptVersions([]);
+  setGeneratePromptOpen(true);
+}, []);
+
+const applyGeneratedPrompt = useCallback(
+  (nextPrompt: string) => {
+    setPrompt(nextPrompt);
+    writeStoredConfig({ prompt: nextPrompt });
+    setGeneratePromptOpen(false);
+    message.success("已填入 AI 生成的提示词");
+    window.setTimeout(() => promptTextAreaRef.current?.focus(), 0);
+  },
+  [message]
+);
+
+async function handleGeneratePrompt(input: { brief: string; stylePreference?: string }) {
+  const brief = input.brief.trim();
+  if (!brief) {
+    message.warning("请先描述视频创意");
+    return;
+  }
+  if (!hasMiniMaxApiKey) {
+    message.warning("请先在环境变量中配置 MINIMAX_API_KEY");
+    return;
+  }
+
+  setGeneratingPrompt(true);
+  try {
+    const res = await fetch("/api/ai-video/generate-prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        brief,
+        stylePreference: input.stylePreference?.trim() || undefined,
+        mode,
+        model,
+        duration,
+        ratio,
+        resolution,
+        generateAudio,
+        referenceResources: referenceResources.map((resource) => ({
+          kind: resource.kind,
+          name: resource.name,
+          token: getReferenceLabel(referenceResources, resource),
+        })),
+        hasFirstFrame: Boolean(firstFrameUrl.trim() || referenceResources.some((item) => item.kind === "image")),
+        hasLastFrame: Boolean(lastFrameUrl.trim()),
+        existingPrompt: prompt.trim() || undefined,
+      }),
+    });
+    const data = (await res.json()) as {
+      versions?: SeedancePromptVersion[];
+      model?: string;
+      error?: string;
+    };
+    if (!res.ok) throw new Error(data.error || "生成提示词失败");
+    const versions = Array.isArray(data.versions) ? data.versions : [];
+    if (!versions.length) throw new Error("未返回可用提示词版本");
+    setPromptVersions(versions);
+    if (typeof data.model === "string" && data.model.trim()) {
+      setPromptLlmModel(data.model.trim());
+    }
+    message.success(`已生成 ${versions.length} 个提示词版本`);
+  } catch (error: unknown) {
+    message.error(error instanceof Error ? error.message : "生成提示词失败");
+  } finally {
+    setGeneratingPrompt(false);
+  }
+}
 
 async function submitTask() {
   if (!hasServerApiKey) {
@@ -795,20 +879,25 @@ function reorderReferenceResources(activeId: string, overId: string) {
 }
 
 function handleReferenceReorderDragStart(event: React.DragEvent, id: string) {
+  draggingReferenceIdRef.current = id;
   setDraggingReferenceId(id);
+  event.stopPropagation();
   event.dataTransfer.effectAllowed = "move";
   event.dataTransfer.setData("text/plain", id);
 }
 
 function handleReferenceReorderDragOver(event: React.DragEvent, id: string) {
   event.preventDefault();
+  event.stopPropagation();
   event.dataTransfer.dropEffect = "move";
-  if (draggingReferenceId && id !== draggingReferenceId) {
+  const activeId = draggingReferenceIdRef.current;
+  if (activeId && id !== activeId) {
     setDragOverReferenceId(id);
   }
 }
 
 function handleReferenceReorderDragLeave(event: React.DragEvent, id: string) {
+  event.stopPropagation();
   const related = event.relatedTarget as Node | null;
   if (related && event.currentTarget.contains(related)) return;
   setDragOverReferenceId((prev) => (prev === id ? null : prev));
@@ -816,15 +905,18 @@ function handleReferenceReorderDragLeave(event: React.DragEvent, id: string) {
 
 function handleReferenceReorderDrop(event: React.DragEvent, targetId: string) {
   event.preventDefault();
-  const activeId = draggingReferenceId || event.dataTransfer.getData("text/plain");
+  event.stopPropagation();
+  const activeId = draggingReferenceIdRef.current || event.dataTransfer.getData("text/plain");
   if (activeId && targetId && activeId !== targetId) {
     reorderReferenceResources(activeId, targetId);
   }
+  draggingReferenceIdRef.current = null;
   setDraggingReferenceId(null);
   setDragOverReferenceId(null);
 }
 
 function handleReferenceReorderDragEnd() {
+  draggingReferenceIdRef.current = null;
   setDraggingReferenceId(null);
   setDragOverReferenceId(null);
 }
@@ -1106,10 +1198,11 @@ const buildFrameUploadProps = (
 
 
 const handleFrameDragEnter = useCallback((event: React.DragEvent) => {
+  if (!event.dataTransfer.types.includes("Files")) return;
   event.preventDefault();
   event.stopPropagation();
   dragCounterRef.current += 1;
-  if (event.dataTransfer.types.includes("Files")) setDragActive(true);
+  setDragActive(true);
 }, []);
 
 const handleFrameDragLeave = useCallback((event: React.DragEvent) => {
@@ -1330,5 +1423,14 @@ const handleReferenceDrop = useCallback(
     handleFrameDragOver,
     handleFrameDrop,
     handleReferenceDrop,
+    generatePromptOpen,
+    setGeneratePromptOpen,
+    generatingPrompt,
+    promptVersions,
+    hasMiniMaxApiKey,
+    promptLlmModel,
+    openGeneratePromptModal,
+    handleGeneratePrompt,
+    applyGeneratedPrompt,
   };
 }

@@ -5,24 +5,22 @@ import { Tooltip } from "antd";
 import { PlayCircleOutlined } from "@ant-design/icons";
 import { isLocalMediaUrl, resolveMediaUrl } from "@/lib/ai-video/media";
 
-export function ClipVideoThumbnail({
+export function VideoFrameThumbnail({
   videoUrl,
   coverUrl,
-  onClick,
-  tooltipTitle = "点击预览视频",
   width = 72,
   height = 48,
   showPlayIcon = true,
   orderBadge,
+  borderRadius = 6,
 }: {
   videoUrl: string;
   coverUrl?: string | null;
-  onClick: () => void;
-  tooltipTitle?: React.ReactNode;
   width?: number;
   height?: number;
   showPlayIcon?: boolean;
   orderBadge?: number;
+  borderRadius?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [thumbUrl, setThumbUrl] = useState<string | null>(coverUrl ? resolveMediaUrl(coverUrl) : null);
@@ -63,21 +61,17 @@ export function ClipVideoThumbnail({
     };
   }, [thumbUrl, videoUrl]);
 
-  const button = (
-    <button
-      type="button"
-      aria-label="预览视频"
-      onClick={onClick}
+  return (
+    <span
       style={{
         position: "relative",
+        display: "inline-flex",
         width,
         height,
-        padding: 0,
-        border: "1px solid var(--vol-hairline)",
-        borderRadius: 6,
+        borderRadius,
         overflow: "hidden",
-        cursor: "pointer",
         background: "#111",
+        flexShrink: 0,
       }}
     >
       {thumbUrl ? (
@@ -131,6 +125,55 @@ export function ClipVideoThumbnail({
           <PlayCircleOutlined />
         </span>
       ) : null}
+    </span>
+  );
+}
+
+export function ClipVideoThumbnail({
+  videoUrl,
+  coverUrl,
+  onClick,
+  tooltipTitle = "点击预览视频",
+  width = 72,
+  height = 48,
+  showPlayIcon = true,
+  orderBadge,
+}: {
+  videoUrl: string;
+  coverUrl?: string | null;
+  onClick: () => void;
+  tooltipTitle?: React.ReactNode;
+  width?: number;
+  height?: number;
+  showPlayIcon?: boolean;
+  orderBadge?: number;
+}) {
+  const button = (
+    <button
+      type="button"
+      aria-label="预览视频"
+      onClick={onClick}
+      style={{
+        position: "relative",
+        width,
+        height,
+        padding: 0,
+        border: "1px solid var(--vol-hairline)",
+        borderRadius: 6,
+        overflow: "hidden",
+        cursor: "pointer",
+        background: "#111",
+      }}
+    >
+      <VideoFrameThumbnail
+        videoUrl={videoUrl}
+        coverUrl={coverUrl}
+        width={width}
+        height={height}
+        showPlayIcon={showPlayIcon}
+        orderBadge={orderBadge}
+        borderRadius={0}
+      />
     </button>
   );
 

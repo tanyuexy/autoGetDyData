@@ -3,13 +3,15 @@
 import { Select, Table } from "antd";
 import { CommentReplyModal } from "@/components/comment/CommentReplyModal";
 import { CommentToolbar } from "@/components/comment/CommentToolbar";
+import { useTableBodyScrollY } from "@/hooks/useTableBodyScrollY";
 import { useCommentPage } from "@/lib/comment/hooks/useCommentPage";
 
 export default function CommentPage() {
   const vm = useCommentPage();
+  const { containerRef, scrollY } = useTableBodyScrollY();
 
   return (
-    <div style={{ width: "100%" }}>
+    <div className="app-page-fill">
       <CommentToolbar
         toolbarAccountsSanitized={vm.toolbarAccountsSanitized}
         onToolbarAccountChange={vm.handleToolbarAccountSelectChange}
@@ -26,7 +28,7 @@ export default function CommentPage() {
         accountStats={vm.accountStats}
       />
 
-      <div style={{ marginBottom: 10, display: "flex", gap: 12, alignItems: "center" }}>
+      <div style={{ marginBottom: 10, display: "flex", gap: 12, alignItems: "center", flexShrink: 0 }}>
         <Select
           size="small"
           style={{ width: 160 }}
@@ -46,27 +48,29 @@ export default function CommentPage() {
         />
       </div>
 
-      <Table
-        rowKey="id"
-        size="small"
-        bordered
-        loading={vm.loadingItems}
-        dataSource={vm.filteredItems}
-        columns={vm.columns as never[]}
-        tableLayout="fixed"
-        rowSelection={{
-          selectedRowKeys: vm.selectedRowKeys,
-          onChange: (keys) => vm.setSelectedRowKeys(keys),
-        }}
-        pagination={{
-          pageSize: 30,
-          showSizeChanger: true,
-          showTotal: (t) => `共 ${t} 条评论`,
-        }}
-        scroll={{ x: 960, y: "calc(100vh - 260px)" }}
-        locale={{ emptyText: "暂无评论数据，请先选择账号并点击「抓取评论」" }}
-        style={{ width: "100%" }}
-      />
+      <div ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
+        <Table
+          rowKey="id"
+          size="small"
+          bordered
+          loading={vm.loadingItems}
+          dataSource={vm.filteredItems}
+          columns={vm.columns as never[]}
+          tableLayout="fixed"
+          rowSelection={{
+            selectedRowKeys: vm.selectedRowKeys,
+            onChange: (keys) => vm.setSelectedRowKeys(keys),
+          }}
+          pagination={{
+            pageSize: 30,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 条评论`,
+          }}
+          scroll={{ x: 960, y: scrollY }}
+          locale={{ emptyText: "暂无评论数据，请先选择账号并点击「抓取评论」" }}
+          style={{ width: "100%" }}
+        />
+      </div>
 
       <CommentReplyModal
         open={vm.replyModalOpen}

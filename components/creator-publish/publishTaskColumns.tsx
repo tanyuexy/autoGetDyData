@@ -126,7 +126,7 @@ export function buildPublishTaskColumns(deps: PublishTaskColumnsDeps): ColumnsTy
       title: "账号",
       dataIndex: "accountName",
       align: "center" as const,
-      width: 128,
+      width: 150,
       render: (value: string) => renderMultilineText(value, 2),
     },
     {
@@ -254,7 +254,7 @@ export function buildPublishTaskColumns(deps: PublishTaskColumnsDeps): ColumnsTy
     },
     {
       title: "广审批文号",
-      width: 112,
+      width: 120,
       render: (_: unknown, r: PublishTask) => renderMultilineText(r.payload.approvalNumber || "", 2),
     },
     {
@@ -312,7 +312,7 @@ export function buildPublishTaskColumns(deps: PublishTaskColumnsDeps): ColumnsTy
     {
       title: "更新时间",
       key: "taskDisplayTime",
-      width: 100,
+      width: 120,
       align: "center" as const,
       render: (_: unknown, r: PublishTask) =>
         dayjs(r.displayUpdatedAt ?? r.updatedAt ?? r.createdAt).format("MM-DD HH:mm"),

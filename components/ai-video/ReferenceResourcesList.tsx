@@ -1,12 +1,8 @@
 "use client";
 
 import { Button, Tooltip, Typography } from "antd";
-import {
-  DeleteOutlined,
-  HolderOutlined,
-  PaperClipOutlined,
-  PlayCircleOutlined,
-} from "@ant-design/icons";
+import { DeleteOutlined, HolderOutlined, PaperClipOutlined } from "@ant-design/icons";
+import { VideoFrameThumbnail } from "@/components/ai-video/ClipVideoThumbnail";
 import { formatFileSize, getReferenceLabel } from "@/lib/ai-video/clipUtils";
 import { framePreviewStyle } from "@/lib/ai-video/styles";
 import type { ReferenceResource } from "@/lib/ai-video/types";
@@ -40,7 +36,7 @@ export function ReferenceResourcesList({
   const canDrag = referenceResources.length > 1;
 
   return (
-    <>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
       {referenceResources.map((resource, index) => {
         const label = getReferenceLabel(referenceResources, resource);
         const token = `@${label}`;
@@ -49,31 +45,45 @@ export function ReferenceResourcesList({
         return (
           <div
             key={resource.id}
-            draggable={canDrag}
-            onDragStart={(event) => onDragStart(event, resource.id)}
             onDragOver={(event) => onDragOver(event, resource.id)}
             onDragLeave={(event) => onDragLeave(event, resource.id)}
             onDrop={(event) => onDrop(event, resource.id)}
-            onDragEnd={onDragEnd}
             style={{
               ...framePreviewStyle,
               maxWidth: 520,
-              cursor: canDrag ? (isDragging ? "grabbing" : "grab") : "default",
               opacity: isDragging ? 0.55 : 1,
               borderColor: isDragOver ? "var(--ic-fin-orange)" : "var(--vol-hairline)",
               boxShadow: isDragOver ? "0 0 0 1px var(--ic-fin-orange)" : undefined,
             }}
           >
-            <Tooltip title={canDrag ? "拖动调整顺序" : undefined}>
-              <HolderOutlined
-                aria-hidden
+            <Tooltip title={canDrag ? "按住左侧图标拖动调整顺序" : undefined}>
+              <span
+                draggable={canDrag}
+                onDragStart={(event) => {
+                  if (!canDrag) {
+                    event.preventDefault();
+                    return;
+                  }
+                  event.stopPropagation();
+                  onDragStart(event, resource.id);
+                }}
+                onDragEnd={(event) => {
+                  event.stopPropagation();
+                  onDragEnd();
+                }}
+                aria-label={canDrag ? "拖动调整顺序" : undefined}
                 style={{
+                  display: "inline-flex",
+                  alignItems: "center",
                   color: "var(--vol-mute)",
                   fontSize: 14,
                   flexShrink: 0,
-                  cursor: canDrag ? "grab" : "default",
+                  cursor: canDrag ? (isDragging ? "grabbing" : "grab") : "default",
+                  touchAction: "none",
                 }}
-              />
+              >
+                <HolderOutlined />
+              </span>
             </Tooltip>
             <Typography.Text type="secondary" style={{ width: 18, flexShrink: 0, fontSize: 12 }}>
               {index + 1}
@@ -85,6 +95,8 @@ export function ReferenceResourcesList({
                 alt={resource.name}
                 style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 4, flexShrink: 0 }}
               />
+            ) : resource.kind === "video" ? (
+              <VideoFrameThumbnail videoUrl={resource.url} width={36} height={36} borderRadius={4} />
             ) : (
               <div
                 style={{
@@ -100,7 +112,7 @@ export function ReferenceResourcesList({
                   fontSize: 16,
                 }}
               >
-                {resource.kind === "video" ? <PlayCircleOutlined /> : <PaperClipOutlined />}
+                <PaperClipOutlined />
               </div>
             )}
             <Button size="small" type="link" draggable={false} onClick={() => onInsertToken(resource)}>
@@ -124,6 +136,6 @@ export function ReferenceResourcesList({
           </div>
         );
       })}
-    </>
+    </div>
   );
 }
