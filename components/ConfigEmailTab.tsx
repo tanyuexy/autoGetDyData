@@ -15,6 +15,7 @@ interface Props {
   emails: EmailEntry[];
   onChange: (emails: EmailEntry[]) => void;
   onLogin?: (email: string) => void;
+  onOpenShop?: (email: string) => void;
   refreshKey?: number;
 }
 
@@ -32,7 +33,7 @@ function formatShortDateTime(value?: string | null) {
   }).format(date);
 }
 
-export default function ConfigEmailTab({ emails: initial, onChange, onLogin, refreshKey = 0 }: Props) {
+export default function ConfigEmailTab({ emails: initial, onChange, onLogin, onOpenShop, refreshKey = 0 }: Props) {
   const { message } = App.useApp();
   const [emails, setEmails] = useState<EmailEntry[]>(initial || []);
   const [accounts, setAccounts] = useState<ShopAccount[]>([]);
@@ -248,12 +249,13 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin, ref
     {
       title: "操作",
       key: "actions",
-      width: 280,
+      width: 360,
       align: "center" as const,
       render: (_: any, row: EmailEntry, index: number) => {
         const acc = accountMap.get(row.email);
         const hasState = acc?.hasStorageState;
         const isVerifying = verifying.has(row.email);
+        const canOpenShop = !!hasState;
 
         return (
           <Space wrap style={{ width: "100%", justifyContent: "center" }}>
@@ -266,6 +268,19 @@ export default function ConfigEmailTab({ emails: initial, onChange, onLogin, ref
               >
                 登录
               </Button>
+            )}
+            {onOpenShop && (
+              <Tooltip title={canOpenShop ? "使用该账号会话打开抖店页面" : "尚未登录，无法打开抖店页面"}>
+                <span>
+                  <Button
+                    size="small"
+                    disabled={!canOpenShop}
+                    onClick={() => onOpenShop(row.email)}
+                  >
+                    抖店页面
+                  </Button>
+                </span>
+              </Tooltip>
             )}
             {hasState && (
               <Button

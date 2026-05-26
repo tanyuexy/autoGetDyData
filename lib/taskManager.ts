@@ -14,7 +14,7 @@ import {
 } from "./runtimeProcessStore";
 import { cancelApiTask, countRunningApiTasks, getRunningApiTaskList } from "./apiTaskRunner";
 
-export type TaskNamespace = "creator-export" | "creator-open" | "shop-export" | "creator-publish" | "login" | "system" | "feishu" | "review" | "comment" | "verify";
+export type TaskNamespace = "creator-export" | "creator-open" | "shop-export" | "shop-open" | "creator-publish" | "login" | "system" | "feishu" | "review" | "comment" | "verify";
 
 /**
  * 生成带时间后缀的 taskId，格式：{prefix}-HH.mm.ss
@@ -46,6 +46,11 @@ function extractTaskLogMeta(
       return meta;
     }
 
+    if (action === "shop:open" && normalizedArgs[2]) {
+      meta.target = normalizedArgs[2];
+      return meta;
+    }
+
     if (action === "shop:login" && normalizedArgs[2]) {
       meta.target = normalizedArgs[2];
       return meta;
@@ -70,6 +75,7 @@ const DEFAULT_MAX_CONCURRENT: Record<TaskNamespace, number> = {
   "creator-export": 1,
   "creator-open": Number.POSITIVE_INFINITY,
   "shop-export": 1,
+  "shop-open": Number.POSITIVE_INFINITY,
   "creator-publish": 3,
   login: Number.POSITIVE_INFINITY,
   system: 1,
@@ -82,6 +88,7 @@ const DEFAULT_MAX_CONCURRENT: Record<TaskNamespace, number> = {
 const DEFAULT_TIMEOUT_MS: Partial<Record<TaskNamespace, number>> = {
   "creator-export": 60 * 60 * 1000,
   "creator-open": 60 * 60 * 1000,
+  "shop-open": 60 * 60 * 1000,
   "shop-export": 2 * 60 * 60 * 1000,
   "creator-publish": 30 * 60 * 1000,
   login: 30 * 60 * 1000,

@@ -20,6 +20,7 @@ const NAMESPACE_LABELS: Record<string, string> = {
   "creator-feishu-sync": "抖创同步",
   "creator-export-push": "抖创推送",
   "shop-export": "抖店导出",
+  "shop-open": "抖店页面",
   "shop-feishu-sync": "抖店同步",
   "shop-export-push": "抖店推送",
   "creator-publish": "发布",

@@ -18,6 +18,7 @@ const PREFIX_MAP = {
   "shop-feishu-sync-": "shop-feishu-sync",
   "shop-export-push-": "shop-export-push",
   "shop-login-": "shop-login",
+  "shop-open-": "shop-open",
   "shop-export-": "shop-export",
   "shop-": "shop-export",
   "feishu-": "feishu"

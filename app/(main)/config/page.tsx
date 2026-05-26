@@ -269,6 +269,14 @@ export default function ConfigPage() {
                 message.error(e instanceof Error ? e.message : "启动登录失败");
               }
             }}
+            onOpenShop={async (email) => {
+              try {
+                await startTask("/api/shop/open", { email }, "system");
+                message.info(`已打开抖店页面: ${email}`);
+              } catch (e: unknown) {
+                message.error(e instanceof Error ? e.message : "打开失败");
+              }
+            }}
           />
         </SettingSection>
       ),

@@ -67,6 +67,10 @@ const ROUTES = {
   "shop:verify": {
     script: "scripts/douyin-shop/verify.js",
     argv: []
+  },
+  "shop:open": {
+    script: "scripts/douyin-shop/commands/open.js",
+    argv: []
   }
 };
 
