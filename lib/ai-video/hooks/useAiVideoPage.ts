@@ -107,6 +107,28 @@ const [dragOverReferenceId, setDragOverReferenceId] = useState<string | null>(nu
 const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
 const [promptAtIndex, setPromptAtIndex] = useState<number | null>(null);
 const [resourcePickerActiveIndex, setResourcePickerActiveIndex] = useState(0);
+
+const handleModeChange = useCallback((nextMode: GenerationMode) => {
+  if (mode === nextMode) return;
+  setMode(nextMode);
+  setReferenceResources([]);
+  setFirstFrameUrl("");
+  setLastFrameUrl("");
+  setFirstFrameFiles([]);
+  setLastFrameFiles([]);
+  setResourcePickerOpen(false);
+  setResourcePickerActiveIndex(0);
+  try {
+    window.localStorage.removeItem(REFERENCE_CACHE_KEY);
+  } catch {}
+  writeStoredConfig({
+    firstFrameUrl: "",
+    lastFrameUrl: "",
+    firstFrameFiles: [],
+    lastFrameFiles: [],
+  });
+}, [mode]);
+
 const promptTextAreaRef = useRef<HTMLTextAreaElement | null>(null);
 const dragCounterRef = useRef(0);
 const draggingReferenceIdRef = useRef<string | null>(null);
@@ -600,7 +622,7 @@ async function submitTask() {
       lastFrameUrl,
       firstFrameFiles: snapshotFirstFrameFiles,
       lastFrameFiles,
-      referenceResources,
+      referenceResources: resolvedReferenceResources,
       ratio,
       resolution,
       duration,
@@ -1367,7 +1389,7 @@ const handleReferenceDrop = useCallback(
     model,
     setModel,
     mode,
-    setMode,
+    setMode: handleModeChange,
     prompt,
     firstFrameUrl,
     lastFrameUrl,

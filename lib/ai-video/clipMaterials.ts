@@ -64,6 +64,7 @@ export function getClipGenerationMaterials(clip: ClipItem): ClipGenerationMateri
         label: "尾帧",
       });
     }
+    return items;
   }
 
   const firstFrameRef =
