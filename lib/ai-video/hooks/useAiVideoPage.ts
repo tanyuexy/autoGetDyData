@@ -5,6 +5,7 @@ import type { AiVideoComposedFilm } from "@/types";
 import type { ComposeFilmModalResult } from "@/components/ComposeFilmModal";
 import type { SeedancePromptVersion } from "@/components/ai-video/GeneratePromptModal";
 import { buildClipTableColumns } from "@/components/ai-video/clipTableColumns";
+import type { ClipGenerationMaterial } from "@/lib/ai-video/clipMaterials";
 import { buildFilmTableColumns } from "@/components/ai-video/filmTableColumns";
 import {
   deleteClipFromServer,
@@ -38,6 +39,7 @@ import {
   resolveClipRestoreSnapshot,
   validateReferenceFile,
 } from "@/lib/ai-video/clipUtils";
+import { copyToClipboard } from "@/lib/copyToClipboard";
 import { resolveMediaUrl } from "@/lib/ai-video/media";
 import type { ClipItem, GenerationMode, ReferenceKind, ReferenceResource, SeedanceModelOption } from "@/lib/ai-video/types";
 import {
@@ -96,6 +98,7 @@ const [composedFilms, setComposedFilms] = useState<AiVideoComposedFilm[]>([]);
 const [filmsHydrated, setFilmsHydrated] = useState(false);
 const [previewFilm, setPreviewFilm] = useState<AiVideoComposedFilm | null>(null);
 const [previewClip, setPreviewClip] = useState<ClipItem | null>(null);
+const [previewMaterial, setPreviewMaterial] = useState<ClipGenerationMaterial | null>(null);
 const [dragActive, setDragActive] = useState(false);
 const [draggingReferenceId, setDraggingReferenceId] = useState<string | null>(null);
 const [dragOverReferenceId, setDragOverReferenceId] = useState<string | null>(null);
@@ -1098,10 +1101,10 @@ async function downloadClip(record: ClipItem) {
 
 
 async function copyPrompt(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
+  const ok = await copyToClipboard(text);
+  if (ok) {
     message.success("已复制提示词");
-  } catch {
+  } else {
     message.error("复制失败，请手动选择复制");
   }
 }
@@ -1260,6 +1263,10 @@ const handleReferenceDrop = useCallback(
     setPreviewClip(clip);
   }, []);
 
+  const handlePreviewMaterial = useCallback((material: ClipGenerationMaterial) => {
+    setPreviewMaterial(material);
+  }, []);
+
   const handleDeleteFilm = useCallback(
     async (record: AiVideoComposedFilm) => {
       await deleteFilmFromServer(record.id);
@@ -1302,12 +1309,13 @@ const handleReferenceDrop = useCallback(
         composeOrderMap,
         onCopyPrompt: copyPrompt,
         onPreviewClip: handlePreviewClip,
+        onPreviewMaterial: handlePreviewMaterial,
         onPollTask: pollTask,
         onDownloadClip: downloadClip,
         onRestoreFormFromClip: restoreFormFromClip,
         onDeleteClip: handleDeleteClip,
       }),
-    [composeOrderMap, copyPrompt, downloadClip, handleDeleteClip, handlePreviewClip, pollTask, restoreFormFromClip]
+    [composeOrderMap, copyPrompt, downloadClip, handleDeleteClip, handlePreviewClip, handlePreviewMaterial, pollTask, restoreFormFromClip]
   );
 
   const handleGroupAssignConfirm = useCallback(async () => {
@@ -1381,6 +1389,8 @@ const handleReferenceDrop = useCallback(
     setPreviewFilm,
     previewClip,
     setPreviewClip,
+    previewMaterial,
+    setPreviewMaterial,
     dragActive,
     draggingReferenceId,
     dragOverReferenceId,

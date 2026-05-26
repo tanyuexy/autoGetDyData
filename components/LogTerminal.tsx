@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { App, Button, Modal, Space, Typography } from "antd";
 import { ClearOutlined, CopyOutlined } from "@ant-design/icons";
 import type { LogEntry } from "@/types";
+import { copyToClipboard } from "@/lib/copyToClipboard";
 
 const { Text } = Typography;
 const AUTO_SCROLL_THRESHOLD = 24;
@@ -95,14 +96,10 @@ export default function LogTerminal({ logs, onClear, height }: Props) {
       return;
     }
 
-    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      try {
-        await navigator.clipboard.writeText(text);
-        message.success("已复制到剪贴板");
-        return;
-      } catch {
-        /* 无权限等：走手动复制 */
-      }
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      message.success("已复制到剪贴板");
+      return;
     }
 
     openManualCopyModal(text);

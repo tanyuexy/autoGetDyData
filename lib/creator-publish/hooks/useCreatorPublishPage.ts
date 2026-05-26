@@ -17,6 +17,7 @@ import type {
 } from "@/lib/creator-publish/types";
 import { normalizeFeishuAiProvider } from "@/lib/feishuAiProvider";
 import type { ConfigData, FeishuAiProvider } from "@/types";
+import { copyToClipboard } from "@/lib/copyToClipboard";
 
 async function uploadOne(file: File): Promise<string> {
   const fd = new FormData();
@@ -633,10 +634,10 @@ export function useCreatorPublishPage() {
   }
 
   async function copyTaskId(id: string) {
-    try {
-      await navigator.clipboard.writeText(id);
+    const ok = await copyToClipboard(id);
+    if (ok) {
       message.success("已复制任务 ID");
-    } catch {
+    } else {
       message.error("复制失败，请手动选择复制");
     }
   }

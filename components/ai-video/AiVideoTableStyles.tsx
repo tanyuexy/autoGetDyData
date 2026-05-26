@@ -10,6 +10,14 @@ export function AiVideoTableStyles() {
       .ai-video-clips-table .ant-table-selection-column {
         text-align: center;
       }
+      .ai-video-clips-table .ai-video-clip-actions .ant-btn-sm {
+        width: 24px;
+        height: 24px;
+        padding: 0;
+      }
+      .ai-video-clips-table .ai-video-clip-actions .ant-btn-sm .ant-btn-icon {
+        font-size: 12px;
+      }
       .ai-video-films-table .ant-table-cell {
         vertical-align: middle;
       }

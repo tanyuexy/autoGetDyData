@@ -165,8 +165,10 @@ export default function AiVideoPage() {
       <PreviewModals
         previewFilm={vm.previewFilm}
         previewClip={vm.previewClip}
+        previewMaterial={vm.previewMaterial}
         onCloseFilm={() => vm.setPreviewFilm(null)}
         onCloseClip={() => vm.setPreviewClip(null)}
+        onCloseMaterial={() => vm.setPreviewMaterial(null)}
       />
     </div>
   );

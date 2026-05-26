@@ -3,7 +3,9 @@
 import { Button, Space, Tag, Tooltip, Typography } from "antd";
 import type { TableProps } from "antd";
 import { DownloadOutlined, DeleteOutlined, RedoOutlined, ReloadOutlined } from "@ant-design/icons";
+import { ClipMaterialThumbnails } from "@/components/ai-video/ClipMaterialThumbnails";
 import { ClipVideoThumbnail } from "@/components/ai-video/ClipVideoThumbnail";
+import type { ClipGenerationMaterial } from "@/lib/ai-video/clipMaterials";
 import { antdTagPresetStyle } from "@/lib/semanticTagStyles";
 import {
   formatClipStatusLabel,
@@ -16,6 +18,7 @@ export interface BuildClipTableColumnsDeps {
   composeOrderMap: Map<string, number>;
   onCopyPrompt: (text: string) => void;
   onPreviewClip: (clip: ClipItem) => void;
+  onPreviewMaterial: (material: ClipGenerationMaterial) => void;
   onPollTask: (clipId: string, taskId: string) => void;
   onDownloadClip: (clip: ClipItem) => void;
   onRestoreFormFromClip: (clip: ClipItem) => void;
@@ -29,6 +32,7 @@ export function buildClipTableColumns(
     composeOrderMap,
     onCopyPrompt,
     onPreviewClip,
+    onPreviewMaterial,
     onPollTask,
     onDownloadClip,
     onRestoreFormFromClip,
@@ -79,6 +83,15 @@ export function buildClipTableColumns(
           </Tooltip>
         );
       },
+    },
+    {
+      title: "素材",
+      key: "materials",
+      width: 280,
+      align: "center",
+      render: (_, record) => (
+        <ClipMaterialThumbnails clip={record} onPreviewMaterial={onPreviewMaterial} />
+      ),
     },
     {
       title: "混剪分组",
@@ -180,13 +193,13 @@ export function buildClipTableColumns(
     {
       title: "操作",
       key: "actions",
-      width: 210,
+      width: 148,
       align: "center",
       render: (_, record) => {
         const canRestore = record.model !== "manual";
 
         return (
-          <Space size={4} wrap style={{ justifyContent: "center" }}>
+          <Space size={2} wrap style={{ justifyContent: "center" }} className="ai-video-clip-actions">
             {record.taskId && !isFinished(record.status) ? (
               <Tooltip title="刷新 Seedance 任务状态">
                 <Button
