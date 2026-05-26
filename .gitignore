@@ -57,14 +57,6 @@ Desktop.ini
 *.tmp
 *.temp
 .cache/
-.claude/*
-!.claude/skills/
-.claude/skills/*
-!.claude/skills/douyin-audio-download/
-!.claude/skills/douyin-audio-download/**
-!.claude/skills/douyin-video-download/
-!.claude/skills/douyin-video-download/**
-
 # 账号数据与导出文件
 storage/
 
