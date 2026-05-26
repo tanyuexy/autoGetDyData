@@ -580,6 +580,16 @@ function detectPublishTimeField(headers) {
   return headers.find((name) => /发布时间/.test(name)) || null;
 }
 
+function readExportSheetHeaders(workbook, sheetName) {
+  const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+    header: 1,
+    defval: "",
+    raw: false
+  });
+  const headerRow = Array.isArray(matrix[0]) ? matrix[0] : [];
+  return headerRow.map((cell) => String(cell || "").trim()).filter(Boolean);
+}
+
 function validateExportedPostListXlsx(filePath, accountName, start, end) {
   const workbook = XLSX.readFile(filePath, { cellDates: true });
   const sheetName = workbook.SheetNames[0];
@@ -590,8 +600,24 @@ function validateExportedPostListXlsx(filePath, accountName, start, end) {
     defval: "",
     raw: false
   });
+
+  const startDay = new Date(start);
+  startDay.setHours(0, 0, 0, 0);
+  const endDay = new Date(end);
+  endDay.setHours(0, 0, 0, 0);
+
   if (!rows.length) {
-    throw new Error(`账号 [${accountName}] 导出文件为空: ${filePath}`);
+    const headers = readExportSheetHeaders(workbook, sheetName);
+    const publishField = detectPublishTimeField(headers);
+    if (!publishField) {
+      throw new Error(
+        `账号 [${accountName}] 导出文件缺少发布时间列，无法校验日期范围: ${filePath}`
+      );
+    }
+    console.log(
+      `账号 [${accountName}] 导出文件日期校验通过: ${formatYmd(startDay)} ~ ${formatYmd(endDay)}，有效行 0（该日期范围内无作品）`
+    );
+    return;
   }
 
   const headers = Object.keys(rows[0] || {});
@@ -601,11 +627,6 @@ function validateExportedPostListXlsx(filePath, accountName, start, end) {
       `账号 [${accountName}] 导出文件缺少发布时间列，无法校验日期范围: ${filePath}`
     );
   }
-
-  const startDay = new Date(start);
-  startDay.setHours(0, 0, 0, 0);
-  const endDay = new Date(end);
-  endDay.setHours(0, 0, 0, 0);
 
   let checked = 0;
   const outOfRange = [];
