@@ -30,4 +30,5 @@ export interface AiVideoCachedConfig {
   watermark?: boolean;
   seed?: number | null;
   callbackUrl?: string;
+  clipTag?: string;
 }

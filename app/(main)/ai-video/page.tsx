@@ -96,6 +96,9 @@ export default function AiVideoPage() {
             showCallbackUrl={vm.showCallbackUrl}
             callbackUrl={vm.callbackUrl}
             setCallbackUrl={vm.setCallbackUrl}
+            clipTag={vm.clipTag}
+            setClipTag={vm.setClipTag}
+            clipTagOptions={vm.clipTagOptions}
             submitting={vm.submitting}
             onSubmitTask={() => void vm.submitTask()}
             onOpenGeneratePrompt={vm.openGeneratePromptModal}
@@ -111,6 +114,10 @@ export default function AiVideoPage() {
             listTab={vm.listTab}
             setListTab={vm.setListTab}
             clips={vm.clips}
+            visibleClips={vm.visibleClips}
+            clipTagFilter={vm.clipTagFilter}
+            clipTagFilterOptions={vm.clipTagFilterOptions}
+            onClipTagFilterChange={vm.setClipTagFilter}
             clipsHydrated={vm.clipsHydrated}
             clipColumns={vm.clipColumns}
             selectedClipIds={vm.selectedClipIds}

@@ -4,6 +4,7 @@ import {
   Alert,
   Button,
   Empty,
+  Select,
   Space,
   Spin,
   Table,
@@ -23,6 +24,10 @@ export interface AiVideoListTabsProps {
   listTab: "clips" | "films";
   setListTab: (tab: "clips" | "films") => void;
   clips: ClipItem[];
+  visibleClips: ClipItem[];
+  clipTagFilter: string | null;
+  clipTagFilterOptions: Array<{ value: string; label: string }>;
+  onClipTagFilterChange: (value: string | null) => void;
   clipsHydrated: boolean;
   clipColumns: NonNullable<TableProps<ClipItem>["columns"]>;
   selectedClipIds: React.Key[];
@@ -55,6 +60,10 @@ export function AiVideoListTabs({
   listTab,
   setListTab,
   clips,
+  visibleClips,
+  clipTagFilter,
+  clipTagFilterOptions,
+  onClipTagFilterChange,
   clipsHydrated,
   clipColumns,
   selectedClipIds,
@@ -89,7 +98,7 @@ export function AiVideoListTabs({
                   <span>片段列表</span>
                   {clipsHydrated ? (
                     <Tag variant="filled" color="default">
-                      {clips.length}
+                      {clipTagFilter ? `${visibleClips.length}/${clips.length}` : clips.length}
                     </Tag>
                   ) : (
                     <Spin size="small" />
@@ -98,10 +107,26 @@ export function AiVideoListTabs({
               ),
               children: (
                 <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-                  <Space align="center" style={{ width: "100%", justifyContent: "space-between" }}>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      勾选片段后可「设为一组」批量分组；随机混剪时在弹窗内勾选参与的分组
-                    </Typography.Text>
+                  <Space align="center" style={{ width: "100%", justifyContent: "space-between" }} wrap>
+                    <Space wrap size={8} align="center">
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        勾选片段后可「设为一组」批量分组；随机混剪时先选标签再选分组
+                      </Typography.Text>
+                      <Select
+                        allowClear
+                        showSearch
+                        placeholder="筛选标签"
+                        value={clipTagFilter ?? undefined}
+                        options={clipTagFilterOptions}
+                        style={{ minWidth: 180 }}
+                        filterOption={(input, option) =>
+                          String(option?.label ?? option?.value ?? "")
+                            .toLowerCase()
+                            .includes(input.trim().toLowerCase())
+                        }
+                        onChange={(value) => onClipTagFilterChange(value ? String(value) : null)}
+                      />
+                    </Space>
                     <Space wrap>
                       <Button
                         icon={<GroupOutlined />}
@@ -129,13 +154,13 @@ export function AiVideoListTabs({
                     </Space>
                   </Space>
 
-                  {clips.length ? (
+                  {visibleClips.length ? (
                     <Table
                       rowKey="id"
                       size="small"
                       className="ai-video-clips-table"
                       pagination={{ pageSize: 8 }}
-                      dataSource={clips}
+                      dataSource={visibleClips}
                       columns={clipColumns}
                       rowSelection={{
                         selectedRowKeys: selectedClipIds,
@@ -145,7 +170,7 @@ export function AiVideoListTabs({
                       }}
                     />
                   ) : (
-                    <Empty description="还没有片段" />
+                    <Empty description={clipTagFilter ? "当前标签下暂无片段" : "还没有片段"} />
                   )}
 
                   <Alert

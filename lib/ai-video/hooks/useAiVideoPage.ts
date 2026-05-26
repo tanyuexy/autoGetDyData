@@ -6,6 +6,7 @@ import type { ComposeFilmModalResult } from "@/components/ComposeFilmModal";
 import type { SeedancePromptVersion } from "@/components/ai-video/GeneratePromptModal";
 import { buildClipTableColumns } from "@/components/ai-video/clipTableColumns";
 import { getClipGenerationMaterials, type ClipGenerationMaterial } from "@/lib/ai-video/clipMaterials";
+import { buildClipTagOptions, collectClipTags, filterClipsByTag, normalizeClipTag } from "@/lib/ai-video/clipTags";
 import type { MaterialPreviewSession } from "@/components/ai-video/AiVideoMaterialPreviewModal";
 import { buildFilmTableColumns } from "@/components/ai-video/filmTableColumns";
 import {
@@ -82,6 +83,8 @@ const [seed, setSeed] = useState<number | null>(
   typeof cachedConfig.seed === "number" ? cachedConfig.seed : null
 );
 const [callbackUrl, setCallbackUrl] = useState(cachedConfig.callbackUrl || "");
+const [clipTag, setClipTag] = useState(cachedConfig.clipTag || "");
+const [clipTagFilter, setClipTagFilter] = useState<string | null>(null);
 const [clips, setClips] = useState<ClipItem[]>([]);
 const [clipsHydrated, setClipsHydrated] = useState(false);
 const [selectedClipIds, setSelectedClipIds] = useState<React.Key[]>([]);
@@ -270,9 +273,11 @@ useEffect(() => {
     watermark,
     seed,
     callbackUrl,
+    clipTag,
   });
 }, [
   callbackUrl,
+  clipTag,
   duration,
   firstFrameFiles,
   firstFrameUrl,
@@ -349,6 +354,17 @@ const composeGroupOptions = useMemo(
   () => existingComposeGroups.map((name) => ({ value: name, label: name })),
   [existingComposeGroups]
 );
+
+const existingClipTags = useMemo(() => collectClipTags(clips), [clips]);
+
+const clipTagOptions = useMemo(() => buildClipTagOptions(existingClipTags), [existingClipTags]);
+
+const clipTagFilterOptions = useMemo(
+  () => clipTagOptions.map((item) => ({ value: item.value, label: item.label })),
+  [clipTagOptions]
+);
+
+const visibleClips = useMemo(() => filterClipsByTag(clips, clipTagFilter), [clipTagFilter, clips]);
 
 const updateClip = useCallback((id: string, patch: Partial<ClipItem>) => {
   setClips((prev) => prev.map((clip) => (clip.id === id ? { ...clip, ...patch } : clip)));
@@ -450,6 +466,7 @@ const restoreFormFromClip = useCallback(
     setWatermark(snapshot.watermark);
     setSeed(snapshot.seed);
     setCallbackUrl(snapshot.callbackUrl);
+    setClipTag(record.tag || "");
 
     writeStoredConfig({
       model: snapshot.model,
@@ -466,6 +483,7 @@ const restoreFormFromClip = useCallback(
       watermark: snapshot.watermark,
       seed: snapshot.seed,
       callbackUrl: snapshot.callbackUrl,
+      clipTag: record.tag || "",
     });
     try {
       window.localStorage.setItem(REFERENCE_CACHE_KEY, JSON.stringify(snapshot.referenceResources));
@@ -557,6 +575,10 @@ async function submitTask() {
     message.warning("请先输入提示词");
     return;
   }
+  if (!normalizeClipTag(clipTag)) {
+    message.warning("请选择或输入标签");
+    return;
+  }
   const firstFrameReference = mode === "first-frame" ? getFirstImageReference(referenceResources) : null;
   const resolvedFirstFrameUrl = mode === "first-frame" ? firstFrameReference?.url || "" : firstFrameUrl;
   const requestMode = mode === "first-frame" && !resolvedFirstFrameUrl ? "text" : mode;
@@ -645,6 +667,7 @@ async function submitTask() {
       duration,
       ratio,
       resolution,
+      tag: normalizeClipTag(clipTag),
       createdAt: now,
       updatedAt: now,
       formSnapshot,
@@ -692,6 +715,10 @@ const uploadClipVideo = useCallback(
       message.error("视频不能超过 200MB");
       return;
     }
+    if (!normalizeClipTag(clipTag)) {
+      message.warning("请先选择或输入标签后再上传片段");
+      return;
+    }
 
     setUploadingClip(true);
     try {
@@ -714,6 +741,7 @@ const uploadClipVideo = useCallback(
         duration,
         ratio,
         resolution,
+        tag: normalizeClipTag(clipTag),
         createdAt: now,
         updatedAt: now,
       };
@@ -727,7 +755,7 @@ const uploadClipVideo = useCallback(
       setUploadingClip(false);
     }
   },
-  [clips.length, duration, message, ratio, resolution]
+  [clipTag, clips.length, duration, message, ratio, resolution]
 );
 
 const clipUploadProps: UploadProps = {
@@ -1415,6 +1443,13 @@ const handleReferenceDrop = useCallback(
     callbackUrl,
     setCallbackUrl,
     clips,
+    visibleClips,
+    clipTag,
+    setClipTag,
+    clipTagOptions,
+    clipTagFilter,
+    setClipTagFilter,
+    clipTagFilterOptions,
     clipsHydrated,
     selectedClipIds,
     submitting,

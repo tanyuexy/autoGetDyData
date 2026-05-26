@@ -95,6 +95,24 @@ export function buildClipTableColumns(
       ),
     },
     {
+      title: "标签",
+      dataIndex: "tag",
+      width: 100,
+      align: "center",
+      render: (_, record) => {
+        const tag = String(record.tag || "").trim();
+        return tag ? (
+          <Tag variant="filled" color="cyan" style={{ margin: 0 }}>
+            {tag}
+          </Tag>
+        ) : (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            —
+          </Typography.Text>
+        );
+      },
+    },
+    {
       title: "混剪分组",
       dataIndex: "composeGroup",
       width: 120,

@@ -66,6 +66,7 @@ export async function ensureMongoIndexes(): Promise<void> {
       { key: { createdAt: -1 }, name: "createdAt" },
       { key: { taskId: 1 }, name: "taskId_sparse", sparse: true },
       { key: { status: 1, updatedAt: -1 }, name: "status_updatedAt" },
+      { key: { tag: 1, createdAt: -1 }, name: "tag_createdAt", sparse: true },
     ]),
     db.collection("ai_video_composed_films").createIndexes([
       { key: { createdAt: -1 }, name: "createdAt" },

@@ -24,6 +24,7 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 import { VideoFrameThumbnail } from "@/components/ai-video/ClipVideoThumbnail";
+import { ClipTagSelect } from "@/components/ai-video/ClipTagSelect";
 import { ReferenceResourcesList } from "@/components/ai-video/ReferenceResourcesList";
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from "@/lib/ai-video/constants";
 import { getReferenceLabel } from "@/lib/ai-video/clipUtils";
@@ -96,6 +97,9 @@ export interface GenerationFormSectionProps {
   showCallbackUrl: boolean;
   callbackUrl: string;
   setCallbackUrl: (url: string) => void;
+  clipTag: string;
+  setClipTag: (value: string) => void;
+  clipTagOptions: Array<{ value: string; label: string }>;
   submitting: boolean;
   onSubmitTask: () => void;
   onOpenGeneratePrompt: () => void;
@@ -207,6 +211,9 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
     showCallbackUrl,
     callbackUrl,
     setCallbackUrl,
+    clipTag,
+    setClipTag,
+    clipTagOptions,
     submitting,
     onSubmitTask,
     onOpenGeneratePrompt,
@@ -575,6 +582,23 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
         {showCallbackUrl ? (
           <Input value={callbackUrl} onChange={(e) => setCallbackUrl(e.target.value)} placeholder="Callback URL（可选）" />
         ) : null}
+
+        <Space orientation="vertical" size={4} style={{ width: "100%" }}>
+          <Typography.Text strong>
+            标签<Typography.Text type="danger"> *</Typography.Text>
+          </Typography.Text>
+          <Space wrap align="center" size={12}>
+            <ClipTagSelect
+              value={clipTag}
+              options={clipTagOptions}
+              style={{ width: 240 }}
+              onChange={setClipTag}
+            />
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              用于标识片段、列表筛选，以及随机混剪时先按标签再选分组
+            </Typography.Text>
+          </Space>
+        </Space>
 
         <Space>
           <Button type="primary" icon={<PlayCircleOutlined />} loading={submitting} onClick={onSubmitTask}>

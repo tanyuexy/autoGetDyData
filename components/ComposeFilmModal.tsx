@@ -9,12 +9,14 @@ import {
   InputNumber,
   Modal,
   Segmented,
+  Select,
   Space,
   Switch,
   Tag,
   Typography,
 } from "antd";
 import type { AiVideoClip } from "@/types";
+import { collectClipTags, filterClipsByTag } from "@/lib/ai-video/clipTags";
 import {
   buildComposeGroupsFromClips,
   computeMaxRandomCombinations,
@@ -61,6 +63,7 @@ export function ComposeFilmModal({
   const [mode, setMode] = useState<ComposeFilmMode>("sequential");
   const [outputCount, setOutputCount] = useState(3);
   const [orderRule, setOrderRule] = useState("");
+  const [composeTag, setComposeTag] = useState<string>("");
   const [selectedGroupNames, setSelectedGroupNames] = useState<string[]>([]);
   const [addBackgroundMusic, setAddBackgroundMusic] = useState(true);
 
@@ -69,7 +72,14 @@ export function ComposeFilmModal({
     [clips]
   );
 
-  const allGroups = useMemo(() => buildComposeGroupsFromClips(readyClips), [readyClips]);
+  const availableTags = useMemo(() => collectClipTags(readyClips), [readyClips]);
+
+  const tagReadyClips = useMemo(
+    () => filterClipsByTag(readyClips, composeTag),
+    [composeTag, readyClips]
+  );
+
+  const allGroups = useMemo(() => buildComposeGroupsFromClips(tagReadyClips), [tagReadyClips]);
 
   const allGroupNames = useMemo(() => allGroups.map((group) => group.name), [allGroups]);
 
@@ -91,21 +101,37 @@ export function ComposeFilmModal({
 
   useEffect(() => {
     if (!open) return;
-    const namesFromSelection = [
+    const tagsFromSelection = [
       ...new Set(
         selectedClips
-          .map((clip) => inferComposeGroup(clip.name, clip.composeGroup))
+          .map((clip) => String(clip.tag || "").trim())
           .filter(Boolean)
       ),
     ];
-    setSelectedGroupNames(namesFromSelection);
+    setComposeTag(tagsFromSelection.length === 1 ? tagsFromSelection[0] : "");
     setMode(selectedClips.length >= 2 ? "sequential" : "random");
     setAddBackgroundMusic(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  useEffect(() => {
+    if (!open || mode !== "random" || !composeTag.trim()) {
+      setSelectedGroupNames([]);
+      return;
+    }
+    const namesFromSelection = [
+      ...new Set(
+        selectedClips
+          .filter((clip) => String(clip.tag || "").trim() === composeTag.trim())
+          .map((clip) => inferComposeGroup(clip.name, clip.composeGroup))
+          .filter(Boolean)
+      ),
+    ];
+    setSelectedGroupNames(namesFromSelection);
+  }, [composeTag, mode, open, selectedClips]);
+
   const canSubmitSequential = selectedClips.length >= 2;
-  const canSubmitRandom = composeGroups.length >= 2 && composeGroups.every((group) => group.segments.length > 0);
+  const canSubmitRandom = Boolean(composeTag.trim()) && composeGroups.length >= 2 && composeGroups.every((group) => group.segments.length > 0);
   const canSubmit =
     mode === "sequential"
       ? canSubmitSequential
@@ -212,7 +238,7 @@ export function ComposeFilmModal({
               <Space orientation="vertical" size={2} style={{ width: "100%" }}>
                 {selectedClips.map((clip, index) => (
                   <Typography.Text key={clip.id} style={{ fontSize: 12 }}>
-                    {index + 1}. {clip.name}
+                    {index + 1}. {clip.name}{clip.tag ? ` · ${clip.tag}` : ""}
                   </Typography.Text>
                 ))}
               </Space>
@@ -221,8 +247,36 @@ export function ComposeFilmModal({
         ) : (
           <>
             <Typography.Paragraph type="secondary" style={hintTextStyle}>
-              勾选参与混剪的分组；每个分组会随机选 1 个片段。勾选顺序即分组在成片中的排列顺序。
+              先选择标签，再勾选该标签下参与混剪的分组；每个分组会随机选 1 个片段。
             </Typography.Paragraph>
+
+            <Space orientation="vertical" size={6} style={{ width: "100%" }}>
+              <Typography.Text strong style={{ fontSize: 13 }}>
+                标签
+              </Typography.Text>
+              <Select
+                showSearch
+                allowClear
+                placeholder="选择标签"
+                value={composeTag || undefined}
+                options={availableTags.map((tag) => ({ value: tag, label: tag }))}
+                style={{ width: "100%" }}
+                filterOption={(input, option) =>
+                  String(option?.label ?? option?.value ?? "")
+                    .toLowerCase()
+                    .includes(input.trim().toLowerCase())
+                }
+                onChange={(value) => setComposeTag(value ? String(value) : "")}
+              />
+              {!availableTags.length ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={compactAlertStyle}
+                  title="暂无可用于随机混剪的标签。请先在生成或上传片段时设置标签。"
+                />
+              ) : null}
+            </Space>
 
             <Space orientation="vertical" size={6} style={{ width: "100%" }}>
               <Space align="center" style={{ width: "100%", justifyContent: "space-between" }}>
@@ -234,6 +288,7 @@ export function ComposeFilmModal({
                     size="small"
                     type="link"
                     style={{ padding: 0, height: "auto" }}
+                    disabled={!composeTag.trim()}
                     onClick={() => setSelectedGroupNames(allGroupNames)}
                   >
                     全选
@@ -258,7 +313,11 @@ export function ComposeFilmModal({
                   padding: "6px 10px",
                 }}
               >
-                {allGroups.length ? (
+                {!composeTag.trim() ? (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    请先选择标签，再勾选该标签下的混剪分组。
+                  </Typography.Text>
+                ) : allGroups.length ? (
                   <Space orientation="vertical" size={8} style={{ width: "100%" }}>
                     {allGroups.map((group, index) => {
                       const checked = selectedGroupNames.includes(group.name);
@@ -303,7 +362,7 @@ export function ComposeFilmModal({
                   </Space>
                 ) : (
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    暂无可用分组。请先在片段列表勾选片段并使用「设为一组」设置分组。
+                    该标签下暂无可用分组。请先在片段列表勾选片段并使用「设为一组」设置分组。
                   </Typography.Text>
                 )}
               </div>
@@ -313,7 +372,9 @@ export function ComposeFilmModal({
               </Typography.Text>
             </Space>
 
-            {composeGroups.length >= 2 ? null : (
+            {!composeTag.trim() ? (
+              <Alert type="info" showIcon style={compactAlertStyle} title="随机混剪需要先选择标签。" />
+            ) : composeGroups.length >= 2 ? null : (
               <Alert
                 type="warning"
                 showIcon

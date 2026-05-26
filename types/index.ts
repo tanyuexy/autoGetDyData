@@ -195,6 +195,8 @@ export interface AiVideoClip {
   resolution: string;
   /** 混剪分组名，随机混剪时同组片段互斥选取 */
   composeGroup?: string | null;
+  /** 片段标签，用于列表筛选与随机混剪按标签选分组 */
+  tag?: string | null;
   createdAt: string;
   updatedAt: string;
   formSnapshot?: AiVideoClipFormSnapshot;

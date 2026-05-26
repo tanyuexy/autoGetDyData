@@ -27,6 +27,7 @@ function normalizeClip(doc: unknown): AiVideoClip | null {
     ratio: String(item.ratio || "9:16"),
     resolution: String(item.resolution || "720p"),
     composeGroup: item.composeGroup ? String(item.composeGroup) : null,
+    tag: item.tag ? String(item.tag).trim() || null : null,
     createdAt: String(item.createdAt || new Date().toISOString()),
     updatedAt: String(item.updatedAt || item.createdAt || new Date().toISOString()),
     formSnapshot: item.formSnapshot,
