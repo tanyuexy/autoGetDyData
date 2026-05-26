@@ -4,7 +4,7 @@ import { existsSync } from "fs";
 import os from "os";
 import path from "path";
 import { applyRandomBackgroundMusic } from "@/lib/composeMusic";
-import { COMPOSED_FILMS_URL_PREFIX, getComposedFilmsDir } from "@/lib/aiVideoMedia";
+import { archiveComposedFilmFile, getComposedFilmsDir } from "@/lib/aiVideoMedia";
 import { getFfmpegPath } from "@/lib/ffmpeg";
 import {
   computeMaxRandomCombinations,
@@ -153,9 +153,10 @@ export async function composeSequentialFilm(
 
   await composeSegmentsToFile(segments.slice(0, 30), outputPath);
   const backgroundMusic = await maybeApplyBackgroundMusic(outputPath, addBackgroundMusic);
+  const videoUrl = await archiveComposedFilmFile(outputPath, filename);
 
   return {
-    videoUrl: `${COMPOSED_FILMS_URL_PREFIX}${filename}`,
+    videoUrl,
     segmentCount: segments.length,
     mode: "sequential",
     backgroundMusic,
@@ -200,8 +201,9 @@ export async function composeRandomFilms(
     const outputPath = path.join(outputDir, filename);
     await composeSegmentsToFile(combos[i].segments, outputPath);
     const backgroundMusic = await maybeApplyBackgroundMusic(outputPath, addBackgroundMusic);
+    const videoUrl = await archiveComposedFilmFile(outputPath, filename);
     films.push({
-      videoUrl: `${COMPOSED_FILMS_URL_PREFIX}${filename}`,
+      videoUrl,
       segmentCount: combos[i].segments.length,
       mode: "random",
       comboIndex: i + 1,

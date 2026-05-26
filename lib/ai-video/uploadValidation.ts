@@ -1,0 +1,70 @@
+import path from "path";
+
+export type UploadMediaKind = "image" | "video" | "audio";
+
+const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const VIDEO_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const AUDIO_TYPES = new Set(["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/mp4", "audio/aac"]);
+
+export const MAX_IMAGE_SIZE = 12 * 1024 * 1024;
+export const MAX_VIDEO_SIZE = 200 * 1024 * 1024;
+export const MAX_AUDIO_SIZE = 80 * 1024 * 1024;
+
+export function getUploadExtension(file: File, kind: UploadMediaKind) {
+  const byType: Record<string, string> = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mp4": ".m4a",
+    "audio/aac": ".aac",
+  };
+  const fromType = byType[file.type];
+  if (fromType) return fromType;
+  const ext = path.extname(file.name).toLowerCase();
+  if (ext) return ext;
+  if (kind === "video") return ".mp4";
+  if (kind === "audio") return ".mp3";
+  return ".png";
+}
+
+export function detectUploadKind(file: File): UploadMediaKind | null {
+  if (IMAGE_TYPES.has(file.type)) return "image";
+  if (VIDEO_TYPES.has(file.type)) return "video";
+  if (AUDIO_TYPES.has(file.type)) return "audio";
+  const ext = path.extname(file.name).toLowerCase();
+  if ([".jpg", ".jpeg", ".png", ".webp"].includes(ext)) return "image";
+  if ([".mp4", ".mov", ".webm"].includes(ext)) return "video";
+  if ([".mp3", ".wav", ".m4a", ".aac"].includes(ext)) return "audio";
+  return null;
+}
+
+export function getUploadMaxSize(kind: UploadMediaKind) {
+  if (kind === "video") return MAX_VIDEO_SIZE;
+  if (kind === "audio") return MAX_AUDIO_SIZE;
+  return MAX_IMAGE_SIZE;
+}
+
+export function getUploadSizeError(kind: UploadMediaKind) {
+  if (kind === "video") return "视频不能超过 200MB";
+  if (kind === "audio") return "音频不能超过 80MB";
+  return "图片不能超过 12MB";
+}
+
+export function buildUploadFilename(kind: UploadMediaKind, file: File) {
+  const prefix = kind === "video" ? "clip" : kind === "audio" ? "audio" : "frame";
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}${getUploadExtension(file, kind)}`;
+}
+
+export function getUploadContentType(file: File, kind: UploadMediaKind) {
+  if (file.type) return file.type;
+  if (kind === "video") return "video/mp4";
+  if (kind === "audio") return "audio/mpeg";
+  return "image/jpeg";
+}
