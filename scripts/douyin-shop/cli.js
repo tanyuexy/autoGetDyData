@@ -20,6 +20,7 @@ const { closeExportItemStore } = require("./lib/export-item-store");
 const {
   startAndWaitInternalApiTask
 } = require("../common/internal-api-client");
+const { createShopExportTimestamp } = require("./lib/debug");
 
 let activeBrowser = null;
 let shuttingDown = false;
@@ -136,11 +137,7 @@ async function resolveTargetShopNames() {
 }
 
 function createExportBatchId() {
-  return new Date()
-    .toISOString()
-    .replace(/[:.]/g, "-")
-    .replace("T", "_")
-    .slice(0, 19);
+  return createShopExportTimestamp();
 }
 
 function parseDataDate(dataDate) {
@@ -229,19 +226,6 @@ async function resetAccountsDataDirs(accounts) {
 }
 
 
-async function runWithOneFullRetry(label, runAttempt, { onBeforeRetry } = {}) {
-  try {
-    return await runAttempt(1);
-  } catch (firstError) {
-    console.warn(`[${label}] 第 1 轮失败: ${firstError.message || firstError}`);
-    console.log(`[${label}] 自动全量重试 1 次（非部分补跑）…`);
-    if (typeof onBeforeRetry === "function") {
-      await onBeforeRetry();
-    }
-    return await runAttempt(2);
-  }
-}
-
 async function runShopSyncFeishuAttempt(accounts, preferredList) {
   const browser = await chromium.launch({
     headless: HEADLESS,
@@ -249,13 +233,7 @@ async function runShopSyncFeishuAttempt(accounts, preferredList) {
   });
   activeBrowser = browser;
 
-  let daysToExport = 1;
-  try {
-    daysToExport = await calcDaysToExport();
-  } catch (e) {
-    console.warn(`读取飞书表日期失败（sync-feishu 使用默认值 1 天）: ${e.message}`);
-  }
-
+  const { daysToExport, targetDates } = await resolveExportDatePlan();
   const exportBatchId = createExportBatchId();
   console.log(`抖店本次导出批次: ${exportBatchId}`);
 
@@ -285,7 +263,8 @@ async function runShopSyncFeishuAttempt(accounts, preferredList) {
         daysToExport,
         exportBatchId,
         accountEmail: account.email,
-        selectedShopNames: preferredList
+        selectedShopNames: preferredList,
+        targetDates
       });
       results.push(result);
       if (!result.ok) {
@@ -449,11 +428,9 @@ async function runShopExport(accounts, preferredList) {
     `目标店铺优先级名单 (${preferredList.length}): ${preferredList.join(", ") || "(空)"}`
   );
 
-  await runWithOneFullRetry("抖店导出", async (attempt) => {
-    console.log(`\n========== 抖店导出 第 ${attempt}/2 轮全量导出 ==========`);
-    await resetAccountsDataDirs(accounts);
-    return runShopExportAttempt(accounts, preferredList);
-  });
+  console.log("\n========== 抖店导出 全量导出 ==========");
+  await resetAccountsDataDirs(accounts);
+  return runShopExportAttempt(accounts, preferredList);
 }
 
 async function runShopSyncFeishu(accounts, targetShopNames = []) {
@@ -463,11 +440,9 @@ async function runShopSyncFeishu(accounts, targetShopNames = []) {
       : await loadPreferredShopNames();
   console.log("抖店同步飞书：开始登录拉取 → 校验 → 合并 → 同步飞书");
 
-  await runWithOneFullRetry("抖店同步飞书", async (attempt) => {
-    console.log(`\n========== 抖店同步飞书 第 ${attempt}/2 轮全量导出 ==========`);
-    await resetAccountsDataDirs(accounts);
-    return runShopSyncFeishuAttempt(accounts, preferredList);
-  });
+  console.log("\n========== 抖店同步飞书 全量导出 ==========");
+  await resetAccountsDataDirs(accounts);
+  return runShopSyncFeishuAttempt(accounts, preferredList);
 }
 
 async function main() {

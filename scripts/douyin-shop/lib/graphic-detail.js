@@ -19,6 +19,7 @@ const GRAPHIC_URL =
 const GRAPHIC_READY_TIMEOUT_MS = Number(process.env.SHOP_GRAPHIC_READY_TIMEOUT_MS || 60000);
 
 const { logInfo, logWarn: logWarnLine, buildShopStepMeta } = require("./shop-log");
+const { createShopExportTimestamp } = require("./debug");
 
 function logStep() {}
 
@@ -204,11 +205,7 @@ async function clickGraphicDownloadAndSave(page, tag, saveDir, options = {}) {
   const rawName =
     download.suggestedFilename() || `graphic-detail-${Date.now()}.csv`;
   const safeName = rawName.replace(/[\\/:*?"<>|]/g, "_");
-  const ts = new Date()
-    .toISOString()
-    .replace(/[:.]/g, "-")
-    .replace("T", "_")
-    .slice(0, 19);
+  const ts = createShopExportTimestamp();
   const batchPrefix = exportBatchId ? `${exportBatchId}-` : "";
   const savePath = path.join(saveDir, `${batchPrefix}${ts}-图文明细-${safeName}`);
 

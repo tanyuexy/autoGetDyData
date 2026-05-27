@@ -1,6 +1,6 @@
 import { readBitable } from "@/lib/feishu/core/readBitable";
 
-function formatDateYmd(date: Date): string {
+export function formatDateYmd(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
@@ -108,4 +108,34 @@ export function buildShopExportDateRange(daysToExport: number): {
     startDate: formatDateYmd(start),
     endDate: formatDateYmd(end),
   };
+}
+
+export function parseDateYmd(value: unknown): Date | null {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  date.setHours(0, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function buildDateRangeStrings(start: Date, end: Date): string[] {
+  const result: string[] = [];
+  const cursor = new Date(start);
+  while (cursor.getTime() <= end.getTime()) {
+    result.push(formatDateYmd(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return result;
+}
+
+export function parseExportDateRange(body: {
+  startDate?: unknown;
+  endDate?: unknown;
+}): string[] {
+  const start = parseDateYmd(body?.startDate);
+  const end = parseDateYmd(body?.endDate);
+  if (!start || !end) return [];
+  if (start.getTime() > end.getTime()) return [];
+  return buildDateRangeStrings(start, end);
 }

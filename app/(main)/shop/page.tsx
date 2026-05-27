@@ -87,7 +87,10 @@ export default function ShopPage() {
       message.warning("请先选择店铺");
       return;
     }
-    if (action === "export" && (!exportDateRange || !exportDateRange[0] || !exportDateRange[1])) {
+    if (
+      (action === "export" || action === "sync-feishu") &&
+      (!exportDateRange || !exportDateRange[0] || !exportDateRange[1])
+    ) {
       message.warning("请先选择导出日期范围");
       return;
     }
@@ -99,16 +102,17 @@ export default function ShopPage() {
       "feishu-sync": "/api/shop/feishu-sync",
       "sync-feishu": "/api/shop/sync-feishu",
     };
+    const payloadWithDates = {
+      shopNames: toolbarMultiSelect.sanitized,
+      startDate: exportDateRange?.[0]?.format("YYYY-MM-DD"),
+      endDate: exportDateRange?.[1]?.format("YYYY-MM-DD"),
+    };
     try {
       await startTask(
         endpoints[action],
-        action === "export"
-          ? {
-              shopNames: toolbarMultiSelect.sanitized,
-              startDate: exportDateRange?.[0]?.format("YYYY-MM-DD"),
-              endDate: exportDateRange?.[1]?.format("YYYY-MM-DD"),
-            }
-          : { shopNames: toolbarMultiSelect.sanitized },
+        action === "feishu-sync"
+          ? { shopNames: toolbarMultiSelect.sanitized }
+          : payloadWithDates,
         "shop-export"
       );
       message.info("任务已启动");

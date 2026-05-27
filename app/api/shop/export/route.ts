@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   buildShopExportDateRange,
   calcDaysToExportFromMaxDate,
+  formatDateYmd,
+  parseExportDateRange,
   readShopMaxDateFromFeishu,
 } from "@/lib/feishu/shopExportDate";
 import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
@@ -13,40 +15,6 @@ function parseShopNames(body: any) {
   return Array.isArray(body?.shopNames)
     ? body.shopNames.map((s: any) => String(s || "").trim()).filter(Boolean)
     : [];
-}
-
-function parseDateYmd(value: any) {
-  const text = String(value || "").trim();
-  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return null;
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  date.setHours(0, 0, 0, 0);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function formatDateYmd(date: Date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-function buildDateRangeStrings(start: Date, end: Date) {
-  const result: string[] = [];
-  const cursor = new Date(start);
-  while (cursor.getTime() <= end.getTime()) {
-    result.push(formatDateYmd(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return result;
-}
-
-function parseExportDateRange(body: any) {
-  const start = parseDateYmd(body?.startDate);
-  const end = parseDateYmd(body?.endDate);
-  if (!start || !end) return [];
-  if (start.getTime() > end.getTime()) return [];
-  return buildDateRangeStrings(start, end);
 }
 
 export async function GET() {

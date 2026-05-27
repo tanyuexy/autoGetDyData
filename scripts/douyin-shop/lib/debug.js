@@ -58,6 +58,12 @@ function createShopExportDebugRunId(date = new Date()) {
   return `${parts.year}-${parts.month}-${parts.day}_${parts.hour}-${parts.minute}-${parts.second}-${parts.ms}`;
 }
 
+/** 导出批次号 / 文件名时间戳：YYYY-MM-DD_HH-MM-SS（默认 Asia/Shanghai） */
+function createShopExportTimestamp(date = new Date()) {
+  const parts = getShopExportDebugTimeParts(date);
+  return `${parts.year}-${parts.month}-${parts.day}_${parts.hour}-${parts.minute}-${parts.second}`;
+}
+
 /** 每个邮箱账号固定一层目录，不再嵌套 taskId/runId。 */
 function getShopExportDebugAccountDir(accountName) {
   const safeAccount = safePathPart(accountName || "unknown");
@@ -174,6 +180,7 @@ module.exports = {
   SHOP_EXPORT_DEBUG_DIR,
   SHOP_EXPORT_DEBUG_TZ,
   createShopExportDebugRunId,
+  createShopExportTimestamp,
   formatShopExportDebugTimestamp,
   getShopExportDebugAccountDir,
   getShopExportDebugTaskDir,

@@ -41,8 +41,13 @@ function shortStepTitle(title) {
     进入短视频明细页: "进入页面",
     选择短视频自然日: "选自然日",
     切换短视频非投放: "非投放",
+    切换短视频投放: "投放",
     下载短视频明细文件: "下载",
+    下载短视频非投放明细: "下载非投放",
+    下载短视频投放明细: "下载投放",
     写入短视频数据日期: "写日期",
+    写入短视频非投放数据日期: "写日期",
+    写入短视频投放数据日期: "写日期",
     进入图文分析页: "进入页面",
     选择图文自然日: "选自然日",
     下载图文明细文件: "下载",
@@ -64,14 +69,21 @@ function inferPhase(index, meta = {}) {
 }
 
 function formatDayPart(meta = {}) {
-  if (meta.offset != null && meta.daysToExport) {
-    return `D${Number(meta.offset) + 1}/${meta.daysToExport}`;
-  }
   const dataDate = String(meta.dataDate || "").trim();
-  if (!dataDate) return "";
-  const parts = dataDate.split("/");
-  if (parts.length >= 3) return parts.slice(1).join("/");
-  return dataDate;
+  const offset = meta.offset;
+  const daysToExport = Number(meta.daysToExport) || 0;
+
+  if (dataDate) {
+    if (daysToExport > 1 && offset != null) {
+      return `${dataDate} (${Number(offset) + 1}/${daysToExport})`;
+    }
+    return dataDate;
+  }
+
+  if (offset != null && daysToExport) {
+    return `D${Number(offset) + 1}/${daysToExport}`;
+  }
+  return "";
 }
 
 function formatStepRef({ index, title, meta = {} }) {
@@ -101,7 +113,7 @@ function formatStepRef({ index, title, meta = {} }) {
         : "";
   const kind = kindLabel(meta.kind);
   const dayPart = formatDayPart(meta);
-  const daySteps = /自然日|下载|写.*日期|非投放/.test(String(title));
+  const daySteps = /自然日|下载|写.*日期|非投放|投放/.test(String(title));
   const chunks = [shopPos, kind, daySteps && dayPart ? dayPart : "", step].filter(
     Boolean
   );

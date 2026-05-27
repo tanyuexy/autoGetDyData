@@ -19,6 +19,7 @@ const VIDEO_SELF_URL =
 const VIDEO_READY_TIMEOUT_MS = Number(process.env.SHOP_VIDEO_READY_TIMEOUT_MS || 60000);
 
 const { logInfo, logWarn: logWarnLine, buildShopStepMeta } = require("./shop-log");
+const { createShopExportTimestamp } = require("./debug");
 
 function logStep() {}
 
@@ -225,7 +226,95 @@ async function ensureVideoDetailTab(page, tag) {
   return true;
 }
 
-async function selectNonAdTab(page, tag) {
+const VIDEO_AD_TYPE = {
+  NON_AD: "non-ad",
+  AD: "ad"
+};
+
+const VIDEO_AD_LABEL = {
+  [VIDEO_AD_TYPE.NON_AD]: "非投放",
+  [VIDEO_AD_TYPE.AD]: "投放"
+};
+
+/** 每天导出步骤数：选日 + 非投放(切 tab/下载/写日期) + 投放(切 tab/下载/写日期) */
+const VIDEO_STEPS_PER_DAY = 7;
+
+async function selectAdTypeTab(page, tag, adType) {
+  const label = VIDEO_AD_LABEL[adType];
+  if (!label) return false;
+  if (adType === VIDEO_AD_TYPE.NON_AD) {
+    return selectNonAdTabLegacy(page, tag);
+  }
+
+  const started = Date.now();
+  const container = page.locator("#_auto__ad_type").first();
+  const hasContainer = await container
+    .waitFor({ state: "visible", timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+
+  let targetTab = null;
+  if (hasContainer) {
+    const tabs = container.locator('div[role="tab"]');
+    const count = await tabs.count().catch(() => 0);
+    for (let i = 0; i < count; i += 1) {
+      const tab = tabs.nth(i);
+      const text = ((await tab.innerText().catch(() => "")) || "").trim();
+      if (text === label) {
+        targetTab = tab;
+        break;
+      }
+    }
+  }
+
+  if (!targetTab) {
+    const tabs = page.locator('div[role="tab"]');
+    const count = await tabs.count().catch(() => 0);
+    for (let i = 0; i < count; i += 1) {
+      const tab = tabs.nth(i);
+      const text = ((await tab.innerText().catch(() => "")) || "").trim();
+      if (text === label) {
+        targetTab = tab;
+        break;
+      }
+    }
+  }
+
+  if (!targetTab) {
+    logWarn(tag, `未找到"${label}" Tab，跳过切换`);
+    return false;
+  }
+
+  const selected = await targetTab.getAttribute("aria-selected").catch(() => null);
+  if (selected === "true") {
+    logStep(tag, `投放属性已为"${label}"，跳过切换`, started);
+    return true;
+  }
+
+  await targetTab.click({ timeout: 3000 }).catch(() => {});
+  await page.waitForTimeout(600);
+  const ok = await page
+    .evaluate((expectedLabel) => {
+      const root = document.querySelector("#_auto__ad_type");
+      const scope = root || document;
+      const tabs = scope.querySelectorAll('div[role="tab"]');
+      for (const tab of tabs) {
+        const text = (tab.textContent || "").trim();
+        if (text !== expectedLabel) continue;
+        return tab.getAttribute("aria-selected") === "true";
+      }
+      return false;
+    }, label)
+    .catch(() => false);
+  if (ok) {
+    logStep(tag, `已将投放属性切换为"${label}"`, started);
+  } else {
+    logWarn(tag, `点击"${label}"后未观察到 aria-selected=true 切换`);
+  }
+  return ok;
+}
+
+async function selectNonAdTabLegacy(page, tag) {
   const started = Date.now();
   let targetTab = page.locator('#_auto__ad_type div[role="tab"]:has-text("非投放")').first();
   const viaContainer = await targetTab
@@ -269,6 +358,14 @@ async function selectNonAdTab(page, tag) {
   return ok;
 }
 
+async function selectNonAdTab(page, tag) {
+  return selectAdTypeTab(page, tag, VIDEO_AD_TYPE.NON_AD);
+}
+
+async function selectAdTab(page, tag) {
+  return selectAdTypeTab(page, tag, VIDEO_AD_TYPE.AD);
+}
+
 function safeShopDirName(name) {
   return String(name || "")
     .trim()
@@ -304,11 +401,7 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   const rawName =
     download.suggestedFilename() || `video-detail-${Date.now()}.csv`;
   const safeName = rawName.replace(/[\\/:*?"<>|]/g, "_");
-  const ts = new Date()
-    .toISOString()
-    .replace(/[:.]/g, "-")
-    .replace("T", "_")
-    .slice(0, 19);
+  const ts = createShopExportTimestamp();
   const batchPrefix = exportBatchId ? `${exportBatchId}-` : "";
   const savePath = path.join(saveDir, `${batchPrefix}${ts}-${exportLabel}-${safeName}`);
 
@@ -339,11 +432,192 @@ function buildTargetDateSet(targetDates) {
   return values.size > 0 ? values : null;
 }
 
+function videoExportKind(adType) {
+  return adType === VIDEO_AD_TYPE.AD ? "video-ad" : "video-non-ad";
+}
+
+function videoDetailDir(saveDir, shopName, adType) {
+  const base = shopName
+    ? path.join(saveDir, safeShopDirName(shopName), "视频明细", VIDEO_AD_LABEL[adType])
+    : path.join(saveDir, "视频明细", VIDEO_AD_LABEL[adType]);
+  return base;
+}
+
+/**
+ * 切换投放属性 / 选日后，等待明细区完成刷新再点「下载明细」。
+ * 投放 Tab 切换后接口更慢，过早点击会触发 60s 下载超时重试。
+ */
+async function waitForVideoDetailPanelReady(page, tag, options = {}) {
+  const adType = options.adType || VIDEO_AD_TYPE.NON_AD;
+  const timeoutMs = options.timeoutMs ?? (adType === VIDEO_AD_TYPE.AD ? 30000 : 10000);
+  const started = Date.now();
+
+  await page
+    .waitForLoadState("networkidle", { timeout: Math.min(12000, timeoutMs) })
+    .catch(() => {});
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const spinning = await page
+      .locator(".ecom-spin-spinning, .ecom-loading, [class*='loading--active']")
+      .first()
+      .isVisible({ timeout: 250 })
+      .catch(() => false);
+    const downloadBtn = page.locator('button:has-text("下载明细")').last();
+    const btnVisible = await downloadBtn.isVisible({ timeout: 250 }).catch(() => false);
+    const btnDisabled = btnVisible
+      ? await downloadBtn.isDisabled({ timeout: 250 }).catch(() => false)
+      : true;
+
+    if (!spinning && btnVisible && !btnDisabled) {
+      const settleMs = adType === VIDEO_AD_TYPE.AD ? 1800 : 600;
+      await page.waitForTimeout(settleMs);
+      logStep(
+        tag,
+        `视频明细区已就绪（${VIDEO_AD_LABEL[adType]}，等待 ${Date.now() - started}ms）`,
+        started
+      );
+      return true;
+    }
+    await page.waitForTimeout(350);
+  }
+
+  logWarn(
+    tag,
+    `视频明细区 ${timeoutMs}ms 内未完全就绪（${VIDEO_AD_LABEL[adType]}），仍尝试下载`
+  );
+  return false;
+}
+
+async function downloadVideoDetailForAdType(page, {
+  tag,
+  saveDir,
+  shopName,
+  exportBatchId,
+  accountEmail,
+  expectedDate,
+  offset,
+  adType,
+  stepRunner,
+  stepIndexBase,
+  shopIndex,
+  shopTotal,
+  daysToExport
+}) {
+  const runStep = stepRunner?.runStep;
+  const stepMeta = (fields = {}) =>
+    buildShopStepMeta({
+      shopName,
+      kind: "video",
+      shopIndex,
+      shopTotal,
+      daysToExport,
+      adType: VIDEO_AD_LABEL[adType],
+      ...fields
+    });
+  const withStep = async (index, title, stepTag, action, verifyOrOptions, maybeOptions) => {
+    if (typeof runStep === "function") {
+      return await runStep(index, title, stepTag, action, verifyOrOptions, maybeOptions);
+    }
+    if (typeof action === "function") await action();
+    const verify = verifyOrOptions && typeof verifyOrOptions === "object"
+      ? verifyOrOptions.verify
+      : verifyOrOptions;
+    if (typeof verify === "function") await verify();
+  };
+
+  const adLabel = VIDEO_AD_LABEL[adType];
+  const item = {
+    runId: exportBatchId,
+    accountEmail,
+    shopName: shopName || "unknown",
+    kind: videoExportKind(adType),
+    dataDate: expectedDate,
+    expectedDate
+  };
+  await markRunning(item);
+
+  const selectStepOffset = adType === VIDEO_AD_TYPE.NON_AD ? 1 : 4;
+  await withStep(
+    stepIndexBase + selectStepOffset,
+    `切换短视频${adLabel}`,
+    `video-select-${adType}-${offset + 1}`,
+    async () => {
+      await selectAdTypeTab(page, tag, adType);
+    },
+    {
+      meta: stepMeta({ dataDate: expectedDate, offset })
+    }
+  );
+
+  await waitForVideoDetailPanelReady(page, tag, { adType });
+
+  const targetDir = videoDetailDir(saveDir, shopName, adType);
+  let savePath;
+  try {
+    const downloadStepOffset = adType === VIDEO_AD_TYPE.NON_AD ? 2 : 5;
+    await withStep(
+      stepIndexBase + downloadStepOffset,
+      `下载短视频${adLabel}明细`,
+      `video-download-${adType}-${offset + 1}`,
+      async () => {
+        savePath = await clickDownloadAndSave(page, tag, targetDir, {
+          exportLabel: `视频明细-${adLabel}`,
+          exportBatchId
+        });
+      },
+      {
+        verify: async () => {
+          if (!savePath) throw new Error(`短视频${adLabel}明细未返回保存路径`);
+          const stat = await fse.stat(savePath).catch(() => null);
+          if (!stat || stat.size <= 0) {
+            throw new Error(`短视频${adLabel}明细文件不存在或为空: ${savePath}`);
+          }
+        },
+        meta: stepMeta({ dataDate: expectedDate, offset })
+      }
+    );
+  } catch (error) {
+    const msg = error?.message || String(error);
+    await markFailed(item, msg);
+    return { savePath: null, dataDate: expectedDate, expectedDate, dateMatch: false, adType, error: msg };
+  }
+
+  const writeStepOffset = adType === VIDEO_AD_TYPE.NON_AD ? 3 : 6;
+  try {
+    await withStep(
+      stepIndexBase + writeStepOffset,
+      `写入短视频${adLabel}数据日期`,
+      `video-write-data-date-${adType}-${offset + 1}`,
+      async () => {
+        appendDataDateColumn(savePath, expectedDate);
+        logStep(tag, `${adLabel}数据日期写入: ${expectedDate}`);
+        await markSuccess(item, savePath);
+      },
+      {
+        verify: async () => {
+          const stat = await fse.stat(savePath).catch(() => null);
+          if (!stat || stat.size <= 0) {
+            throw new Error(`短视频${adLabel}明细文件写入后不可用: ${savePath}`);
+          }
+        },
+        meta: stepMeta({ dataDate: expectedDate, offset })
+      }
+    );
+  } catch (error) {
+    const msg = error?.message || String(error);
+    await markFailed(item, msg);
+    return { savePath: null, dataDate: expectedDate, expectedDate, dateMatch: false, adType, error: msg };
+  }
+
+  return { savePath, dataDate: expectedDate, dateMatch: true, adType };
+}
+
 /**
  * 对外入口：
  *  - 导航到视频明细页
  *  - 循环导出多天数据：dayOffset=0..daysToExport-1
- *    每天依次：选择自然日(offset)→非投放 tab→下载明细→追加数据日期
+ *    每天依次：选择自然日 → 非投放下载 → 投放下载
  *
  * @param {import('playwright').Page} page
  * @param {{ tag: string, saveDir: string, shopName?: string, daysToExport?: number }} options
@@ -430,7 +704,7 @@ async function downloadVideoSelfDetail(page, {
     if (dateSet && !dateSet.has(expectedDate)) {
       logStep(tag, `跳过非补跑目标日期: ${expectedDate}`);
       await withStep(
-        stepIndexBase + 1 + offset * 4,
+        stepIndexBase + offset * VIDEO_STEPS_PER_DAY,
         "跳过短视频非目标日期",
         `video-skip-date-${offset + 1}`,
         null,
@@ -444,11 +718,12 @@ async function downloadVideoSelfDetail(page, {
     }
     targetCount += 1;
 
+    const dayStepBase = stepIndexBase + offset * VIDEO_STEPS_PER_DAY;
     let datePicked = false;
     let dataDate = null;
     let pickReason = null;
     await withStep(
-      stepIndexBase + 1 + offset * 4,
+      dayStepBase,
       "选择短视频自然日",
       `video-select-date-${offset + 1}`,
       async () => {
@@ -473,118 +748,85 @@ async function downloadVideoSelfDetail(page, {
       }
     ).catch(async (error) => {
       const msg = error?.message || String(error);
-      await markFailed({
-        runId: exportBatchId,
+      for (const kind of ["video-non-ad", "video-ad"]) {
+        await markFailed({
+          runId: exportBatchId,
+          accountEmail,
+          shopName: shopName || "unknown",
+          kind,
+          dataDate: expectedDate,
+          expectedDate
+        }, msg);
+      }
+      results.push({
+        savePath: null,
+        dataDate: dataDate || null,
+        expectedDate,
+        dateMatch: false,
+        adType: VIDEO_AD_TYPE.NON_AD,
+        error: msg
+      });
+      results.push({
+        savePath: null,
+        dataDate: dataDate || null,
+        expectedDate,
+        dateMatch: false,
+        adType: VIDEO_AD_TYPE.AD,
+        error: msg
+      });
+    });
+    if (results.some((r) => r.expectedDate === expectedDate && r.dateMatch === false && !r.savePath)) {
+      continue;
+    }
+
+    for (const adType of [VIDEO_AD_TYPE.NON_AD, VIDEO_AD_TYPE.AD]) {
+      const dayResult = await downloadVideoDetailForAdType(page, {
+        tag,
+        saveDir,
+        shopName,
+        exportBatchId,
         accountEmail,
-        shopName: shopName || "unknown",
-        kind: "video",
-        dataDate: expectedDate,
-        expectedDate
-      }, msg);
-      results.push({ savePath: null, dataDate: dataDate || null, expectedDate, dateMatch: false, error: msg });
-    });
-    if (results.some((r) => r.expectedDate === expectedDate && r.dateMatch === false && !r.savePath)) {
-      continue;
-    }
-    const item = {
-      runId: exportBatchId,
-      accountEmail,
-      shopName: shopName || "unknown",
-      kind: "video",
-      dataDate: expectedDate,
-      expectedDate
-    };
-    await markRunning(item);
-    const dateMatch = true;
-
-    await withStep(
-      stepIndexBase + 2 + offset * 4,
-      "切换短视频非投放",
-      `video-select-non-ad-${offset + 1}`,
-      async () => {
-        await selectNonAdTab(page, tag);
-      },
-      {
-        meta: stepMeta({ dataDate: expectedDate, offset })
-      }
-    );
-
-    await page.waitForTimeout(1200);
-
-    const targetDir = shopName
-      ? path.join(saveDir, safeShopDirName(shopName), "视频明细")
-      : saveDir;
-    let savePath;
-    try {
-      await withStep(
-        stepIndexBase + 3 + offset * 4,
-        "下载短视频明细文件",
-        `video-download-file-${offset + 1}`,
-        async () => {
-          savePath = await clickDownloadAndSave(page, tag, targetDir, {
-            exportLabel: "视频明细",
-            exportBatchId
-          });
-        },
-        {
-          verify: async () => {
-            if (!savePath) throw new Error("短视频明细未返回保存路径");
-            const stat = await fse.stat(savePath).catch(() => null);
-            if (!stat || stat.size <= 0) {
-              throw new Error(`短视频明细文件不存在或为空: ${savePath}`);
-            }
-          },
-          meta: stepMeta({ dataDate: expectedDate, offset })
-        }
-      );
-    } catch (error) {
-      const msg = error?.message || String(error);
-      await markFailed(item, msg);
-      results.push({ savePath: null, dataDate: expectedDate, expectedDate, dateMatch: false, error: msg });
-      continue;
+        expectedDate,
+        offset,
+        adType,
+        stepRunner,
+        stepIndexBase: dayStepBase,
+        shopIndex,
+        shopTotal,
+        daysToExport
+      });
+      results.push(dayResult);
     }
 
-    const dateToWrite = expectedDate;
-    await withStep(
-      stepIndexBase + 4 + offset * 4,
-      "写入短视频数据日期",
-      `video-write-data-date-${offset + 1}`,
-      async () => {
-        appendDataDateColumn(savePath, dateToWrite);
-        logStep(tag, `数据日期写入: ${dateToWrite}`);
-        await markSuccess(item, savePath);
-      },
-      {
-        verify: async () => {
-          const stat = await fse.stat(savePath).catch(() => null);
-          if (!stat || stat.size <= 0) {
-            throw new Error(`短视频明细文件写入后不可用: ${savePath}`);
-          }
-        },
-        meta: stepMeta({ dataDate: expectedDate, offset })
-      }
-    ).catch(async (e) => {
-      const msg = e?.message || String(e);
-      await markFailed(item, msg);
-      results.push({ savePath: null, dataDate: expectedDate, expectedDate, dateMatch: false, error: msg });
-    });
-    if (results.some((r) => r.expectedDate === expectedDate && r.dateMatch === false && !r.savePath)) {
-      continue;
-    }
-
-    results.push({ savePath, dataDate: dateToWrite, dateMatch });
-
-    // 非最后一轮，让页面稳定后再进入下一轮
     if (offset < daysToExport - 1) {
       await page.waitForTimeout(800);
     }
   }
 
-  logStep(tag, `视频下载流程完成，成功 ${results.filter((r) => r.savePath && r.dateMatch !== false).length}/${targetCount || daysToExport} 天`, startedAll);
+  const completeDays = targetCount > 0
+    ? [...new Set(results.filter((r) => r.savePath && r.dateMatch !== false).map((r) => r.dataDate))]
+        .filter((date) =>
+          [VIDEO_AD_TYPE.NON_AD, VIDEO_AD_TYPE.AD].every((adType) =>
+            results.some(
+              (r) =>
+                r.dataDate === date &&
+                r.adType === adType &&
+                r.savePath &&
+                r.dateMatch !== false
+            )
+          )
+        ).length
+    : 0;
+
+  logStep(
+    tag,
+    `视频下载流程完成，完整 ${completeDays}/${targetCount || daysToExport} 天（非投放+投放）`,
+    startedAll
+  );
   const failures = results
     .filter((r) => r.dateMatch === false || !r.savePath)
     .map((r) => ({
-      step: "视频日期选择/下载",
+      step: r.adType === VIDEO_AD_TYPE.AD ? "视频投放下载" : "视频非投放下载",
       dataDate: r.dataDate || r.expectedDate || null,
       error: r.error || "视频明细未成功下载"
     }));
@@ -595,17 +837,22 @@ async function downloadVideoSelfDetail(page, {
         dataDate: firstSuccess?.dataDate || null,
         allResults: results,
         failures,
-        targetCount
+        targetCount,
+        completeDays
       }
-    : { savePath: null, dataDate: null, allResults: [], failures, targetCount };
+    : { savePath: null, dataDate: null, allResults: [], failures, targetCount, completeDays: 0 };
 }
 
 module.exports = {
   VIDEO_SELF_URL,
+  VIDEO_AD_TYPE,
+  VIDEO_AD_LABEL,
   gotoVideoSelf,
   waitForVideoSelfReady,
   ensureVideoDetailTab,
   selectNonAdTab,
+  selectAdTab,
+  selectAdTypeTab,
   selectDateRangeYesterday,
   clickDownloadAndSave,
   downloadVideoSelfDetail,

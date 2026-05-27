@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import { NextRequest, NextResponse } from "next/server";
+import { parseExportDateRange } from "@/lib/feishu/shopExportDate";
 import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
 
 export const maxDuration = 0;
@@ -23,12 +24,14 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => ({} as any));
     const shopNames = parseShopNames(body);
+    const targetDates = parseExportDateRange(body);
 
     const taskId = generateTaskIdWithTime("shop-export-push");
     await enqueueTask(taskId, "node", ["scripts/run.js", "shop:sync-feishu"], {
       namespace: "shop-export",
       env: {
         SHOP_SELECTED_NAMES: shopNames.join(","),
+        SHOP_EXPORT_TARGET_DATES: targetDates.join(","),
       },
     });
 

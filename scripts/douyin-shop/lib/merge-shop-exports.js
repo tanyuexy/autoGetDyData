@@ -16,6 +16,7 @@ const OUTPUT_DIR = (() => {
   return newPath;
 })();
 const OUTPUT_FILE_NAME = "抖店-全部店铺-每日支付增量汇总.xlsx";
+const CREATOR_OUTPUT_FILE_NAME = "抖创-全部店铺-作品列表.xlsx";
 const BACKUP_FILE_NAME = "抖店-飞书表备份.xlsx";
 const OUTPUT_SHEET_NAME = "全部作品";
 const DATA_DATE_COLUMN = "数据日期";
@@ -34,6 +35,12 @@ const OUT_PAY = "增加销售额";
 
 const VIDEO_TITLE_COL = "视频标题";
 const GRAPHIC_TITLE_COL = "图文标题";
+const CREATOR_TITLE_COLS = ["作品名称", "作品名"];
+
+const VIDEO_AD_DIR = {
+  NON_AD: "非投放",
+  AD: "投放"
+};
 
 const SALES_AMOUNT_FIELDS = [
   {
@@ -141,6 +148,86 @@ function normalizeTitle(value) {
   return String(value ?? "").replace(/\s/g, "");
 }
 
+function readCreatorTitleFromRow(row) {
+  for (const col of CREATOR_TITLE_COLS) {
+    if (col in row) {
+      const title = normalizeTitle(row[col]);
+      if (title) return title;
+    }
+  }
+  return "";
+}
+
+function loadCreatorTitleIndex() {
+  const creatorPath = path.join(OUTPUT_DIR, CREATOR_OUTPUT_FILE_NAME);
+  if (!fse.existsSync(creatorPath)) {
+    console.warn(`未找到抖创汇总表 ${creatorPath}，投放视频将不会按抖创标题过滤`);
+    return [];
+  }
+
+  const rows = readFirstSheetRows(creatorPath);
+  const shopMap = new Map();
+  for (const row of rows) {
+    const shopName = String(row[SHOP_FIELD] || "").trim();
+    const title = readCreatorTitleFromRow(row);
+    if (!shopName || !title) continue;
+    if (!shopMap.has(shopName)) shopMap.set(shopName, new Set());
+    shopMap.get(shopName).add(title);
+  }
+
+  const entries = [...shopMap.entries()].map(([shopName, titles]) => ({
+    shopName,
+    titles
+  }));
+  console.log(
+    `已加载抖创标题索引：${entries.length} 个店铺，共 ${entries.reduce((n, e) => n + e.titles.size, 0)} 个标题`
+  );
+  return entries;
+}
+
+function getCreatorTitlesForShop(shopName, creatorEntries) {
+  const titles = new Set();
+  for (const entry of creatorEntries) {
+    if (
+      matchesPreferredShop(shopName, [entry.shopName]) ||
+      matchesPreferredShop(entry.shopName, [shopName])
+    ) {
+      for (const title of entry.titles) titles.add(title);
+    }
+  }
+  return titles;
+}
+
+function isLegacyAdVideoFile(filePath) {
+  const base = path.basename(filePath);
+  if (base.includes("非投放")) return false;
+  return base.includes("投放") || base.includes("{投放}");
+}
+
+function isLegacyNonAdVideoFile(filePath) {
+  const base = path.basename(filePath);
+  if (isLegacyAdVideoFile(filePath)) return false;
+  return base.includes("非投放") || base.includes("{非投放}") || !base.includes("投放");
+}
+
+async function pickVideoExportFiles(videoBaseDir, adDirLabel, options = {}) {
+  const daysToExport = Math.max(1, Number(options.daysToExport) || 1);
+  const subDir = path.join(videoBaseDir, adDirLabel);
+  let files = await pickLatestXlsxFiles(subDir, options);
+  if (files.length >= daysToExport) {
+    return files.slice(0, daysToExport);
+  }
+
+  const flatFiles = await pickLatestXlsxFiles(videoBaseDir, options);
+  const legacyFilter =
+    adDirLabel === VIDEO_AD_DIR.AD ? isLegacyAdVideoFile : isLegacyNonAdVideoFile;
+  const legacyFiles = flatFiles.filter(legacyFilter);
+  if (legacyFiles.length > 0) {
+    return legacyFiles.slice(0, daysToExport);
+  }
+  return files.slice(0, daysToExport);
+}
+
 function calcExpectedDates(daysToExport) {
   const days = Math.max(1, Number(daysToExport) || 1);
   const result = [];
@@ -244,6 +331,50 @@ function normalizeDateYMD(value) {
   return "";
 }
 
+/** 从导出文件名 `[20260525-20260525]` 解析数据日期（空表兜底） */
+function parseDataDatesFromExportFileName(filePath) {
+  const base = path.basename(filePath);
+  const match = base.match(/\[(\d{8})-(\d{8})\]/);
+  if (!match) return [];
+
+  const toNorm = (raw) =>
+    normalizeDateYMD(`${raw.slice(0, 4)}/${raw.slice(4, 6)}/${raw.slice(6, 8)}`);
+  const start = toNorm(match[1]);
+  const end = toNorm(match[2]);
+  if (!start) return [];
+  if (!end || start === end) return [start];
+
+  const result = [];
+  const cursor = new Date(
+    Number(match[1].slice(0, 4)),
+    Number(match[1].slice(4, 6)) - 1,
+    Number(match[1].slice(6, 8))
+  );
+  const endDate = new Date(
+    Number(match[2].slice(0, 4)),
+    Number(match[2].slice(4, 6)) - 1,
+    Number(match[2].slice(6, 8))
+  );
+  cursor.setHours(0, 0, 0, 0);
+  endDate.setHours(0, 0, 0, 0);
+  while (cursor.getTime() <= endDate.getTime()) {
+    result.push(fmtDateYMD(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return result;
+}
+
+function collectDataDatesFromSheetRows(sheetRows) {
+  const dates = [];
+  if (!sheetRows.length) return dates;
+  if (!hasDateColumn(Object.keys(sheetRows[0] || {}))) return dates;
+  for (const row of sheetRows) {
+    const normalized = normalizeDateYMD(row[SOURCE_DATA_DATE_COL]);
+    if (normalized) dates.push(normalized);
+  }
+  return dates;
+}
+
 function readPaymentAmount(row, candidateColumns) {
   for (const column of candidateColumns) {
     if (!(column in row)) continue;
@@ -268,14 +399,39 @@ function pushSalesRows(allRows, row, shopName, title, candidateGroups) {
   }
 }
 
-function pushVideoRows(allRows, rows, shopName) {
+function pushVideoRows(allRows, rows, shopName, options = {}) {
   const saleGroups = SALES_AMOUNT_FIELDS.map((item) => ({
     type: item.type,
     columns: item.videoColumns
   }));
+  const titleFilter = options.titleFilter || null;
+  let skipped = 0;
+  let matched = 0;
+  let keptRows = 0;
+  const matchedTitles = new Set();
+
   for (const row of rows) {
     const title = normalizeTitle(row[VIDEO_TITLE_COL]);
+    if (!title) continue;
+    if (titleFilter && !titleFilter.has(title)) {
+      skipped += 1;
+      continue;
+    }
+    if (titleFilter) {
+      matched += 1;
+      matchedTitles.add(title);
+    }
+    const before = allRows.length;
     pushSalesRows(allRows, row, shopName, title, saleGroups);
+    if (allRows.length > before) keptRows += 1;
+  }
+
+  if (titleFilter && options.adType === VIDEO_AD_DIR.AD) {
+    const total = matched + skipped;
+    const titles = [...matchedTitles];
+    console.log(
+      `  [${shopName}] 投放视频标题匹配 ${matched}/${total} 条，命中 ${titles.length} 个作品名，写入汇总 ${keptRows} 条源行，跳过 ${skipped} 条`
+    );
   }
 }
 
@@ -299,12 +455,19 @@ async function collectShopRows(dataRoot, shopName, options = {}) {
   const rows = [];
   const daysToExport = Math.max(1, Number(options.daysToExport) || 1);
   const exportBatchId = options.exportBatchId || null;
+  const creatorEntries = Array.isArray(options.creatorEntries)
+    ? options.creatorEntries
+    : [];
   const videoDir = path.join(dataRoot, shopName, "视频明细");
   const graphicDir = path.join(dataRoot, shopName, "图文明细");
-  const latestVideoFiles = (await pickLatestXlsxFiles(videoDir, { exportBatchId })).slice(
-    0,
-    daysToExport
-  );
+  const latestNonAdVideoFiles = await pickVideoExportFiles(videoDir, VIDEO_AD_DIR.NON_AD, {
+    daysToExport,
+    exportBatchId
+  });
+  const latestAdVideoFiles = await pickVideoExportFiles(videoDir, VIDEO_AD_DIR.AD, {
+    daysToExport,
+    exportBatchId
+  });
   const latestGraphicFiles = (await pickLatestXlsxFiles(graphicDir, { exportBatchId })).slice(
     0,
     daysToExport
@@ -312,33 +475,63 @@ async function collectShopRows(dataRoot, shopName, options = {}) {
   const seen = new Set();
   const collectedDates = new Set();
   const videoDates = new Set();
+  const videoNonAdDates = new Set();
+  const videoAdDates = new Set();
   const graphicDates = new Set();
+  const creatorTitles = getCreatorTitlesForShop(shopName, creatorEntries);
 
-  function processLatestFiles(filePaths, pushFn, typeName, dateSet) {
+  function processLatestFiles(filePaths, pushFn, typeName, dateSet, pushOptions = {}) {
     for (const filePath of filePaths) {
       const sheetRows = readFirstSheetRows(filePath);
-      if (!sheetRows.length) continue;
-      // 循环导出的文件若缺少日期列则跳过，避免空日期进入汇总
-      if (!hasDateColumn(Object.keys(sheetRows[0] || {}))) {
+      let datesFromFile = collectDataDatesFromSheetRows(sheetRows);
+      if (!datesFromFile.length && sheetRows.length) {
         console.warn(
           `  跳过${typeName}文件（缺少「${SOURCE_DATA_DATE_COL}」列）: ${filePath}`
         );
-        continue;
       }
-      for (const row of sheetRows) {
-        const normalized = normalizeDateYMD(row[SOURCE_DATA_DATE_COL]);
-        if (normalized) dateSet.add(normalized);
+      if (!datesFromFile.length) {
+        datesFromFile = parseDataDatesFromExportFileName(filePath);
+        if (datesFromFile.length > 0 && sheetRows.length === 0) {
+          console.log(
+            `  ${typeName}文件无数据行，下载成功，按文件名认定日期: ${datesFromFile.join(", ")}`
+          );
+        }
       }
-      pushFn(rows, sheetRows, shopName);
+      for (const normalized of datesFromFile) dateSet.add(normalized);
+      if (sheetRows.length) {
+        pushFn(rows, sheetRows, shopName, pushOptions);
+      }
     }
   }
 
-  processLatestFiles(latestVideoFiles, pushVideoRows, "视频", videoDates);
+  processLatestFiles(
+    latestNonAdVideoFiles,
+    pushVideoRows,
+    "视频非投放",
+    videoNonAdDates
+  );
+  processLatestFiles(
+    latestAdVideoFiles,
+    pushVideoRows,
+    "视频投放",
+    videoAdDates,
+    {
+      titleFilter: creatorTitles,
+      adType: VIDEO_AD_DIR.AD
+    }
+  );
   processLatestFiles(latestGraphicFiles, pushGraphicRows, "图文", graphicDates);
-  for (const date of videoDates) collectedDates.add(date);
+  for (const date of videoNonAdDates) {
+    videoDates.add(date);
+    collectedDates.add(date);
+  }
+  for (const date of videoAdDates) {
+    videoDates.add(date);
+    collectedDates.add(date);
+  }
   for (const date of graphicDates) collectedDates.add(date);
 
-  // 按(作品名, 日期, 成交类型)去重，保留第一条
+  // 按(作品名, 日期, 成交类型)去重，保留第一条（非投放优先）
   const deduped = [];
   for (const r of rows) {
     const key = `${r[OUT_TITLE]}|${r[OUT_DATE]}|${r[OUT_DEAL_TYPE]}`;
@@ -358,8 +551,11 @@ async function collectShopRows(dataRoot, shopName, options = {}) {
     rows: deduped,
     collectedDates,
     videoDates,
+    videoNonAdDates,
+    videoAdDates,
     graphicDates,
-    videoFiles: latestVideoFiles,
+    videoFiles: latestNonAdVideoFiles,
+    videoAdFiles: latestAdVideoFiles,
     graphicFiles: latestGraphicFiles
   };
 }
@@ -380,6 +576,7 @@ async function listShopNames(dataRoot) {
 async function validateShopExportFiles(options = {}) {
   const daysToExport = Math.max(1, Number(options.daysToExport) || 1);
   const exportBatchId = options.exportBatchId || null;
+  const creatorEntries = loadCreatorTitleIndex();
   const expectedDates = calcExpectedDates(daysToExport);
   const preferredShopNames = Array.isArray(options.preferredShopNames)
     ? options.preferredShopNames.map((name) => String(name || "").trim()).filter(Boolean)
@@ -410,24 +607,39 @@ async function validateShopExportFiles(options = {}) {
       matchesPreferredShop(shopName, preferredShopNames)
     );
     for (const shopName of shops) {
-      const chunk = await collectShopRows(dataRoot, shopName, { daysToExport, exportBatchId });
+      const chunk = await collectShopRows(dataRoot, shopName, {
+        daysToExport,
+        exportBatchId,
+        creatorEntries
+      });
       const videoDates = [...chunk.videoDates].sort();
+      const videoNonAdDates = [...chunk.videoNonAdDates].sort();
+      const videoAdDates = [...chunk.videoAdDates].sort();
       const graphicDates = [...chunk.graphicDates].sort();
       const missingVideoDates = expectedDates.filter((d) => !chunk.videoDates.has(d));
+      const missingVideoNonAdDates = expectedDates.filter((d) => !chunk.videoNonAdDates.has(d));
+      const missingVideoAdDates = expectedDates.filter((d) => !chunk.videoAdDates.has(d));
       const missingGraphicDates = expectedDates.filter((d) => !chunk.graphicDates.has(d));
       const report = {
         account: ent.name,
         shopName,
         videoFiles: chunk.videoFiles.length,
+        videoAdFiles: chunk.videoAdFiles.length,
         graphicFiles: chunk.graphicFiles.length,
         videoDates,
+        videoNonAdDates,
+        videoAdDates,
         graphicDates,
         missingVideoDates,
+        missingVideoNonAdDates,
+        missingVideoAdDates,
         missingGraphicDates,
         ok:
           chunk.videoFiles.length >= daysToExport &&
+          chunk.videoAdFiles.length >= daysToExport &&
           chunk.graphicFiles.length >= daysToExport &&
-          missingVideoDates.length === 0 &&
+          missingVideoNonAdDates.length === 0 &&
+          missingVideoAdDates.length === 0 &&
           missingGraphicDates.length === 0
       };
       candidateReports.push(report);
@@ -459,23 +671,38 @@ async function validateShopExportFiles(options = {}) {
     const locations = matchedReports.map((report) => `${report.account}/${report.shopName}`).join("；");
     problems.push(`${detailPrefix} 已找到店铺目录但本批次导出不完整，检查位置: ${locations}`);
 
-    const hasEnoughVideo = matchedReports.some((report) => report.videoFiles >= daysToExport);
+    const hasEnoughVideoNonAd = matchedReports.some((report) => report.videoFiles >= daysToExport);
+    const hasEnoughVideoAd = matchedReports.some((report) => report.videoAdFiles >= daysToExport);
     const hasEnoughGraphic = matchedReports.some((report) => report.graphicFiles >= daysToExport);
-    const hasAllVideoDates = matchedReports.some((report) => report.missingVideoDates.length === 0);
+    const hasAllVideoNonAdDates = matchedReports.some(
+      (report) => report.missingVideoNonAdDates.length === 0
+    );
+    const hasAllVideoAdDates = matchedReports.some(
+      (report) => report.missingVideoAdDates.length === 0
+    );
     const hasAllGraphicDates = matchedReports.some((report) => report.missingGraphicDates.length === 0);
 
-    if (!hasEnoughVideo) {
+    if (!hasEnoughVideoNonAd) {
       const actual = Math.max(...matchedReports.map((report) => report.videoFiles));
-      problems.push(`${detailPrefix} 视频文件数量不足：期望 ${daysToExport} 个，最多找到 ${actual} 个`);
+      problems.push(`${detailPrefix} 视频非投放文件数量不足：期望 ${daysToExport} 个，最多找到 ${actual} 个`);
+    }
+    if (!hasEnoughVideoAd) {
+      const actual = Math.max(...matchedReports.map((report) => report.videoAdFiles || 0));
+      problems.push(`${detailPrefix} 视频投放文件数量不足：期望 ${daysToExport} 个，最多找到 ${actual} 个`);
     }
     if (!hasEnoughGraphic) {
       const actual = Math.max(...matchedReports.map((report) => report.graphicFiles));
       problems.push(`${detailPrefix} 图文文件数量不足：期望 ${daysToExport} 个，最多找到 ${actual} 个`);
     }
-    if (!hasAllVideoDates) {
-      const actualDates = [...new Set(matchedReports.flatMap((report) => report.videoDates))].sort();
+    if (!hasAllVideoNonAdDates) {
+      const actualDates = [...new Set(matchedReports.flatMap((report) => report.videoNonAdDates || []))].sort();
       const missingDates = expectedDates.filter((date) => !actualDates.includes(date));
-      problems.push(`${detailPrefix} 视频缺少日期：${missingDates.join(", ")}；实际日期=${actualDates.join(", ") || "(空)"}`);
+      problems.push(`${detailPrefix} 视频非投放缺少日期：${missingDates.join(", ")}；实际日期=${actualDates.join(", ") || "(空)"}`);
+    }
+    if (!hasAllVideoAdDates) {
+      const actualDates = [...new Set(matchedReports.flatMap((report) => report.videoAdDates || []))].sort();
+      const missingDates = expectedDates.filter((date) => !actualDates.includes(date));
+      problems.push(`${detailPrefix} 视频投放缺少日期：${missingDates.join(", ")}；实际日期=${actualDates.join(", ") || "(空)"}`);
     }
     if (!hasAllGraphicDates) {
       const actualDates = [...new Set(matchedReports.flatMap((report) => report.graphicDates))].sort();
@@ -505,6 +732,7 @@ async function mergeAllShopExportsToData(options = {}) {
   const preferredShopNames = Array.isArray(options.preferredShopNames)
     ? options.preferredShopNames.filter((name) => String(name || "").trim())
     : [];
+  const creatorEntries = loadCreatorTitleIndex();
   let accountDirs;
   try {
     accountDirs = await fse.readdir(ACCOUNTS_DIR, { withFileTypes: true });
@@ -522,7 +750,11 @@ async function mergeAllShopExportsToData(options = {}) {
       matchesPreferredShop(shopName, preferredShopNames)
     );
     for (const shopName of shops) {
-      const chunk = await collectShopRows(dataRoot, shopName, { daysToExport, exportBatchId });
+      const chunk = await collectShopRows(dataRoot, shopName, {
+        daysToExport,
+        exportBatchId,
+        creatorEntries
+      });
       allRows.push(...chunk.rows);
       for (const d of chunk.collectedDates) actualDateSet.add(d);
     }

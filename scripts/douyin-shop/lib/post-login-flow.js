@@ -83,6 +83,7 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
   let graphicDateMismatches = [];
   let videoTargetCount = targetKinds && !targetKinds.includes("video") ? 0 : daysToExport;
   let graphicTargetCount = targetKinds && !targetKinds.includes("graphic") ? 0 : daysToExport;
+  let videoCompleteDays = 0;
   const allFailures = [];
 
   try {
@@ -112,8 +113,10 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
         .filter((r) => r.dateMatch === false)
         .map((r) => r.dataDate || r.expectedDate || "unknown");
       videoTargetCount = result.targetCount ?? daysToExport;
+      videoCompleteDays = result.completeDays ?? 0;
     } else if (result.savePath) {
       videoPaths = [result.savePath];
+      videoCompleteDays = 1;
     }
   } catch (error) {
     videoError = error?.message || String(error);
@@ -167,10 +170,12 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     ).catch(() => {});
   }
 
-  const ok = videoPaths.length === videoTargetCount && graphicPaths.length === graphicTargetCount;
+  const ok =
+    videoCompleteDays === videoTargetCount &&
+    graphicPaths.length === graphicTargetCount;
   const parts = [videoError, graphicError].filter(Boolean);
 
-  const videoDaysOk = videoError ? 0 : videoPaths.length;
+  const videoDaysOk = videoError ? 0 : videoCompleteDays;
   const graphicDaysOk = graphicError ? 0 : graphicPaths.length;
   const dateMismatchWarn = [];
   if (videoDateMismatches.length) dateMismatchWarn.push(`视频日期不符: ${videoDateMismatches.join(', ')}`);
@@ -189,7 +194,7 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
 
   logMilestone(
     shopTag,
-    `导出汇总 视频 ${videoDaysOk}/${videoTargetCount}天 ${videoDaysOk === videoTargetCount ? "✓" : "✗"} | 图文 ${graphicDaysOk}/${graphicTargetCount}天 ${graphicDaysOk === graphicTargetCount ? "✓" : "✗"}` +
+    `导出汇总 视频 ${videoDaysOk}/${videoTargetCount}天(非投放+投放) ${videoDaysOk === videoTargetCount ? "✓" : "✗"} | 图文 ${graphicDaysOk}/${graphicTargetCount}天 ${graphicDaysOk === graphicTargetCount ? "✓" : "✗"}` +
     (!dateOk ? ` | ⚠ ${dateMismatchWarn.join("; ")}` : "") +
     (videoError ? ` | 视频错误: ${videoError}` : "") +
     (graphicError ? ` | 图文错误: ${graphicError}` : "") +
