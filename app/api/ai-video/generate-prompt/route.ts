@@ -37,9 +37,10 @@ function normalizeReferences(input: unknown): SeedancePromptReferenceInput[] {
       const kind = record.kind;
       const name = String(record.name || "").trim();
       const token = String(record.token || "").trim();
+      const url = String(record.url || "").trim();
       if (kind !== "image" && kind !== "video" && kind !== "audio") return null;
       if (!name || !token) return null;
-      return { kind, name, token };
+      return { kind, name, token, ...(url ? { url } : {}) };
     })
     .filter(Boolean) as SeedancePromptReferenceInput[];
 }
@@ -62,8 +63,10 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => ({}));
     const brief = String(body.brief || "").trim();
-    if (!brief) {
-      return NextResponse.json({ error: "请先描述视频创意" }, { status: 400 });
+    const referenceResources = normalizeReferences(body.referenceResources);
+    const hasImageReference = referenceResources.some((resource) => resource.url && resource.kind === "image");
+    if (!brief && !hasImageReference) {
+      return NextResponse.json({ error: "请先描述视频创意，或上传图片参考素材" }, { status: 400 });
     }
 
     const mode = isGenerationMode(body.mode) ? body.mode : "first-frame";
@@ -75,7 +78,7 @@ export async function POST(request: NextRequest) {
       ratio: String(body.ratio || "9:16").trim(),
       resolution: String(body.resolution || "720p").trim(),
       generateAudio: Boolean(body.generateAudio),
-      referenceResources: normalizeReferences(body.referenceResources),
+      referenceResources,
       hasFirstFrame: Boolean(body.hasFirstFrame),
       hasLastFrame: Boolean(body.hasLastFrame),
       stylePreference: String(body.stylePreference || "").trim() || undefined,

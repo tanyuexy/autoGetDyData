@@ -1,5 +1,5 @@
 import type { AiVideoClip, AiVideoClipTokenUsage } from "@/types";
-import { mergeTokenUsage, normalizeTokenUsage } from "@/lib/ai-video/tokenUsage";
+import { normalizeTokenUsage } from "@/lib/ai-video/tokenUsage";
 import { assertAiVideoAdminCanDelete } from "@/lib/auth/aiVideoOwner";
 import { isClipCompleted } from "@/lib/ai-video/clipUtils";
 import { archiveClipVideo, isLocalGeneratedVideoUrl } from "@/lib/aiVideoMedia";
@@ -51,6 +51,13 @@ function toDocument(clip: AiVideoClip) {
   };
 }
 
+function preferLatestTokenUsage(
+  latest?: AiVideoClipTokenUsage | null,
+  fallback?: AiVideoClipTokenUsage | null
+) {
+  return normalizeTokenUsage(latest) ?? normalizeTokenUsage(fallback) ?? null;
+}
+
 export async function readAiVideoClips(): Promise<AiVideoClip[]> {
   const db = await getDb();
   const docs = await db.collection(COLLECTION).find({}).sort({ createdAt: -1 }).toArray();
@@ -77,7 +84,7 @@ export async function upsertAiVideoClip(
   const saved: AiVideoClip = {
     ...clip,
     username: existing?.username || ownerUsername || clip.username || null,
-    tokenUsage: mergeTokenUsage(existing?.tokenUsage, clip.tokenUsage) ?? clip.tokenUsage ?? null,
+    tokenUsage: preferLatestTokenUsage(clip.tokenUsage, existing?.tokenUsage),
     videoUrl,
     remoteVideoUrl,
     updatedAt: new Date().toISOString(),
@@ -131,7 +138,7 @@ export async function updateAiVideoClipFromTask(
     videoUrl,
     remoteVideoUrl,
     coverUrl: task.coverUrl ?? existing.coverUrl ?? null,
-    tokenUsage: mergeTokenUsage(existing.tokenUsage, task.tokenUsage) ?? existing.tokenUsage ?? null,
+    tokenUsage: preferLatestTokenUsage(task.tokenUsage, existing.tokenUsage),
     updatedAt: new Date().toISOString(),
   };
 

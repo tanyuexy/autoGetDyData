@@ -128,13 +128,13 @@ export function GeneratePromptModal({
         </Space>
 
         <Space orientation="vertical" size={4} style={{ width: "100%" }}>
-          <Typography.Text strong>视频创意 / 主题</Typography.Text>
+          <Typography.Text strong>视频创意 / 主题（可选）</Typography.Text>
           <ReferenceTokenTextArea
             value={brief}
             onChange={setBrief}
             referenceResources={referenceResources}
             idPrefix="generate-prompt-picker"
-            placeholder="例如：以 @图片1 作为开场参考，参考 @视频1 的动作节奏，15 秒仙侠高燃战斗；或 @图片1 产品 5 秒竖屏仿实拍手持展示"
+            placeholder="可留空让 AI 先理解图片后自主生成创意；视频素材请在这里说明希望参考的动作节奏或内容"
             autoSize={{ minRows: 3, maxRows: 6 }}
             maxLength={800}
           />

@@ -402,7 +402,8 @@ const pollTask = useCallback(
       }
 
       const status = String(data.clip?.status || data.task?.status || "");
-      if (isFinished(status)) {
+      const hasVideoUrl = Boolean(data.clip?.videoUrl || data.task?.videoUrl);
+      if (isFinished(status) || hasVideoUrl) {
         setPollingTaskIds((prev) => {
           const next = new Set(prev);
           next.delete(taskId);
@@ -444,7 +445,7 @@ useEffect(() => {
     const liveClips = clipsRef.current;
     pollingTaskIds.forEach((taskId) => {
       const clip = liveClips.find((item) => item.taskId === taskId);
-      if (clip && !isFinished(clip.status)) pollTask(clip.id, taskId);
+      if (clip && !clip.videoUrl && !isFinished(clip.status)) pollTask(clip.id, taskId);
     });
   }, 5000);
 
@@ -522,8 +523,9 @@ const applyGeneratedPrompt = useCallback(
 
 async function handleGeneratePrompt(input: { brief: string; stylePreference?: string }) {
   const brief = input.brief.trim();
-  if (!brief) {
-    message.warning("请先描述视频创意");
+  const hasImageReference = referenceResources.some((resource) => resource.kind === "image");
+  if (!brief && !hasImageReference) {
+    message.warning("请先描述视频创意，或上传图片参考素材");
     return;
   }
   if (!hasMiniMaxApiKey) {
@@ -549,6 +551,7 @@ async function handleGeneratePrompt(input: { brief: string; stylePreference?: st
           kind: resource.kind,
           name: resource.name,
           token: getReferenceLabel(referenceResources, resource),
+          url: resource.url,
         })),
         hasFirstFrame: Boolean(
           mode === "multimodal-reference"

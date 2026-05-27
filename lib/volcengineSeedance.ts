@@ -457,21 +457,24 @@ function findVideoUrl(data: any): string | null {
 export function normalizeSeedanceTask(data: any): NormalizedSeedanceTask {
   const root = data?.data && typeof data.data === "object" ? data.data : data;
   const id = firstString(root?.id, root?.task_id, root?.taskId, data?.id, data?.task_id) || "";
-  const status =
+  const rawStatus =
     firstString(root?.status, root?.state, root?.task_status, data?.status, data?.state) || "unknown";
+  const videoUrl =
+    firstNestedString(root, [
+      "video_url",
+      "videoUrl",
+      "result_url",
+      "output_url",
+      "download_url",
+      "play_url",
+    ]) || findVideoUrl(root);
+  const normalizedStatus = String(rawStatus).toLowerCase();
+  const isFailedStatus = ["failed", "error", "cancelled", "canceled"].includes(normalizedStatus);
 
   return {
     id,
-    status,
-    videoUrl:
-      firstNestedString(root, [
-        "video_url",
-        "videoUrl",
-        "result_url",
-        "output_url",
-        "download_url",
-        "play_url",
-      ]) || findVideoUrl(root),
+    status: videoUrl && !isFailedStatus ? "succeeded" : rawStatus,
+    videoUrl,
     coverUrl: firstNestedString(root, [
       "cover_url",
       "coverUrl",

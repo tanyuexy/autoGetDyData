@@ -1,6 +1,8 @@
 import { readFile } from "fs/promises";
+import { existsSync } from "fs";
 import path from "path";
 import { callMiniMaxStructured } from "@/lib/llm/minimax";
+import { bufferToImageDataUrl, understandMiniMaxImage } from "@/lib/llm/minimax-vision";
 import { parseStructuredContent } from "@/lib/llm/shared";
 import type { JsonSchemaObject } from "@/lib/llm/types";
 import type { GenerationMode } from "./types";
@@ -14,6 +16,7 @@ export interface SeedancePromptReferenceInput {
   kind: "image" | "video" | "audio";
   name: string;
   token: string;
+  url?: string;
 }
 
 export interface GenerateSeedancePromptInput {
@@ -71,6 +74,8 @@ const PROMPT_SCHEMA: JsonSchemaObject = {
 
 let cachedSkillBody: string | null = null;
 
+const MAX_UNDERSTAND_RESOURCES = 4;
+
 function stripSkillFrontmatter(content: string) {
   if (!content.startsWith("---")) return content.trim();
   const end = content.indexOf("---", 3);
@@ -102,12 +107,71 @@ function buildReferenceSummary(resources: SeedancePromptReferenceInput[]) {
     .join("\n");
 }
 
-function buildUserMessage(input: GenerateSeedancePromptInput) {
+function getLocalPublicPath(url: string): string | null {
+  const trimmed = String(url || "").trim();
+  if (!trimmed) return null;
+
+  let pathname = "";
+  try {
+    pathname = new URL(trimmed, "http://local").pathname;
+  } catch {
+    pathname = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  }
+
+  const allowedPrefixes = ["/uploads/ai-video/", "/generated-videos/", "/composed-films/"];
+  if (!allowedPrefixes.some((prefix) => pathname.startsWith(prefix))) return null;
+
+  const relative = pathname.replace(/^\/+/, "");
+  if (relative.includes("..")) return null;
+
+  const filePath = path.join(process.cwd(), "public", relative);
+  return existsSync(filePath) ? filePath : null;
+}
+
+async function analyzeImageResource(resource: SeedancePromptReferenceInput): Promise<string> {
+  if (!resource.url) return "";
+  const localPath = getLocalPublicPath(resource.url);
+  const imageUrl = localPath
+    ? bufferToImageDataUrl(await readFile(localPath), undefined, resource.name)
+    : resource.url;
+
+  return understandMiniMaxImage({
+    imageUrl,
+    prompt: [
+      `请理解参考素材 @${resource.token}（${resource.name}）。`,
+      "输出用于视频生成提示词的素材摘要：主体/产品、可见文字、场景、构图、颜色、光线、动作线索、需要保持一致的细节。",
+      "不要编造看不见的信息，控制在 120 字以内。",
+    ].join("\n"),
+  });
+}
+
+async function buildMaterialUnderstanding(resources: SeedancePromptReferenceInput[]) {
+  const targets = resources
+    .filter((resource) => resource.url && resource.kind === "image")
+    .slice(0, MAX_UNDERSTAND_RESOURCES);
+  if (!targets.length) return "";
+
+  const lines: string[] = [];
+  for (const resource of targets) {
+    try {
+      const description = await analyzeImageResource(resource);
+      if (description.trim()) {
+        lines.push(`- @${resource.token}（图片：${resource.name}）：${description.trim()}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      lines.push(`- @${resource.token}（${resource.name}）：素材理解失败，生成时仅按文件名和用户描述参考（${message}）`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function buildUserMessage(input: GenerateSeedancePromptInput, materialUnderstanding: string) {
   const lines = [
     "请根据以下信息生成 Seedance 2.0 视频提示词。",
     "",
     "## 创意简述",
-    input.brief.trim(),
+    input.brief.trim() || "用户未提供额外创意，请基于素材理解自主设计一个适合该素材的视频创意。",
     "",
     "## 当前表单参数（已确定，不要再向用户提问）",
     `- 生成模式：${modeLabel(input.mode)}`,
@@ -122,6 +186,10 @@ function buildUserMessage(input: GenerateSeedancePromptInput) {
     "## 参考素材",
     buildReferenceSummary(input.referenceResources),
   ];
+
+  if (materialUnderstanding.trim()) {
+    lines.push("", "## 素材理解（由 MiniMax Vision 自动生成，可作为创意依据）", materialUnderstanding.trim());
+  }
 
   if (input.stylePreference?.trim()) {
     lines.push("", "## 风格/氛围偏好", input.stylePreference.trim());
@@ -306,9 +374,12 @@ export async function generateSeedancePrompts(
   input: GenerateSeedancePromptInput
 ): Promise<GenerateSeedancePromptResult> {
   const brief = input.brief.trim();
-  if (!brief) throw new Error("请先描述你想生成的视频内容");
+  if (!brief && !input.referenceResources.some((resource) => resource.url && resource.kind === "image")) {
+    throw new Error("请先描述你想生成的视频内容，或上传至少 1 个图片参考素材");
+  }
 
   const skillBody = await loadSeedancePromptSkillBody();
+  const materialUnderstanding = await buildMaterialUnderstanding(input.referenceResources);
   const systemPrompt = [
     skillBody,
     "",
@@ -329,7 +400,7 @@ export async function generateSeedancePrompts(
     temperature: 0.65,
     messages: [
       { role: "system", content: systemPrompt },
-      { role: "user", content: buildUserMessage(input) },
+      { role: "user", content: buildUserMessage(input, materialUnderstanding) },
     ],
   });
 
