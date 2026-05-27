@@ -57,6 +57,8 @@ Desktop.ini
 *.tmp
 *.temp
 .cache/
+**/__pycache__/
+*.pyc
 # 账号数据与导出文件
 storage/
 
@@ -67,4 +69,6 @@ scripts/feishu/token-cache.json
 .cursor/
 
 data/
+!.claude/skills/ui-ux-pro-max/data/
+!.claude/skills/ui-ux-pro-max/data/**
 public/
