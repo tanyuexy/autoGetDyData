@@ -337,11 +337,10 @@ async function downloadGraphicDetail(page, {
       );
       continue;
     }
-    targetCount += 1;
-
     let datePicked = false;
     let dataDate = null;
     let pickReason = null;
+    let pickUnavailable = false;
     await withStep(
       stepIndexBase + 1 + offset * 3,
       "选择图文自然日",
@@ -351,13 +350,14 @@ async function downloadGraphicDetail(page, {
         datePicked = Boolean(selected.ok);
         dataDate = selected.dataDate || null;
         pickReason = selected.reason || null;
+        if (pickReason === "disabled") {
+          pickUnavailable = true;
+        }
       },
       {
         verify: async () => {
+          if (pickUnavailable) return;
           if (!datePicked || !dataDate) {
-            if (pickReason === "disabled") {
-              throw new Error(`目标日期 ${expectedDate} 在日历中不可选（数据可能未产出）`);
-            }
             throw new Error(`未能选择或解析日期，预期 ${expectedDate}`);
           }
           if (dataDate !== expectedDate) {
@@ -368,6 +368,10 @@ async function downloadGraphicDetail(page, {
       }
     ).catch(async (error) => {
       const msg = error?.message || String(error);
+      if (pickUnavailable || pickReason === "disabled") {
+        pickUnavailable = true;
+        return;
+      }
       await markFailed({
         runId: exportBatchId,
         accountEmail,
@@ -378,9 +382,31 @@ async function downloadGraphicDetail(page, {
       }, msg);
       results.push({ savePath: null, dataDate: dataDate || null, expectedDate, dateMatch: false, error: msg });
     });
+    if (pickUnavailable) {
+      logWarn(tag, `跳过不可选日期 ${expectedDate}（数据可能未产出）`);
+      await withStep(
+        stepIndexBase + 1 + offset * 3,
+        "跳过图文不可选日期",
+        `graphic-skip-unavailable-${offset + 1}`,
+        null,
+        {
+          skipped: true,
+          skipReason: `日历不可选 ${expectedDate}（数据可能未产出）`,
+          meta: stepMeta({ dataDate: expectedDate, offset })
+        }
+      );
+      results.push({
+        skippedUnavailable: true,
+        expectedDate,
+        dataDate: expectedDate
+      });
+      continue;
+    }
     if (results.some((r) => r.expectedDate === expectedDate && r.dateMatch === false && !r.savePath)) {
       continue;
     }
+
+    targetCount += 1;
     const item = {
       runId: exportBatchId,
       accountEmail,
@@ -463,7 +489,7 @@ async function downloadGraphicDetail(page, {
 
   logStep(tag, `图文明细下载完成，成功 ${results.filter((r) => r.savePath && r.dateMatch !== false).length}/${targetCount || daysToExport} 天`, startedAll);
   const failures = results
-    .filter((r) => r.dateMatch === false || !r.savePath)
+    .filter((r) => !r.skippedUnavailable && (r.dateMatch === false || !r.savePath))
     .map((r) => ({
       step: "图文日期选择/下载",
       dataDate: r.dataDate || r.expectedDate || null,

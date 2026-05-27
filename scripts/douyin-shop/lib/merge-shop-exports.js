@@ -3,6 +3,12 @@ const path = require("path");
 const XLSX = require("xlsx");
 const { ACCOUNTS_DIR } = require("./env");
 const { getInternalApiBaseUrl } = require("../../common/internal-api-client");
+const {
+  buildExpectedExportDates,
+  countRequiredExportDays,
+  filterHardMissingDates,
+  getGracefulMissingDateSet,
+} = require("./export-date-grace");
 
 const OUTPUT_DIR = (() => {
   const envVal = process.env.EXPORTS_DIR;
@@ -577,7 +583,9 @@ async function validateShopExportFiles(options = {}) {
   const daysToExport = Math.max(1, Number(options.daysToExport) || 1);
   const exportBatchId = options.exportBatchId || null;
   const creatorEntries = loadCreatorTitleIndex();
-  const expectedDates = calcExpectedDates(daysToExport);
+  const expectedDates = buildExpectedExportDates(options);
+  const requiredDayCount = countRequiredExportDays(expectedDates);
+  const gracefulMissing = getGracefulMissingDateSet();
   const preferredShopNames = Array.isArray(options.preferredShopNames)
     ? options.preferredShopNames.map((name) => String(name || "").trim()).filter(Boolean)
     : [];
@@ -635,12 +643,12 @@ async function validateShopExportFiles(options = {}) {
         missingVideoAdDates,
         missingGraphicDates,
         ok:
-          chunk.videoFiles.length >= daysToExport &&
-          chunk.videoAdFiles.length >= daysToExport &&
-          chunk.graphicFiles.length >= daysToExport &&
-          missingVideoNonAdDates.length === 0 &&
-          missingVideoAdDates.length === 0 &&
-          missingGraphicDates.length === 0
+          chunk.videoFiles.length >= requiredDayCount &&
+          chunk.videoAdFiles.length >= requiredDayCount &&
+          chunk.graphicFiles.length >= requiredDayCount &&
+          filterHardMissingDates(missingVideoNonAdDates, gracefulMissing).length === 0 &&
+          filterHardMissingDates(missingVideoAdDates, gracefulMissing).length === 0 &&
+          filterHardMissingDates(missingGraphicDates, gracefulMissing).length === 0
       };
       candidateReports.push(report);
     }
@@ -671,43 +679,78 @@ async function validateShopExportFiles(options = {}) {
     const locations = matchedReports.map((report) => `${report.account}/${report.shopName}`).join("；");
     problems.push(`${detailPrefix} 已找到店铺目录但本批次导出不完整，检查位置: ${locations}`);
 
-    const hasEnoughVideoNonAd = matchedReports.some((report) => report.videoFiles >= daysToExport);
-    const hasEnoughVideoAd = matchedReports.some((report) => report.videoAdFiles >= daysToExport);
-    const hasEnoughGraphic = matchedReports.some((report) => report.graphicFiles >= daysToExport);
+    const hasEnoughVideoNonAd = matchedReports.some((report) => report.videoFiles >= requiredDayCount);
+    const hasEnoughVideoAd = matchedReports.some((report) => report.videoAdFiles >= requiredDayCount);
+    const hasEnoughGraphic = matchedReports.some((report) => report.graphicFiles >= requiredDayCount);
     const hasAllVideoNonAdDates = matchedReports.some(
-      (report) => report.missingVideoNonAdDates.length === 0
+      (report) => filterHardMissingDates(report.missingVideoNonAdDates, gracefulMissing).length === 0
     );
     const hasAllVideoAdDates = matchedReports.some(
-      (report) => report.missingVideoAdDates.length === 0
+      (report) => filterHardMissingDates(report.missingVideoAdDates, gracefulMissing).length === 0
     );
-    const hasAllGraphicDates = matchedReports.some((report) => report.missingGraphicDates.length === 0);
+    const hasAllGraphicDates = matchedReports.some(
+      (report) => filterHardMissingDates(report.missingGraphicDates, gracefulMissing).length === 0
+    );
 
     if (!hasEnoughVideoNonAd) {
       const actual = Math.max(...matchedReports.map((report) => report.videoFiles));
-      problems.push(`${detailPrefix} 视频非投放文件数量不足：期望 ${daysToExport} 个，最多找到 ${actual} 个`);
+      problems.push(`${detailPrefix} 视频非投放文件数量不足：期望 ${requiredDayCount} 个，最多找到 ${actual} 个`);
     }
     if (!hasEnoughVideoAd) {
       const actual = Math.max(...matchedReports.map((report) => report.videoAdFiles || 0));
-      problems.push(`${detailPrefix} 视频投放文件数量不足：期望 ${daysToExport} 个，最多找到 ${actual} 个`);
+      problems.push(`${detailPrefix} 视频投放文件数量不足：期望 ${requiredDayCount} 个，最多找到 ${actual} 个`);
     }
     if (!hasEnoughGraphic) {
       const actual = Math.max(...matchedReports.map((report) => report.graphicFiles));
-      problems.push(`${detailPrefix} 图文文件数量不足：期望 ${daysToExport} 个，最多找到 ${actual} 个`);
+      problems.push(`${detailPrefix} 图文文件数量不足：期望 ${requiredDayCount} 个，最多找到 ${actual} 个`);
     }
     if (!hasAllVideoNonAdDates) {
       const actualDates = [...new Set(matchedReports.flatMap((report) => report.videoNonAdDates || []))].sort();
       const missingDates = expectedDates.filter((date) => !actualDates.includes(date));
-      problems.push(`${detailPrefix} 视频非投放缺少日期：${missingDates.join(", ")}；实际日期=${actualDates.join(", ") || "(空)"}`);
+      const hardMissingDates = filterHardMissingDates(missingDates, gracefulMissing);
+      const softMissingDates = missingDates.filter((d) => gracefulMissing.has(normalizeDateYMD(d)));
+      if (softMissingDates.length) {
+        console.warn(
+          `${detailPrefix} 视频非投放跳过未产出日期（仅告警）：${softMissingDates.join(", ")}`
+        );
+      }
+      if (hardMissingDates.length) {
+        problems.push(
+          `${detailPrefix} 视频非投放缺少日期：${hardMissingDates.join(", ")}；实际日期=${actualDates.join(", ") || "(空)"}`
+        );
+      }
     }
     if (!hasAllVideoAdDates) {
       const actualDates = [...new Set(matchedReports.flatMap((report) => report.videoAdDates || []))].sort();
       const missingDates = expectedDates.filter((date) => !actualDates.includes(date));
-      problems.push(`${detailPrefix} 视频投放缺少日期：${missingDates.join(", ")}；实际日期=${actualDates.join(", ") || "(空)"}`);
+      const hardMissingDates = filterHardMissingDates(missingDates, gracefulMissing);
+      const softMissingDates = missingDates.filter((d) => gracefulMissing.has(normalizeDateYMD(d)));
+      if (softMissingDates.length) {
+        console.warn(
+          `${detailPrefix} 视频投放跳过未产出日期（仅告警）：${softMissingDates.join(", ")}`
+        );
+      }
+      if (hardMissingDates.length) {
+        problems.push(
+          `${detailPrefix} 视频投放缺少日期：${hardMissingDates.join(", ")}；实际日期=${actualDates.join(", ") || "(空)"}`
+        );
+      }
     }
     if (!hasAllGraphicDates) {
       const actualDates = [...new Set(matchedReports.flatMap((report) => report.graphicDates))].sort();
       const missingDates = expectedDates.filter((date) => !actualDates.includes(date));
-      problems.push(`${detailPrefix} 图文缺少日期：${missingDates.join(", ")}；实际日期=${actualDates.join(", ") || "(空)"}`);
+      const hardMissingDates = filterHardMissingDates(missingDates, gracefulMissing);
+      const softMissingDates = missingDates.filter((d) => gracefulMissing.has(normalizeDateYMD(d)));
+      if (softMissingDates.length) {
+        console.warn(
+          `${detailPrefix} 图文跳过未产出日期（仅告警）：${softMissingDates.join(", ")}`
+        );
+      }
+      if (hardMissingDates.length) {
+        problems.push(
+          `${detailPrefix} 图文缺少日期：${hardMissingDates.join(", ")}；实际日期=${actualDates.join(", ") || "(空)"}`
+        );
+      }
     }
   }
 
@@ -740,7 +783,9 @@ async function mergeAllShopExportsToData(options = {}) {
     accountDirs = [];
   }
 
-  const expectedDateSet = new Set(calcExpectedDates(daysToExport));
+  const expectedDatesList = buildExpectedExportDates(options);
+  const expectedDateSet = new Set(expectedDatesList);
+  const gracefulMissing = getGracefulMissingDateSet();
   const actualDateSet = new Set();
 
   for (const ent of accountDirs) {
@@ -815,11 +860,18 @@ async function mergeAllShopExportsToData(options = {}) {
 
   const expectedDates = [...expectedDateSet].sort();
   const missing = expectedDates.filter((d) => !actualDateSet.has(d));
-  if (missing.length > 0) {
+  const hardMissing = filterHardMissingDates(missing, gracefulMissing);
+  const softMissing = missing.filter((d) => gracefulMissing.has(normalizeDateYMD(d)));
+  if (softMissing.length > 0) {
+    console.warn(
+      `抖店汇总跳过未产出日期（仅告警）：${softMissing.join(", ")}；期望日期=${expectedDates.join(", ")}`
+    );
+  }
+  if (hardMissing.length > 0) {
     console.error(
-      `抖店汇总日期校验失败：最近 ${daysToExport} 天数据缺失。期望日期=${expectedDates.join(", ")}，实际日期=${
+      `抖店汇总日期校验失败：数据缺失。期望日期=${expectedDates.join(", ")}，实际日期=${
         [...actualDateSet].sort().join(", ") || "(空)"
-      }，缺失日期=${missing.join(", ")}`
+      }，缺失日期=${hardMissing.join(", ")}`
     );
   }
 

@@ -716,12 +716,11 @@ async function downloadVideoSelfDetail(page, {
       );
       continue;
     }
-    targetCount += 1;
-
     const dayStepBase = stepIndexBase + offset * VIDEO_STEPS_PER_DAY;
     let datePicked = false;
     let dataDate = null;
     let pickReason = null;
+    let pickUnavailable = false;
     await withStep(
       dayStepBase,
       "选择短视频自然日",
@@ -731,13 +730,14 @@ async function downloadVideoSelfDetail(page, {
         datePicked = Boolean(selected.ok);
         dataDate = selected.dataDate || null;
         pickReason = selected.reason || null;
+        if (pickReason === "disabled") {
+          pickUnavailable = true;
+        }
       },
       {
         verify: async () => {
+          if (pickUnavailable) return;
           if (!datePicked || !dataDate) {
-            if (pickReason === "disabled") {
-              throw new Error(`目标日期 ${expectedDate} 在日历中不可选（数据可能未产出）`);
-            }
             throw new Error(`未能选择或解析日期，预期 ${expectedDate}`);
           }
           if (dataDate !== expectedDate) {
@@ -748,6 +748,10 @@ async function downloadVideoSelfDetail(page, {
       }
     ).catch(async (error) => {
       const msg = error?.message || String(error);
+      if (pickUnavailable || pickReason === "disabled") {
+        pickUnavailable = true;
+        return;
+      }
       for (const kind of ["video-non-ad", "video-ad"]) {
         await markFailed({
           runId: exportBatchId,
@@ -775,9 +779,31 @@ async function downloadVideoSelfDetail(page, {
         error: msg
       });
     });
+    if (pickUnavailable) {
+      logWarn(tag, `跳过不可选日期 ${expectedDate}（数据可能未产出）`);
+      await withStep(
+        dayStepBase,
+        "跳过短视频不可选日期",
+        `video-skip-unavailable-${offset + 1}`,
+        null,
+        {
+          skipped: true,
+          skipReason: `日历不可选 ${expectedDate}（数据可能未产出）`,
+          meta: stepMeta({ dataDate: expectedDate, offset })
+        }
+      );
+      results.push({
+        skippedUnavailable: true,
+        expectedDate,
+        dataDate: expectedDate
+      });
+      continue;
+    }
     if (results.some((r) => r.expectedDate === expectedDate && r.dateMatch === false && !r.savePath)) {
       continue;
     }
+
+    targetCount += 1;
 
     for (const adType of [VIDEO_AD_TYPE.NON_AD, VIDEO_AD_TYPE.AD]) {
       const dayResult = await downloadVideoDetailForAdType(page, {
@@ -824,7 +850,7 @@ async function downloadVideoSelfDetail(page, {
     startedAll
   );
   const failures = results
-    .filter((r) => r.dateMatch === false || !r.savePath)
+    .filter((r) => !r.skippedUnavailable && (r.dateMatch === false || !r.savePath))
     .map((r) => ({
       step: r.adType === VIDEO_AD_TYPE.AD ? "视频投放下载" : "视频非投放下载",
       dataDate: r.dataDate || r.expectedDate || null,

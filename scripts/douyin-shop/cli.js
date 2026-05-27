@@ -21,6 +21,11 @@ const {
   startAndWaitInternalApiTask
 } = require("../common/internal-api-client");
 const { createShopExportTimestamp } = require("./lib/debug");
+const {
+  filterHardMissingDates,
+  getGracefulMissingDateSet,
+  normalizeDateYMD
+} = require("./lib/export-date-grace");
 
 let activeBrowser = null;
 let shuttingDown = false;
@@ -292,6 +297,7 @@ async function runShopSyncFeishuAttempt(accounts, preferredList) {
     .filter(Boolean);
   const validation = await validateShopExportFiles({
     daysToExport,
+    targetDates,
     exportBatchId,
     preferredShopNames: preferredList,
     processedAccountEmails
@@ -308,15 +314,26 @@ async function runShopSyncFeishuAttempt(accounts, preferredList) {
 
   const mergeResult = await mergeAllShopExportsToData({
     daysToExport,
+    targetDates,
     exportBatchId,
     preferredShopNames: preferredList
   });
   const missingMergedDates = mergeResult.expectedDates.filter(
     (d) => !mergeResult.actualDates.includes(d)
   );
-  if (missingMergedDates.length > 0) {
+  const gracefulMissing = getGracefulMissingDateSet();
+  const hardMissingMergedDates = filterHardMissingDates(missingMergedDates, gracefulMissing);
+  const softMissingMergedDates = missingMergedDates.filter((d) =>
+    gracefulMissing.has(normalizeDateYMD(d))
+  );
+  if (softMissingMergedDates.length > 0) {
+    console.warn(
+      `抖店汇总跳过未产出日期（仅告警）：${softMissingMergedDates.join(", ")}；实际日期=${mergeResult.actualDates.join(", ") || "(空)"}`
+    );
+  }
+  if (hardMissingMergedDates.length > 0) {
     throw new Error(
-      `抖店汇总数据校验失败：缺失日期 ${missingMergedDates.join(", ")}；实际日期=${mergeResult.actualDates.join(", ") || "(空)"}`
+      `抖店汇总数据校验失败：缺失日期 ${hardMissingMergedDates.join(", ")}；实际日期=${mergeResult.actualDates.join(", ") || "(空)"}`
     );
   }
 
@@ -391,15 +408,26 @@ async function runShopExportAttempt(accounts, preferredList) {
 
   const mergeResult = await mergeAllShopExportsToData({
     daysToExport,
+    targetDates,
     exportBatchId,
     preferredShopNames: preferredList
   });
   const missingMergedDates = mergeResult.expectedDates.filter(
     (d) => !mergeResult.actualDates.includes(d)
   );
-  if (missingMergedDates.length > 0) {
+  const gracefulMissing = getGracefulMissingDateSet();
+  const hardMissingMergedDates = filterHardMissingDates(missingMergedDates, gracefulMissing);
+  const softMissingMergedDates = missingMergedDates.filter((d) =>
+    gracefulMissing.has(normalizeDateYMD(d))
+  );
+  if (softMissingMergedDates.length > 0) {
+    console.warn(
+      `抖店汇总跳过未产出日期（仅告警）：${softMissingMergedDates.join(", ")}；实际日期=${mergeResult.actualDates.join(", ") || "(空)"}`
+    );
+  }
+  if (hardMissingMergedDates.length > 0) {
     throw new Error(
-      `抖店汇总数据校验失败：缺失日期 ${missingMergedDates.join(", ")}；实际日期=${mergeResult.actualDates.join(", ") || "(空)"}`
+      `抖店汇总数据校验失败：缺失日期 ${hardMissingMergedDates.join(", ")}；实际日期=${mergeResult.actualDates.join(", ") || "(空)"}`
     );
   }
 

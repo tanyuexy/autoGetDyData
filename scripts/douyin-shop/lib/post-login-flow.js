@@ -13,6 +13,12 @@ const {
 } = require("./page-utils");
 const { saveDebugArtifacts } = require("./debug");
 const { logMilestone, logWarn, logError } = require("./shop-log");
+const {
+  isCalendarUnavailableError,
+  filterHardMissingDates,
+  getGracefulMissingDateSet,
+  normalizeDateYMD
+} = require("./export-date-grace");
 
 function buildShopExportIncompleteError(round, shopTag) {
   const parts = [
@@ -84,6 +90,8 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
   let videoTargetCount = targetKinds && !targetKinds.includes("video") ? 0 : daysToExport;
   let graphicTargetCount = targetKinds && !targetKinds.includes("graphic") ? 0 : daysToExport;
   let videoCompleteDays = 0;
+  let videoSkippedUnavailable = [];
+  let graphicSkippedUnavailable = [];
   const allFailures = [];
 
   try {
@@ -102,7 +110,9 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       shopTotal: options.shopTotal
     });
     if (result.failures && result.failures.length) {
-      allFailures.push(...result.failures);
+      allFailures.push(
+        ...result.failures.filter((f) => !isCalendarUnavailableError(f.error))
+      );
     }
     if (result.allResults) {
       videoPaths = result.allResults
@@ -110,10 +120,18 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
         .map((r) => r.savePath)
         .filter(Boolean);
       videoDateMismatches = result.allResults
-        .filter((r) => r.dateMatch === false)
+        .filter((r) => r.dateMatch === false && !r.skippedUnavailable)
         .map((r) => r.dataDate || r.expectedDate || "unknown");
       videoTargetCount = result.targetCount ?? daysToExport;
       videoCompleteDays = result.completeDays ?? 0;
+      videoSkippedUnavailable = [
+        ...new Set(
+          result.allResults
+            .filter((r) => r.skippedUnavailable)
+            .map((r) => r.expectedDate || r.dataDate)
+            .filter(Boolean)
+        )
+      ];
     } else if (result.savePath) {
       videoPaths = [result.savePath];
       videoCompleteDays = 1;
@@ -145,7 +163,9 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
       shopTotal: options.shopTotal
     });
     if (result.failures && result.failures.length) {
-      allFailures.push(...result.failures);
+      allFailures.push(
+        ...result.failures.filter((f) => !isCalendarUnavailableError(f.error))
+      );
     }
     if (result.allResults) {
       graphicPaths = result.allResults
@@ -153,9 +173,17 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
         .map((r) => r.savePath)
         .filter(Boolean);
       graphicDateMismatches = result.allResults
-        .filter((r) => r.dateMatch === false)
+        .filter((r) => r.dateMatch === false && !r.skippedUnavailable)
         .map((r) => r.dataDate || r.expectedDate || "unknown");
       graphicTargetCount = result.targetCount ?? daysToExport;
+      graphicSkippedUnavailable = [
+        ...new Set(
+          result.allResults
+            .filter((r) => r.skippedUnavailable)
+            .map((r) => r.expectedDate || r.dataDate)
+            .filter(Boolean)
+        )
+      ];
     } else if (result.savePath) {
       graphicPaths = [result.savePath];
     }
@@ -170,17 +198,39 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     ).catch(() => {});
   }
 
+  const gracefulMissing = getGracefulMissingDateSet();
+  const hardVideoMismatches = filterHardMissingDates(videoDateMismatches, gracefulMissing);
+  const hardGraphicMismatches = filterHardMissingDates(graphicDateMismatches, gracefulMissing);
   const ok =
+    !videoError &&
+    !graphicError &&
     videoCompleteDays === videoTargetCount &&
-    graphicPaths.length === graphicTargetCount;
+    graphicPaths.length === graphicTargetCount &&
+    hardVideoMismatches.length === 0 &&
+    hardGraphicMismatches.length === 0;
   const parts = [videoError, graphicError].filter(Boolean);
 
   const videoDaysOk = videoError ? 0 : videoCompleteDays;
   const graphicDaysOk = graphicError ? 0 : graphicPaths.length;
   const dateMismatchWarn = [];
-  if (videoDateMismatches.length) dateMismatchWarn.push(`视频日期不符: ${videoDateMismatches.join(', ')}`);
-  if (graphicDateMismatches.length) dateMismatchWarn.push(`图文日期不符: ${graphicDateMismatches.join(', ')}`);
-  const dateOk = videoDateMismatches.length === 0 && graphicDateMismatches.length === 0;
+  if (hardVideoMismatches.length) {
+    dateMismatchWarn.push(`视频日期不符: ${hardVideoMismatches.join(", ")}`);
+  }
+  if (hardGraphicMismatches.length) {
+    dateMismatchWarn.push(`图文日期不符: ${hardGraphicMismatches.join(", ")}`);
+  }
+  const softSkippedDates = [
+    ...new Set([
+      ...videoSkippedUnavailable,
+      ...graphicSkippedUnavailable,
+      ...videoDateMismatches.filter((d) => gracefulMissing.has(normalizeDateYMD(d))),
+      ...graphicDateMismatches.filter((d) => gracefulMissing.has(normalizeDateYMD(d)))
+    ])
+  ];
+  if (softSkippedDates.length) {
+    dateMismatchWarn.push(`数据未产出已跳过: ${softSkippedDates.join(", ")}`);
+  }
+  const dateOk = hardVideoMismatches.length === 0 && hardGraphicMismatches.length === 0;
   const failedStepsDetail = [];
   if (allFailures.length) {
     const counts = {};
@@ -215,6 +265,8 @@ async function downloadCurrentShop(page, tag, paths, options = {}) {
     graphicError,
     videoDateMismatches,
     graphicDateMismatches,
+    hardVideoMismatches,
+    hardGraphicMismatches,
     downloadPath: videoPaths[0] || graphicPaths[0] || null,
     error: parts.length ? parts.join("；") : undefined,
     failures: allFailures
