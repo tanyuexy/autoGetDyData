@@ -5,6 +5,7 @@ import {
   type GenerateSeedancePromptInput,
   type SeedancePromptReferenceInput,
 } from "@/lib/ai-video/seedancePromptGenerator";
+import { DEFAULT_SEEDANCE_MODEL } from "@/lib/ai-video/constants";
 import type { GenerationMode } from "@/lib/ai-video/types";
 
 export const runtime = "nodejs";
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
     const input: GenerateSeedancePromptInput = {
       brief,
       mode,
-      model: String(body.model || "").trim() || "doubao-seedance-2-0-260128",
+      model: String(body.model || "").trim() || DEFAULT_SEEDANCE_MODEL,
       duration: Number(body.duration) || 5,
       ratio: String(body.ratio || "9:16").trim(),
       resolution: String(body.resolution || "720p").trim(),

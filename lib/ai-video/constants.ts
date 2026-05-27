@@ -3,6 +3,9 @@ import type { SeedanceModelOption } from "./types";
 export const COMPOSE_GROUP_PRESETS = ["开头", "中间", "结尾"];
 export const COMPOSE_GROUP_QUICK_PICKS = ["1", "2", "3", "4", "5"];
 
+/** AI 视频生成页默认模型 */
+export const DEFAULT_SEEDANCE_MODEL = "doubao-seedance-2-0-fast-260128";
+
 export const FALLBACK_MODELS: SeedanceModelOption[] = [
   {
     label: "Seedance 2.0",

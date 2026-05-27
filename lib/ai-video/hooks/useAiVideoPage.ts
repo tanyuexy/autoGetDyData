@@ -28,7 +28,11 @@ import {
   writeReferenceResourcesCache,
   writeStoredConfig,
 } from "@/lib/ai-video/cache";
-import { FALLBACK_MODELS, REFERENCE_CACHE_KEY } from "@/lib/ai-video/constants";
+import {
+  DEFAULT_SEEDANCE_MODEL,
+  FALLBACK_MODELS,
+  REFERENCE_CACHE_KEY,
+} from "@/lib/ai-video/constants";
 import {
   buildClipFormSnapshot,
   createClipId,
@@ -56,7 +60,7 @@ const cachedConfig = useMemo(() => readCachedConfig(), []);
 const [models, setModels] = useState<SeedanceModelOption[]>(FALLBACK_MODELS);
 const [hasServerApiKey, setHasServerApiKey] = useState(false);
 const [showCallbackUrl, setShowCallbackUrl] = useState(false);
-const [model, setModel] = useState(cachedConfig.model || FALLBACK_MODELS[0].value);
+const [model, setModel] = useState(cachedConfig.model || DEFAULT_SEEDANCE_MODEL);
 const [mode, setMode] = useState<GenerationMode>(
   isGenerationMode(cachedConfig.mode) ? cachedConfig.mode : "first-frame"
 );
@@ -75,7 +79,7 @@ const [referenceResources, setReferenceResources] = useState<ReferenceResource[]
 const [ratio, setRatio] = useState(cachedConfig.ratio || "9:16");
 const [resolution, setResolution] = useState(cachedConfig.resolution || "720p");
 const [duration, setDuration] = useState(() =>
-  normalizeSeedanceDuration(cachedConfig.model || FALLBACK_MODELS[0].value, cachedConfig.duration)
+  normalizeSeedanceDuration(cachedConfig.model || DEFAULT_SEEDANCE_MODEL, cachedConfig.duration)
 );
 const [generateAudio, setGenerateAudio] = useState(cachedConfig.generateAudio ?? false);
 const [watermark, setWatermark] = useState(cachedConfig.watermark ?? false);
