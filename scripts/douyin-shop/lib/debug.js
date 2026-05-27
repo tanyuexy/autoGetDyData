@@ -179,6 +179,7 @@ async function saveDebugArtifacts(page, accountName, tag, options = {}) {
 module.exports = {
   SHOP_EXPORT_DEBUG_DIR,
   SHOP_EXPORT_DEBUG_TZ,
+  getShopExportDebugTimeParts,
   createShopExportDebugRunId,
   createShopExportTimestamp,
   formatShopExportDebugTimestamp,
