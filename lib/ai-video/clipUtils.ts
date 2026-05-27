@@ -1,5 +1,6 @@
 import type { UploadFile } from "antd/es/upload/interface";
 import type { SemanticTagPreset } from "@/lib/semanticTagStyles";
+import { FALLBACK_MODELS } from "./constants";
 import { readCachedUploadFiles, serializeUploadFiles } from "./cache";
 import type {
   ClipFormSnapshot,
@@ -149,6 +150,14 @@ export function isFinished(status: string) {
   return ["succeeded", "success", "completed", "done", "failed", "error", "cancelled", "canceled"].includes(
     status.toLowerCase()
   );
+}
+
+export function formatClipModelLabel(modelValue: string): string {
+  const model = String(modelValue || "").trim();
+  if (!model) return "—";
+  if (model === "manual") return "手动上传";
+  const found = FALLBACK_MODELS.find((item) => item.value === model);
+  return found?.label ?? model;
 }
 
 export function createClipId() {

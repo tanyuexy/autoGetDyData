@@ -106,7 +106,7 @@ export function AiVideoListTabs({
                 </Space>
               ),
               children: (
-                <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+                <Space orientation="vertical" size={8} style={{ width: "100%" }}>
                   <Space align="center" style={{ width: "100%", justifyContent: "space-between" }} wrap>
                     <Space wrap size={8} align="center">
                       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -154,6 +154,14 @@ export function AiVideoListTabs({
                     </Space>
                   </Space>
 
+                  <Alert
+                    type="info"
+                    showIcon
+                    banner
+                    style={{ padding: "4px 12px", marginBottom: 0 }}
+                    title={`已选 ${selectedClips.length} 个片段，预计 ${selectedDuration || 0} 秒`}
+                  />
+
                   {visibleClips.length ? (
                     <Table
                       rowKey="id"
@@ -172,12 +180,6 @@ export function AiVideoListTabs({
                   ) : (
                     <Empty description={clipTagFilter ? "当前标签下暂无片段" : "还没有片段"} />
                   )}
-
-                  <Alert
-                    type="info"
-                    showIcon
-                    title={`已选 ${selectedClips.length} 个片段，预计 ${selectedDuration || 0} 秒`}
-                  />
                 </Space>
               ),
             },

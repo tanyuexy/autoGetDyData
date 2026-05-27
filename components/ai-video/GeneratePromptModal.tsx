@@ -133,7 +133,7 @@ export function GeneratePromptModal({
             onChange={setBrief}
             referenceResources={referenceResources}
             idPrefix="generate-prompt-picker"
-            placeholder="例如：@视频1 作为首帧参考，一段 15 秒仙侠高燃战斗，横屏，金红暖色调，带台词与音效描述"
+            placeholder="例如：@视频1 首帧参考，15 秒仙侠高燃战斗；或 @图片1 产品 5 秒竖屏仿实拍手持展示，自然光、生活化场景、带口播与音效"
             autoSize={{ minRows: 3, maxRows: 6 }}
             maxLength={800}
           />
@@ -144,7 +144,7 @@ export function GeneratePromptModal({
           <Input
             value={stylePreference}
             onChange={(event) => setStylePreference(event.target.value)}
-            placeholder="例如：电影感、赛博朋克、广告片质感、一镜到底"
+            placeholder="例如：仿实拍 / 手机手持 UGC、自然光低饱和、电影感、赛博朋克、广告大片、一镜到底"
             maxLength={200}
           />
         </Space>

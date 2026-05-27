@@ -128,6 +128,13 @@ export interface CommentItem {
 
 export type AiVideoGenerationMode = "text" | "first-frame" | "first-last-frame";
 
+/** Seedance（即梦/方舟）视频任务 token 消耗 */
+export interface AiVideoClipTokenUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens: number;
+}
+
 export interface AiVideoUploadFileSnapshot {
   uid: string;
   name?: string;
@@ -176,6 +183,8 @@ export interface AiVideoComposedFilm {
   segments: AiVideoComposedFilmSegment[];
   backgroundMusic?: string | null;
   comboIndex?: number | null;
+  /** 创建该成片的登录用户 */
+  username?: string | null;
   createdAt: string;
 }
 
@@ -197,6 +206,10 @@ export interface AiVideoClip {
   composeGroup?: string | null;
   /** 片段标签，用于列表筛选与随机混剪按标签选分组 */
   tag?: string | null;
+  /** 创建该片段的登录用户 */
+  username?: string | null;
+  /** 本条片段 Seedance 视频任务 token 消耗 */
+  tokenUsage?: AiVideoClipTokenUsage | null;
   createdAt: string;
   updatedAt: string;
   formSnapshot?: AiVideoClipFormSnapshot;

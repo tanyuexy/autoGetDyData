@@ -46,8 +46,12 @@ import {
   resolveClipRestoreSnapshot,
   validateReferenceFile,
 } from "@/lib/ai-video/clipUtils";
+import { useAuth } from "@/contexts/AuthContext";
+import { isAiVideoAdmin } from "@/lib/auth/aiVideoOwner";
 import { copyToClipboard } from "@/lib/copyToClipboard";
 import { resolveMediaUrl } from "@/lib/ai-video/media";
+import { normalizeTokenUsage } from "@/lib/ai-video/tokenUsage";
+import type { AiVideoClipTokenUsage } from "@/types";
 import type { ClipItem, GenerationMode, ReferenceKind, ReferenceResource, SeedanceModelOption } from "@/lib/ai-video/types";
 import {
   getSeedanceDurationConfig,
@@ -56,6 +60,8 @@ import {
 
 export function useAiVideoPage() {
 const { message } = App.useApp();
+const { username } = useAuth();
+const canDeleteMaterials = isAiVideoAdmin(username);
 const cachedConfig = useMemo(() => readCachedConfig(), []);
 const [models, setModels] = useState<SeedanceModelOption[]>(FALLBACK_MODELS);
 const [hasServerApiKey, setHasServerApiKey] = useState(false);
@@ -603,37 +609,62 @@ async function submitTask() {
 
   setSubmitting(true);
   try {
-    const res = await fetch("/api/ai-video/seedance", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        prompt: normalizeReferencePrompt(prompt),
-        mode: requestMode,
-        firstFrameUrl: resolvedFirstFrameUrl,
-        lastFrameUrl,
-        referenceResources: resolvedReferenceResources
-          .filter((resource) => !(mode === "first-frame" && resource.id === firstFrameReference?.id))
-          .map((resource) => ({
-            id: resource.id,
-            name: resource.name,
-            kind: resource.kind,
-            url: resource.url,
-          })),
-        ratio,
-        resolution,
-        duration,
-        generateAudio,
-        watermark,
-        seed,
-        callbackUrl,
+    const resolveClipName = async () => {
+      const fallback = prompt.trim().slice(0, 24) || "未命名片段";
+      if (!hasMiniMaxApiKey || !prompt.trim()) return fallback;
+      try {
+        const nameRes = await fetch("/api/ai-video/generate-clip-name", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: prompt.trim() }),
+        });
+        const nameData = (await nameRes.json()) as { name?: string };
+        if (nameRes.ok && typeof nameData.name === "string" && nameData.name.trim()) {
+          return nameData.name.trim().slice(0, 24);
+        }
+      } catch {
+        // MiniMax 命名失败时回退
+      }
+      return fallback;
+    };
+
+    const [res, clipName] = await Promise.all([
+      fetch("/api/ai-video/seedance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          prompt: normalizeReferencePrompt(prompt),
+          mode: requestMode,
+          firstFrameUrl: resolvedFirstFrameUrl,
+          lastFrameUrl,
+          referenceResources: resolvedReferenceResources
+            .filter((resource) => !(mode === "first-frame" && resource.id === firstFrameReference?.id))
+            .map((resource) => ({
+              id: resource.id,
+              name: resource.name,
+              kind: resource.kind,
+              url: resource.url,
+            })),
+          ratio,
+          resolution,
+          duration,
+          generateAudio,
+          watermark,
+          seed,
+          callbackUrl,
+        }),
       }),
-    });
+      resolveClipName(),
+    ]);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "创建任务失败");
 
     const task = data.task || {};
     const taskId = task.id || data.raw?.id || data.raw?.task_id;
+    const tokenUsage = normalizeTokenUsage(
+      task.tokenUsage as AiVideoClipTokenUsage | null | undefined
+    );
     const snapshotFirstFrameUrl =
       mode === "first-frame" ? firstFrameReference?.url || firstFrameUrl : firstFrameUrl;
     const snapshotFirstFrameFiles =
@@ -660,7 +691,7 @@ async function submitTask() {
     const now = new Date().toISOString();
     const clip: ClipItem = {
       id: createClipId(),
-      name: prompt.trim().slice(0, 24) || "未命名片段",
+      name: clipName,
       model,
       prompt,
       mode,
@@ -672,6 +703,7 @@ async function submitTask() {
       ratio,
       resolution,
       tag: normalizeClipTag(clipTag),
+      tokenUsage,
       createdAt: now,
       updatedAt: now,
       formSnapshot,
@@ -1374,17 +1406,19 @@ const handleReferenceDrop = useCallback(
   const filmColumns = useMemo(
     () =>
       buildFilmTableColumns({
+        canDeleteMaterials,
         clipById,
         onPreviewFilm: handlePreviewFilm,
         onPreviewClip: handlePreviewClip,
         onDeleteFilm: handleDeleteFilm,
       }),
-    [clipById, handleDeleteFilm, handlePreviewClip, handlePreviewFilm]
+    [canDeleteMaterials, clipById, handleDeleteFilm, handlePreviewClip, handlePreviewFilm]
   );
 
   const clipColumns = useMemo(
     () =>
       buildClipTableColumns({
+        canDeleteMaterials,
         composeOrderMap,
         onCopyPrompt: copyPrompt,
         onPreviewClip: handlePreviewClip,
@@ -1394,7 +1428,7 @@ const handleReferenceDrop = useCallback(
         onRestoreFormFromClip: restoreFormFromClip,
         onDeleteClip: handleDeleteClip,
       }),
-    [composeOrderMap, copyPrompt, downloadClip, handleDeleteClip, handlePreviewClip, handlePreviewMaterial, pollTask, restoreFormFromClip]
+    [canDeleteMaterials, composeOrderMap, copyPrompt, downloadClip, handleDeleteClip, handlePreviewClip, handlePreviewMaterial, pollTask, restoreFormFromClip]
   );
 
   const handleGroupAssignConfirm = useCallback(async () => {

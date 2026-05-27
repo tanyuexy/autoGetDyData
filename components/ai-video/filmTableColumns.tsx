@@ -8,6 +8,7 @@ import { resolveMediaUrl } from "@/lib/ai-video/media";
 import type { ClipItem } from "@/lib/ai-video/types";
 
 export interface BuildFilmTableColumnsDeps {
+  canDeleteMaterials: boolean;
   clipById: Map<string, ClipItem>;
   onPreviewFilm: (film: AiVideoComposedFilm) => void;
   onPreviewClip: (clip: ClipItem) => void;
@@ -17,7 +18,7 @@ export interface BuildFilmTableColumnsDeps {
 export function buildFilmTableColumns(
   deps: BuildFilmTableColumnsDeps
 ): NonNullable<TableProps<AiVideoComposedFilm>["columns"]> {
-  const { clipById, onPreviewFilm, onPreviewClip, onDeleteFilm } = deps;
+  const { canDeleteMaterials, clipById, onPreviewFilm, onPreviewClip, onDeleteFilm } = deps;
 
   return [
     {
@@ -27,6 +28,15 @@ export function buildFilmTableColumns(
       align: "center" as const,
       render: (_: unknown, record: AiVideoComposedFilm) => (
         <ClipVideoThumbnail width={96} height={64} videoUrl={record.videoUrl} onClick={() => onPreviewFilm(record)} />
+      ),
+    },
+    {
+      title: "用户",
+      dataIndex: "username",
+      width: 88,
+      align: "center" as const,
+      render: (_: unknown, record: AiVideoComposedFilm) => (
+        <Typography.Text style={{ fontSize: 12 }}>{record.username?.trim() || "—"}</Typography.Text>
       ),
     },
     {
@@ -144,23 +154,25 @@ export function buildFilmTableColumns(
           <Button size="small" type="link" style={{ padding: 0 }} href={resolveMediaUrl(record.videoUrl)} target="_blank">
             打开
           </Button>
-          <Button
-            size="small"
-            type="link"
-            danger
-            style={{ padding: 0 }}
-            onClick={() => {
-              Modal.confirm({
-                title: "删除这条成片记录？",
-                content: "仅删除列表记录，不会删除磁盘上的视频文件。",
-                okText: "删除",
-                cancelText: "取消",
-                onOk: () => onDeleteFilm(record),
-              });
-            }}
-          >
-            删除
-          </Button>
+          {canDeleteMaterials ? (
+            <Button
+              size="small"
+              type="link"
+              danger
+              style={{ padding: 0 }}
+              onClick={() => {
+                Modal.confirm({
+                  title: "删除这条成片记录？",
+                  content: "仅删除列表记录，不会删除磁盘上的视频文件。",
+                  okText: "删除",
+                  cancelText: "取消",
+                  onOk: () => onDeleteFilm(record),
+                });
+              }}
+            >
+              删除
+            </Button>
+          ) : null}
         </Space>
       ),
     },

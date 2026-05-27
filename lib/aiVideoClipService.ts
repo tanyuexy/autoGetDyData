@@ -1,4 +1,6 @@
-import type { AiVideoClip } from "@/types";
+import type { AiVideoClip, AiVideoClipTokenUsage } from "@/types";
+import { mergeTokenUsage, normalizeTokenUsage } from "@/lib/ai-video/tokenUsage";
+import { assertAiVideoAdminCanDelete } from "@/lib/auth/aiVideoOwner";
 import { isClipCompleted } from "@/lib/ai-video/clipUtils";
 import { archiveClipVideo, isLocalGeneratedVideoUrl } from "@/lib/aiVideoMedia";
 import { getDb } from "./db/mongo";
@@ -28,6 +30,8 @@ function normalizeClip(doc: unknown): AiVideoClip | null {
     resolution: String(item.resolution || "720p"),
     composeGroup: item.composeGroup ? String(item.composeGroup) : null,
     tag: item.tag ? String(item.tag).trim() || null : null,
+    username: item.username ? String(item.username).trim() || null : null,
+    tokenUsage: normalizeTokenUsage(item.tokenUsage),
     createdAt: String(item.createdAt || new Date().toISOString()),
     updatedAt: String(item.updatedAt || item.createdAt || new Date().toISOString()),
     formSnapshot: item.formSnapshot,
@@ -50,9 +54,15 @@ export async function readAiVideoClips(): Promise<AiVideoClip[]> {
   return docs.map(normalizeClip).filter(Boolean) as AiVideoClip[];
 }
 
-export async function upsertAiVideoClip(input: AiVideoClip): Promise<AiVideoClip> {
+export async function upsertAiVideoClip(
+  input: AiVideoClip,
+  ownerUsername?: string
+): Promise<AiVideoClip> {
   const clip = normalizeClip(input);
   if (!clip) throw new Error("片段数据无效");
+
+  const db = await getDb();
+  const existing = normalizeClip(await db.collection(COLLECTION).findOne({ id: clip.id }));
 
   let videoUrl = clip.videoUrl;
   let remoteVideoUrl = clip.remoteVideoUrl ?? null;
@@ -63,26 +73,37 @@ export async function upsertAiVideoClip(input: AiVideoClip): Promise<AiVideoClip
 
   const saved: AiVideoClip = {
     ...clip,
+    username: existing?.username || ownerUsername || clip.username || null,
+    tokenUsage: mergeTokenUsage(existing?.tokenUsage, clip.tokenUsage) ?? clip.tokenUsage ?? null,
     videoUrl,
     remoteVideoUrl,
     updatedAt: new Date().toISOString(),
   };
-  const db = await getDb();
   await db.collection(COLLECTION).replaceOne({ id: saved.id }, toDocument(saved), { upsert: true });
   return saved;
 }
 
-export async function upsertAiVideoClips(items: AiVideoClip[]): Promise<AiVideoClip[]> {
+export async function upsertAiVideoClips(
+  items: AiVideoClip[],
+  ownerUsername?: string
+): Promise<AiVideoClip[]> {
   const saved: AiVideoClip[] = [];
   for (const item of items) {
-    saved.push(await upsertAiVideoClip(item));
+    saved.push(await upsertAiVideoClip(item, ownerUsername));
   }
   return saved;
 }
 
 export async function updateAiVideoClipFromTask(
   clipId: string,
-  task: { status?: string; videoUrl?: string | null; coverUrl?: string | null }
+  task: {
+    status?: string;
+    videoUrl?: string | null;
+    coverUrl?: string | null;
+    tokenUsage?: AiVideoClipTokenUsage | null;
+    raw?: unknown;
+  },
+  ownerUsername?: string
 ): Promise<AiVideoClip | null> {
   const db = await getDb();
   const existing = normalizeClip(await db.collection(COLLECTION).findOne({ id: clipId }));
@@ -107,6 +128,7 @@ export async function updateAiVideoClipFromTask(
     videoUrl,
     remoteVideoUrl,
     coverUrl: task.coverUrl ?? existing.coverUrl ?? null,
+    tokenUsage: mergeTokenUsage(existing.tokenUsage, task.tokenUsage) ?? existing.tokenUsage ?? null,
     updatedAt: new Date().toISOString(),
   };
 
@@ -114,7 +136,8 @@ export async function updateAiVideoClipFromTask(
   return updated;
 }
 
-export async function deleteAiVideoClip(id: string): Promise<boolean> {
+export async function deleteAiVideoClip(id: string, actorUsername?: string): Promise<boolean> {
+  assertAiVideoAdminCanDelete(actorUsername);
   const db = await getDb();
   const existing = normalizeClip(await db.collection(COLLECTION).findOne({ id }));
   if (!existing) return false;

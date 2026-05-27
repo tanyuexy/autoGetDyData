@@ -1,4 +1,5 @@
 import AppLayout from "@/components/AppLayout";
+import { AuthProvider } from "@/contexts/AuthContext";
 import { TaskProvider } from "@/contexts/TaskContext";
 
 export default function MainLayout({
@@ -7,8 +8,10 @@ export default function MainLayout({
   children: React.ReactNode;
 }) {
   return (
-    <TaskProvider>
+    <AuthProvider>
+      <TaskProvider>
       <AppLayout>{children}</AppLayout>
     </TaskProvider>
+    </AuthProvider>
   );
 }

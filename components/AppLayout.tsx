@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Layout, Menu, Button, Segmented, Tooltip } from "antd";
+import { Layout, Menu, Button, Segmented, Tooltip, Typography } from "antd";
 import {
   VideoCameraOutlined,
   ShoppingOutlined,
@@ -17,9 +17,12 @@ import {
   ThunderboltOutlined,
   CoffeeOutlined,
   PlayCircleOutlined,
+  LogoutOutlined,
+  UserOutlined,
 } from "@ant-design/icons";
 import { useRouter, usePathname } from "next/navigation";
 import TaskPanel from "@/components/TaskPanel";
+import { useAuth } from "@/contexts/AuthContext";
 import { useTaskContext } from "@/contexts/TaskContext";
 import { useAppUiTheme } from "@/contexts/UIThemeContext";
 import type { AppUiTheme } from "@/lib/appUiTheme";
@@ -100,6 +103,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [pos, setPos] = useState<Pos>({ x: 0, y: 0 });
 
   const router = useRouter();
+  const { enabled: authEnabled, username, logout } = useAuth();
   const pathname = usePathname();
 
   const selectedKey = pathname || "/creator";
@@ -233,10 +237,41 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           }}
         />
 
+        {authEnabled && username ? (
+          <div
+            className="auth-user-row"
+            style={{
+              padding: collapsed ? "8px 0" : "10px 12px",
+              borderTop: "1px solid var(--ic-hairline)",
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: collapsed ? "center" : "space-between",
+              gap: 8,
+            }}
+          >
+            {collapsed ? (
+              <Tooltip title={`当前用户：${username}`}>
+                <UserOutlined style={{ fontSize: 16 }} />
+              </Tooltip>
+            ) : (
+              <>
+                <Typography.Text ellipsis style={{ fontSize: 12, flex: 1, minWidth: 0 }}>
+                  <UserOutlined style={{ marginRight: 6 }} />
+                  {username}
+                </Typography.Text>
+                <Button type="text" size="small" icon={<LogoutOutlined />} onClick={() => void logout()}>
+                  退出
+                </Button>
+              </>
+            )}
+          </div>
+        ) : null}
+
         <div
           style={{
             padding: "10px 12px",
-            borderTop: "1px solid var(--ic-hairline)",
+            borderTop: authEnabled && username ? "none" : "1px solid var(--ic-hairline)",
             flexShrink: 0,
           }}
         >

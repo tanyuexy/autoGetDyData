@@ -1,6 +1,8 @@
 export type SeedanceGenerationMode = "text" | "first-frame" | "first-last-frame";
 export type SeedanceReferenceKind = "image" | "video" | "audio";
 
+import type { AiVideoClipTokenUsage } from "@/types";
+import { extractTokenUsageFromResponse } from "@/lib/ai-video/tokenUsage";
 import {
   getSeedanceDurationConfig,
   normalizeSeedanceDuration,
@@ -89,6 +91,7 @@ export interface NormalizedSeedanceTask {
   status: string;
   videoUrl: string | null;
   coverUrl: string | null;
+  tokenUsage?: AiVideoClipTokenUsage | null;
   raw: unknown;
 }
 
@@ -480,6 +483,7 @@ export function normalizeSeedanceTask(data: any): NormalizedSeedanceTask {
       "thumbnail_url",
       "image_url",
     ]),
+    tokenUsage: extractTokenUsageFromResponse(data),
     raw: data,
   };
 }

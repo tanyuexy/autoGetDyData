@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { ComposeGroupInput, ComposeRequest, ComposeSegmentInput } from "@/lib/videoComposeShared";
+import { requireAppSession, resolveOwnerUsername } from "@/lib/auth/requireSession";
 import { saveComposedFilmsFromResults } from "@/lib/aiVideoComposedFilmService";
 import { runComposeRequest } from "@/lib/videoCompose";
 
@@ -28,6 +29,8 @@ function normalizeGroup(item: unknown): ComposeGroupInput | null {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await requireAppSession(request);
+  if (session instanceof NextResponse) return session;
   try {
     const body = await request.json();
     const mode = body.mode === "random" ? "random" : "sequential";
@@ -57,7 +60,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await runComposeRequest(composeRequest);
-    const savedFilms = await saveComposedFilmsFromResults(result.films);
+    const savedFilms = await saveComposedFilmsFromResults(result.films, resolveOwnerUsername(session));
     const primaryFilm = savedFilms[0] || result.films[0];
 
     return NextResponse.json({

@@ -8,14 +8,17 @@ import { ClipVideoThumbnail } from "@/components/ai-video/ClipVideoThumbnail";
 import type { ClipGenerationMaterial } from "@/lib/ai-video/clipMaterials";
 import { antdTagPresetStyle } from "@/lib/semanticTagStyles";
 import {
+  formatClipModelLabel,
   formatClipStatusLabel,
   getStatusPreset,
   isClipCompleted,
   isFinished,
 } from "@/lib/ai-video/clipUtils";
+import { formatTokenCountCompact, formatTokenUsageLabel } from "@/lib/ai-video/tokenUsage";
 import type { ClipItem } from "@/lib/ai-video/types";
 
 export interface BuildClipTableColumnsDeps {
+  canDeleteMaterials: boolean;
   composeOrderMap: Map<string, number>;
   onCopyPrompt: (text: string) => void;
   onPreviewClip: (clip: ClipItem) => void;
@@ -30,6 +33,7 @@ export function buildClipTableColumns(
   deps: BuildClipTableColumnsDeps
 ): NonNullable<TableProps<ClipItem>["columns"]> {
   const {
+    canDeleteMaterials,
     composeOrderMap,
     onCopyPrompt,
     onPreviewClip,
@@ -60,9 +64,57 @@ export function buildClipTableColumns(
       },
     },
     {
+      title: "用户",
+      dataIndex: "username",
+      width: 88,
+      align: "center",
+      render: (value: string | null | undefined) => (
+        <Typography.Text style={{ fontSize: 12 }}>{value?.trim() || "—"}</Typography.Text>
+      ),
+    },
+    {
+      title: "Token",
+      key: "tokenUsage",
+      width: 88,
+      align: "center",
+      render: (_, record) => {
+        const label = formatTokenUsageLabel(record.tokenUsage);
+        const usage = record.tokenUsage;
+        const hasBreakdown =
+          usage &&
+          (usage.promptTokens != null || usage.completionTokens != null) &&
+          label !== "—";
+        const tooltip = hasBreakdown ? (
+          <span style={{ whiteSpace: "pre-wrap" }}>
+            {[
+              usage.promptTokens != null
+                ? `输入：${formatTokenCountCompact(usage.promptTokens)}`
+                : null,
+              usage.completionTokens != null
+                ? `输出：${formatTokenCountCompact(usage.completionTokens)}`
+                : null,
+              `合计：${formatTokenCountCompact(usage.totalTokens)}`,
+            ]
+              .filter(Boolean)
+              .join("\n")}
+          </span>
+        ) : null;
+
+        return tooltip ? (
+          <Tooltip title={tooltip}>
+            <Typography.Text style={{ fontSize: 12 }}>{label}</Typography.Text>
+          </Tooltip>
+        ) : (
+          <Typography.Text type={label === "—" ? "secondary" : undefined} style={{ fontSize: 12 }}>
+            {label}
+          </Typography.Text>
+        );
+      },
+    },
+    {
       title: "片段",
       dataIndex: "name",
-      width: 240,
+      width: 132,
       align: "center",
       render: (_, record) => {
         const meta = `${record.ratio} · ${record.resolution} · ${record.duration}s`;
@@ -73,11 +125,15 @@ export function buildClipTableColumns(
             title={<span style={{ whiteSpace: "pre-wrap" }}>{tooltipContent}</span>}
             styles={{ root: { maxWidth: 420 } }}
           >
-            <Space orientation="vertical" size={2} style={{ maxWidth: 210, margin: "0 auto" }}>
-              <Typography.Text strong ellipsis>
+            <Space
+              orientation="vertical"
+              size={2}
+              style={{ width: "100%", maxWidth: 116, margin: "0 auto" }}
+            >
+              <Typography.Text strong ellipsis style={{ width: "100%", fontSize: 12 }}>
                 {record.name}
               </Typography.Text>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              <Typography.Text type="secondary" ellipsis style={{ width: "100%", fontSize: 11 }}>
                 {meta}
               </Typography.Text>
             </Space>
@@ -133,13 +189,32 @@ export function buildClipTableColumns(
     {
       title: "模型",
       dataIndex: "model",
-      width: 190,
+      width: 148,
       align: "center",
-      render: (value) => (
-        <Typography.Text style={{ fontSize: 12 }} ellipsis>
-          {value}
-        </Typography.Text>
-      ),
+      render: (value) => {
+        const raw = String(value || "").trim();
+        const label = formatClipModelLabel(raw);
+        if (label === "—") {
+          return (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              —
+            </Typography.Text>
+          );
+        }
+        const showIdTooltip = raw && raw !== label && raw !== "manual";
+        const text = (
+          <Typography.Text style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+            {label}
+          </Typography.Text>
+        );
+        return showIdTooltip ? (
+          <Tooltip title={raw} styles={{ root: { maxWidth: 420 } }}>
+            {text}
+          </Tooltip>
+        ) : (
+          text
+        );
+      },
     },
     {
       title: "提示词",
@@ -216,7 +291,7 @@ export function buildClipTableColumns(
       align: "center",
       render: (_, record) => {
         const canRestore = record.model !== "manual";
-        const canDelete = isClipCompleted(record.status);
+        const canDelete = canDeleteMaterials && isClipCompleted(record.status);
 
         return (
           <Space size={2} wrap style={{ justifyContent: "center" }} className="ai-video-clip-actions">
@@ -250,16 +325,18 @@ export function buildClipTableColumns(
                 />
               </Tooltip>
             ) : null}
-            <Tooltip title={canDelete ? "从列表移除" : "仅已完成状态的片段可删除"}>
-              <Button
-                danger
-                size="small"
-                icon={<DeleteOutlined />}
-                aria-label="删除片段"
-                disabled={!canDelete}
-                onClick={() => onDeleteClip(record)}
-              />
-            </Tooltip>
+            {canDeleteMaterials ? (
+              <Tooltip title={canDelete ? "从列表移除" : "仅已完成状态的片段可删除"}>
+                <Button
+                  danger
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  aria-label="删除片段"
+                  disabled={!canDelete}
+                  onClick={() => onDeleteClip(record)}
+                />
+              </Tooltip>
+            ) : null}
           </Space>
         );
       },
