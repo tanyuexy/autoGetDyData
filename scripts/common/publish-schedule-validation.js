@@ -1,4 +1,4 @@
-// 脚本侧定时校验（CJS）。规则须与 lib/publishScheduleValidation.ts 保持一致。
+// 脚本侧定时校验（CJS）。规则须与 lib/creator-publish/publishScheduleValidation.ts 保持一致。
 const MIN_OFFSET_MS = 2 * 60 * 60 * 1000;
 const MAX_OFFSET_MS = 14 * 24 * 60 * 60 * 1000;
 

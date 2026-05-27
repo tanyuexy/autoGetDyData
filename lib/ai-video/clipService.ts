@@ -2,8 +2,8 @@ import type { AiVideoClip, AiVideoClipTokenUsage } from "@/types";
 import { normalizeTokenUsage } from "@/lib/ai-video/tokenUsage";
 import { assertAiVideoAdminCanDelete } from "@/lib/auth/aiVideoOwner";
 import { isClipCompleted } from "@/lib/ai-video/clipUtils";
-import { archiveClipVideo, isLocalGeneratedVideoUrl } from "@/lib/aiVideoMedia";
-import { getDb } from "./db/mongo";
+import { archiveClipVideo, isLocalGeneratedVideoUrl } from "@/lib/ai-video/archiveMedia";
+import { getDb } from "@/lib/db/mongo";
 
 const COLLECTION = "ai_video_clips";
 

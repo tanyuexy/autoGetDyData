@@ -27,7 +27,7 @@ npx tsc --noEmit     # TypeScript type check
 
 ### Task execution (2-layer)
 
-1. **API-triggered** (`lib/taskManager.ts`): API routes call `enqueueTask()` → writes to MongoDB `task_jobs` (status: `queued`) → spawns `node scripts/run.js <route>` as child process. SSE channel streams logs back to the browser via `lib/sseManager.ts`. Uses in-memory `ChildProcess` tracking + `runtime_processes` collection for crash recovery.
+1. **API-triggered** (`lib/tasks/taskManager.ts`): API routes call `enqueueTask()` → writes to MongoDB `task_jobs` (status: `queued`) → spawns `node scripts/run.js <route>` as child process. SSE channel streams logs back to the browser via `lib/tasks/sseManager.ts`. Uses in-memory `ChildProcess` tracking + `runtime_processes` collection for crash recovery.
 
 2. **Background worker** (`scripts/workers/task-worker.js`): Polls `task_jobs` collection for `queued` items, spawns them, reports progress via `runtime_processes`. Used for long-running or scheduled tasks (e.g., publish automation at scheduled times).
 
@@ -71,7 +71,7 @@ Pages call API routes → API enqueues a task → the Playwright script scrapes 
 
 ### SSE task monitoring
 
-`contexts/TaskContext.tsx` provides `startTask(url, body, namespace)` which POSTs to an API, gets back a `taskId`, then connects to `/api/progress/[taskId]` (SSE). The SSE endpoint polls the on-disk task log (`lib/taskLogStore.ts`) every 500ms and emits `log`, `progress`, and `done` events. The context auto-reconciles finished tasks by polling `/api/progress/tasks` every 3s — if a tracked task disappears from the running list, it loads the disk snapshot and marks it done.
+`contexts/TaskContext.tsx` provides `startTask(url, body, namespace)` which POSTs to an API, gets back a `taskId`, then connects to `/api/progress/[taskId]` (SSE). The SSE endpoint polls the on-disk task log (`lib/tasks/taskLogStore.ts`) every 500ms and emits `log`, `progress`, and `done` events. The context auto-reconciles finished tasks by polling `/api/progress/tasks` every 3s — if a tracked task disappears from the running list, it loads the disk snapshot and marks it done.
 
 ### Creator account automation
 
@@ -194,7 +194,7 @@ To add a new page:
 1. Create `app/(main)/<route>/page.tsx` ("use client", wrapped by `AppLayout` + `TaskProvider`)
 2. Add menu item in `components/AppLayout.tsx` `menuItems` array
 3. Add API routes under `app/api/<route>/`
-4. If it triggers a Playwright task: register a route in `scripts/run.js`, add namespace to `TaskNamespace` in `lib/taskManager.ts`
+4. If it triggers a Playwright task: register a route in `scripts/run.js`, add namespace to `TaskNamespace` in `lib/tasks/taskManager.ts`
 5. If persistent data: create a service in `lib/`, add MongoDB indexes in `lib/db/mongo.ts`, define types in `types/index.ts`
 
 ### LLM 调用规范

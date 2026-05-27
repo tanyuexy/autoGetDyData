@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getRunningTaskList } from "@/lib/taskManager";
+import { getRunningTaskList } from "@/lib/tasks/taskManager";
 import { getConfig } from "@/lib/configService";
-import { normalizePublishMaxConcurrent } from "@/lib/publishConcurrency";
+import { normalizePublishMaxConcurrent } from "@/lib/creator-publish/publishConcurrency";
 
 /** 前台用于判断按钮「namespace 已满」是否与后端一致（发布并发来自配置页） */
 const DEFAULT_NAMESPACE_UI_LIMITS: Record<string, number> = {

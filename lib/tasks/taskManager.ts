@@ -1,8 +1,8 @@
 import type { ChildProcess } from "child_process";
 import { createChannel } from "./sseManager";
-import { getConfig } from "./configService";
-import { normalizePublishMaxConcurrent } from "./publishConcurrency";
-import { getDb } from "./db/mongo";
+import { getConfig } from "@/lib/configService";
+import { normalizePublishMaxConcurrent } from "@/lib/creator-publish/publishConcurrency";
+import { getDb } from "@/lib/db/mongo";
 import { appendTaskLog, ensureTaskLogMeta, type TaskLogMeta } from "./taskLogStore";
 import {
   getRuntimeProcess,

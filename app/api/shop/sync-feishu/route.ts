@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import { NextRequest, NextResponse } from "next/server";
 import { parseExportDateRange } from "@/lib/feishu/shopExportDate";
-import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/tasks/taskManager";
 
 export const maxDuration = 0;
 

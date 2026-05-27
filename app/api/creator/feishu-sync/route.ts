@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
-import { startApiTask } from "@/lib/apiTaskRunner";
+import { canStartTask, generateTaskIdWithTime } from "@/lib/tasks/taskManager";
+import { startApiTask } from "@/lib/tasks/apiTaskRunner";
 import { syncFeishuBitable } from "@/lib/feishu/service";
 
 export const maxDuration = 0;

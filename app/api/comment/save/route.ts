@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { upsertCommentItems, pruneCommentItemsForAccount } from "@/lib/commentService";
+import { upsertCommentItems, pruneCommentItemsForAccount } from "@/lib/comment/service";
 import type { CommentItem } from "@/types";
 
 export async function POST(request: NextRequest) {

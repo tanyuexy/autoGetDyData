@@ -35,7 +35,7 @@ export type PublishTask = {
   id: string;
   createdAt: string;
   updatedAt: string;
-  /** 表格可见字段最后变更时间，见 lib/creatorPublishStore#patchTouchesTaskTable */
+  /** 表格可见字段最后变更时间，见 lib/creator-publish/store#patchTouchesTaskTable */
   displayUpdatedAt?: string;
   accountName: string;
   status: TaskStatus;

@@ -7,7 +7,7 @@ import {
   getServerSeedanceApiKey,
   resolveSeedanceApiKey,
   type CreateSeedanceTaskInput,
-} from "@/lib/volcengineSeedance";
+} from "@/lib/ai-video/volcengineSeedance";
 
 export const runtime = "nodejs";
 

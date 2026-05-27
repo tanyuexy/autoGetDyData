@@ -3,9 +3,9 @@ import { copyFile, mkdir, mkdtemp, rm, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import os from "os";
 import path from "path";
-import { applyRandomBackgroundMusic } from "@/lib/composeMusic";
-import { archiveComposedFilmFile, getComposedFilmsDir } from "@/lib/aiVideoMedia";
-import { getFfmpegPath } from "@/lib/ffmpeg";
+import { applyRandomBackgroundMusic } from "@/lib/ai-video/composeMusic";
+import { archiveComposedFilmFile, getComposedFilmsDir } from "@/lib/ai-video/archiveMedia";
+import { getFfmpegPath } from "@/lib/ai-video/ffmpeg";
 import {
   computeMaxRandomCombinations,
   generateRandomCombos,
@@ -14,7 +14,7 @@ import {
   type ComposeGroupInput,
   type ComposeRequest,
   type ComposeSegmentInput,
-} from "@/lib/videoComposeShared";
+} from "@/lib/ai-video/videoComposeShared";
 
 export type {
   ComposeBatchResult,
@@ -25,7 +25,7 @@ export type {
   ComposeSegmentInput,
   RandomComposeRequest,
   SequentialComposeRequest,
-} from "@/lib/videoComposeShared";
+} from "@/lib/ai-video/videoComposeShared";
 
 function runCommand(command: string, args: string[], cwd: string) {
   return new Promise<void>((resolve, reject) => {

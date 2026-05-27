@@ -8,7 +8,7 @@ import {
   TASK_TYPE_OPTIONS,
 } from "@/lib/creator-publish/constants";
 import type { PublishTask, TaskStatus, TaskType } from "@/lib/creator-publish/types";
-import { FEISHU_AI_PROVIDER_OPTIONS } from "@/lib/feishuAiProvider";
+import { FEISHU_AI_PROVIDER_OPTIONS } from "@/lib/feishu/aiProvider";
 import type { FeishuAiProvider } from "@/types";
 
 const { Text } = Typography;

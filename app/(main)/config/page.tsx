@@ -10,7 +10,7 @@ import { ConfigCreatorPublishTab } from "@/components/config/ConfigCreatorPublis
 import SettingSection from "@/components/layout/SettingSection";
 import { useTaskContext } from "@/contexts/TaskContext";
 import type { ConfigData, CreatorAccount } from "@/types";
-import { normalizeCreatorPublishConfig } from "@/lib/creatorPublishConfig";
+import { normalizeCreatorPublishConfig } from "@/lib/creator-publish/config";
 import { configPageWrapStyle } from "@/lib/pageStyles";
 
 export default function ConfigPage() {

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { loadTaskSnapshot } from "@/lib/taskLogStore";
+import { loadTaskSnapshot } from "@/lib/tasks/taskLogStore";
 
 export async function GET(
   _request: NextRequest,

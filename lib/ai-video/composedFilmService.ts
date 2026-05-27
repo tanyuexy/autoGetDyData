@@ -1,7 +1,7 @@
 import type { AiVideoComposedFilm, AiVideoComposedFilmSegment } from "@/types";
 import { assertAiVideoAdminCanDelete } from "@/lib/auth/aiVideoOwner";
-import type { ComposeFilmResult } from "@/lib/videoComposeShared";
-import { getDb } from "./db/mongo";
+import type { ComposeFilmResult } from "@/lib/ai-video/videoComposeShared";
+import { getDb } from "@/lib/db/mongo";
 
 const COLLECTION = "ai_video_composed_films";
 

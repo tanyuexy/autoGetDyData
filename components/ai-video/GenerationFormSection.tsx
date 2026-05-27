@@ -34,7 +34,7 @@ import { antdTagPresetStyle } from "@/lib/semanticTagStyles";
 import {
   getSeedanceDurationConfig,
   normalizeSeedanceDuration,
-} from "@/lib/volcengineSeedanceDuration";
+} from "@/lib/ai-video/volcengineSeedanceDuration";
 
 export interface GenerationFormSectionProps {
   mode: GenerationMode;

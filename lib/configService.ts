@@ -1,11 +1,11 @@
 import type { ConfigData } from "@/types";
 import { getDb } from "./db/mongo";
-import { normalizeFeishuAiProvider } from "./feishuAiProvider";
+import { normalizeFeishuAiProvider } from "@/lib/feishu/aiProvider";
 import {
   normalizeFeishuAiContentMaxConcurrent,
   FEISHU_AI_CONTENT_MAX_CONCURRENT_DEFAULT,
-} from "./feishuAiContentConcurrency";
-import { normalizePublishMaxConcurrent, PUBLISH_MAX_CONCURRENT_DEFAULT } from "./publishConcurrency";
+} from "@/lib/feishu/aiContentConcurrency";
+import { normalizePublishMaxConcurrent, PUBLISH_MAX_CONCURRENT_DEFAULT } from "@/lib/creator-publish/publishConcurrency";
 
 function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigData {
   return {

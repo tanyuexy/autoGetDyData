@@ -2,12 +2,12 @@ import type { ConfigData } from "@/types";
 import {
   FEISHU_AI_CONTENT_MAX_CONCURRENT_DEFAULT,
   normalizeFeishuAiContentMaxConcurrent,
-} from "@/lib/feishuAiContentConcurrency";
-import { normalizeFeishuAiProvider } from "@/lib/feishuAiProvider";
+} from "@/lib/feishu/aiContentConcurrency";
+import { normalizeFeishuAiProvider } from "@/lib/feishu/aiProvider";
 import {
   PUBLISH_MAX_CONCURRENT_DEFAULT,
   normalizePublishMaxConcurrent,
-} from "@/lib/publishConcurrency";
+} from "@/lib/creator-publish/publishConcurrency";
 
 export type CreatorPublishConfig = NonNullable<ConfigData["creatorPublish"]>;
 

@@ -1,5 +1,5 @@
 import type { TaskNamespace } from "./taskManager";
-import { getDb } from "./db/mongo";
+import { getDb } from "@/lib/db/mongo";
 
 export interface RuntimeProcessRecord {
   taskId: string;

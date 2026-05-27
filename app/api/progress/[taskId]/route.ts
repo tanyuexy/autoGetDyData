@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
-import { killTask } from "@/lib/taskManager";
-import { loadTaskLogEvents } from "@/lib/taskLogStore";
+import { killTask } from "@/lib/tasks/taskManager";
+import { loadTaskLogEvents } from "@/lib/tasks/taskLogStore";
 
 export const maxDuration = 0;
 

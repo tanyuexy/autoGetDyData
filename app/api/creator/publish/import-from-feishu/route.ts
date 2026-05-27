@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateTaskIdWithTime, canStartTask } from "@/lib/taskManager";
-import { startApiTask } from "@/lib/apiTaskRunner";
+import { generateTaskIdWithTime, canStartTask } from "@/lib/tasks/taskManager";
+import { startApiTask } from "@/lib/tasks/apiTaskRunner";
 import { runFeishuPublishImportPipeline } from "@/lib/feishu/service";
 import crypto from "crypto";
 

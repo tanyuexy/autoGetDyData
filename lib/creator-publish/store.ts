@@ -1,12 +1,12 @@
-import { getTaskList } from "./taskManager";
-import { getDb } from "./db/mongo";
-import { loadTaskSnapshot, readLastTaskError } from "./taskLogStore";
-import { loadFeishuBitableConfigForProfile } from "./feishu/core/config";
-import { getValidAccessToken } from "./feishu/core/oauth";
+import { getTaskList } from "@/lib/tasks/taskManager";
+import { getDb } from "@/lib/db/mongo";
+import { loadTaskSnapshot, readLastTaskError } from "@/lib/tasks/taskLogStore";
+import { loadFeishuBitableConfigForProfile } from "@/lib/feishu/core/config";
+import { getValidAccessToken } from "@/lib/feishu/core/oauth";
 import {
   updateBitableRecord,
   listAllBitableRecords,
-} from "./feishu/core/bitable";
+} from "@/lib/feishu/core/bitable";
 
 export type CreatorPublishTaskType = "video" | "article";
 
@@ -223,7 +223,7 @@ function writeBackFeishuFailure(task: CreatorPublishTask, errorText: string | un
     );
     return;
   }
-  import("./feishu/service")
+  import("@/lib/feishu/service")
     .then(({ writeFeishuTaskStatus }) =>
       writeFeishuTaskStatus({
         recordId: task.feishuRecordId!,
@@ -392,7 +392,7 @@ export function attachCreatorPublishTaskRuntime(
 
       // 发布成功 + 来自飞书导入 → 回写飞书行状态
       if (code === 0 && resolvedTarget.feishuRecordId) {
-        import("./feishu/service")
+        import("@/lib/feishu/service")
           .then(({ markFeishuTaskPublished }) =>
             markFeishuTaskPublished(resolvedTarget.feishuRecordId!)
           )

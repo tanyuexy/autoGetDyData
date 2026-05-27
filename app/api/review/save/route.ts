@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { pruneReviewItemsForAccount, upsertReviewItems } from "@/lib/reviewService";
+import { pruneReviewItemsForAccount, upsertReviewItems } from "@/lib/review/service";
 import type { ReviewItem } from "@/types";
 
 export async function POST(request: NextRequest) {

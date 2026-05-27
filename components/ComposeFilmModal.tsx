@@ -23,7 +23,7 @@ import {
   computeMaxRandomCombinations,
   inferComposeGroup,
   type ComposeFilmResult,
-} from "@/lib/videoComposeShared";
+} from "@/lib/ai-video/videoComposeShared";
 
 export type ComposeFilmMode = "sequential" | "random";
 

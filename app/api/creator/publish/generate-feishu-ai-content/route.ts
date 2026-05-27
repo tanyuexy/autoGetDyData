@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { generateTaskIdWithTime, canStartTask } from "@/lib/taskManager";
-import { startApiTask } from "@/lib/apiTaskRunner";
+import { generateTaskIdWithTime, canStartTask } from "@/lib/tasks/taskManager";
+import { startApiTask } from "@/lib/tasks/apiTaskRunner";
 import { generateFeishuTaskAiContent } from "@/lib/feishu/service";
 import type { LlmProvider } from "@/lib/llm";
 

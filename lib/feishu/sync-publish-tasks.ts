@@ -15,8 +15,8 @@ import { getValidAccessToken } from "./core/oauth";
 import {
   formatFeishuScheduleFailureStatus,
   validateScheduleAt,
-} from "@/lib/publishScheduleValidation";
-import { normalizeDescriptionForPublish } from "@/lib/publishDescription";
+} from "@/lib/creator-publish/publishScheduleValidation";
+import { normalizeDescriptionForPublish } from "@/lib/creator-publish/publishDescription";
 
 dotenv.config({ quiet: true });
 

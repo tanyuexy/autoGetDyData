@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getConfig } from "@/lib/configService";
-import { readReviewItems } from "@/lib/reviewService";
-import { generateTaskIdWithTime } from "@/lib/taskManager";
-import { appendTaskLog, appendTaskDone, ensureTaskLogMeta } from "@/lib/taskLogStore";
+import { readReviewItems } from "@/lib/review/service";
+import { generateTaskIdWithTime } from "@/lib/tasks/taskManager";
+import { appendTaskLog, appendTaskDone, ensureTaskLogMeta } from "@/lib/tasks/taskLogStore";
 import { loadFeishuBitableConfigForProfile } from "@/lib/feishu/core/config";
 import { getValidAccessToken } from "@/lib/feishu/core/oauth";
 import { listAllBitableRecords, batchUpdateBitableRecords } from "@/lib/feishu/core/bitable";

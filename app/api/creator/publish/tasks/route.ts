@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { killTask } from "@/lib/taskManager";
+import { killTask } from "@/lib/tasks/taskManager";
 import { getConfig } from "@/lib/configService";
 import {
   patchCreatorPublishTask,
@@ -9,7 +9,7 @@ import {
   writeCreatorPublishTasks,
   type CreatorPublishPayload,
   type CreatorPublishTask,
-} from "@/lib/creatorPublishStore";
+} from "@/lib/creator-publish/store";
 
 export const maxDuration = 0;
 

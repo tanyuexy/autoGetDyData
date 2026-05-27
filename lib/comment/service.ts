@@ -1,5 +1,5 @@
 import type { CommentItem } from "@/types";
-import { getDb } from "./db/mongo";
+import { getDb } from "@/lib/db/mongo";
 
 function normalizeItem(item: any): CommentItem | null {
   if (!item || typeof item.id !== "string") return null;

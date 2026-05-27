@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enqueueTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { enqueueTask, generateTaskIdWithTime } from "@/lib/tasks/taskManager";
 import crypto from "crypto";
 
 export const maxDuration = 0;

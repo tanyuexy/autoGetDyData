@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import { getConfig } from "@/lib/configService";
-import { normalizeFeishuAiContentMaxConcurrent } from "@/lib/feishuAiContentConcurrency";
-import { normalizeFeishuAiProvider } from "@/lib/feishuAiProvider";
+import { normalizeFeishuAiContentMaxConcurrent } from "@/lib/feishu/aiContentConcurrency";
+import { normalizeFeishuAiProvider } from "@/lib/feishu/aiProvider";
 import { runWithArgs } from "@/lib/feishu/legacy-cli";
 import {
   peekFeishuSyncCandidates,

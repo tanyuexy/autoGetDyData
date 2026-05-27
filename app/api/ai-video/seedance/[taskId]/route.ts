@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAppSession, resolveOwnerUsername } from "@/lib/auth/requireSession";
-import { updateAiVideoClipFromTask } from "@/lib/aiVideoClipService";
-import { getSeedanceTask, resolveSeedanceApiKey } from "@/lib/volcengineSeedance";
+import { updateAiVideoClipFromTask } from "@/lib/ai-video/clipService";
+import { getSeedanceTask, resolveSeedanceApiKey } from "@/lib/ai-video/volcengineSeedance";
 
 export const runtime = "nodejs";
 

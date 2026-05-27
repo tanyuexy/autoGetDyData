@@ -15,7 +15,7 @@ import type {
   TaskStatus,
   TaskType,
 } from "@/lib/creator-publish/types";
-import { normalizeFeishuAiProvider } from "@/lib/feishuAiProvider";
+import { normalizeFeishuAiProvider } from "@/lib/feishu/aiProvider";
 import type { ConfigData, FeishuAiProvider } from "@/types";
 import { copyToClipboard } from "@/lib/copyToClipboard";
 

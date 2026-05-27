@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAppSession, resolveOwnerUsername } from "@/lib/auth/requireSession";
-import { deleteAiVideoComposedFilm, readAiVideoComposedFilms } from "@/lib/aiVideoComposedFilmService";
+import { deleteAiVideoComposedFilm, readAiVideoComposedFilms } from "@/lib/ai-video/composedFilmService";
 
 export const runtime = "nodejs";
 

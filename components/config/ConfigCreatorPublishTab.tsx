@@ -13,18 +13,18 @@ import SettingSection from "@/components/layout/SettingSection";
 import {
   FEISHU_AI_CONTENT_MAX_CONCURRENT_HARD_MAX,
   normalizeFeishuAiContentMaxConcurrent,
-} from "@/lib/feishuAiContentConcurrency";
-import { FEISHU_AI_PROVIDER_OPTIONS, normalizeFeishuAiProvider } from "@/lib/feishuAiProvider";
+} from "@/lib/feishu/aiContentConcurrency";
+import { FEISHU_AI_PROVIDER_OPTIONS, normalizeFeishuAiProvider } from "@/lib/feishu/aiProvider";
 import {
   PUBLISH_MAX_CONCURRENT_HARD_MAX,
   normalizePublishMaxConcurrent,
-} from "@/lib/publishConcurrency";
+} from "@/lib/creator-publish/publishConcurrency";
 import {
   getAutomationSelectedDays,
   normalizeTimeTags,
   WEEKDAY_OPTIONS,
   type CreatorPublishConfig,
-} from "@/lib/creatorPublishConfig";
+} from "@/lib/creator-publish/config";
 
 type ConfigCreatorPublishTabProps = {
   publishConfig: CreatorPublishConfig;

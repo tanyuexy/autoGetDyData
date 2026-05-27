@@ -55,7 +55,7 @@ import type { ClipItem, GenerationMode, ReferenceKind, ReferenceResource, Seedan
 import {
   getSeedanceDurationConfig,
   normalizeSeedanceDuration,
-} from "@/lib/volcengineSeedanceDuration";
+} from "@/lib/ai-video/volcengineSeedanceDuration";
 
 export function useAiVideoPage() {
 const { message } = App.useApp();

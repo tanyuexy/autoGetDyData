@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { AiVideoClip } from "@/types";
 import { requireAppSession, resolveOwnerUsername } from "@/lib/auth/requireSession";
-import { deleteAiVideoClip, readAiVideoClips, upsertAiVideoClip, upsertAiVideoClips } from "@/lib/aiVideoClipService";
+import { deleteAiVideoClip, readAiVideoClips, upsertAiVideoClip, upsertAiVideoClips } from "@/lib/ai-video/clipService";
 
 export const runtime = "nodejs";
 

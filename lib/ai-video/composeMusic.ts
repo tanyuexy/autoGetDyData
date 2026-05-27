@@ -2,7 +2,7 @@ import { spawn } from "child_process";
 import { readdir, rename, rm } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
-import { getFfmpegPath } from "@/lib/ffmpeg";
+import { getFfmpegPath } from "@/lib/ai-video/ffmpeg";
 
 const MUSIC_DIR = path.join(process.cwd(), "public", "music");
 const MUSIC_EXTENSIONS = new Set([".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg"]);

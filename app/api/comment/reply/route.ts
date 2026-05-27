@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/taskManager";
+import { enqueueTask, canStartTask, generateTaskIdWithTime } from "@/lib/tasks/taskManager";
 
 export const maxDuration = 0;
 

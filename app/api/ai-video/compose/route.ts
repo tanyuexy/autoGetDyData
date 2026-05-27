@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { ComposeGroupInput, ComposeRequest, ComposeSegmentInput } from "@/lib/videoComposeShared";
+import type { ComposeGroupInput, ComposeRequest, ComposeSegmentInput } from "@/lib/ai-video/videoComposeShared";
 import { requireAppSession, resolveOwnerUsername } from "@/lib/auth/requireSession";
-import { saveComposedFilmsFromResults } from "@/lib/aiVideoComposedFilmService";
-import { runComposeRequest } from "@/lib/videoCompose";
+import { saveComposedFilmsFromResults } from "@/lib/ai-video/composedFilmService";
+import { runComposeRequest } from "@/lib/ai-video/videoCompose";
 
 export const runtime = "nodejs";
 

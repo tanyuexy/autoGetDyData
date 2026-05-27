@@ -1,7 +1,7 @@
 import type { LlmProvider, JsonValue } from "@/lib/llm";
 import { callStructuredLlm } from "@/lib/llm";
 import { bufferToImageDataUrl, understandMiniMaxImage } from "@/lib/llm/minimax-vision";
-import { normalizeFeishuAiContentMaxConcurrent } from "@/lib/feishuAiContentConcurrency";
+import { normalizeFeishuAiContentMaxConcurrent } from "@/lib/feishu/aiContentConcurrency";
 import { readBitable } from "@/lib/feishu/core/readBitable";
 import { loadFeishuBitableConfigForProfile } from "@/lib/feishu/core/config";
 import { getValidAccessToken } from "@/lib/feishu/core/oauth";
@@ -10,7 +10,7 @@ import { downloadFeishuAttachmentCached } from "@/lib/feishu/attachment-download
 import {
   FEISHU_AI_CONTENT_FORMAT_HINT,
   validateFeishuAiGeneratedContent,
-} from "@/lib/publishDescription";
+} from "@/lib/creator-publish/publishDescription";
 import path from "node:path";
 import fse from "fs-extra";
 

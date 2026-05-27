@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteReviewItem } from "@/lib/reviewService";
+import { deleteReviewItem } from "@/lib/review/service";
 
 export async function DELETE(request: NextRequest) {
   try {
