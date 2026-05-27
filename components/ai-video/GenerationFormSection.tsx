@@ -231,11 +231,48 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
   return (
     <section
       style={{ ...sectionStyle, position: "relative" }}
-      onDragEnter={mode === "first-frame" || mode === "first-last-frame" ? onFrameDragEnter : undefined}
-      onDragLeave={mode === "first-frame" || mode === "first-last-frame" ? onFrameDragLeave : undefined}
-      onDragOver={mode === "first-frame" || mode === "first-last-frame" ? onFrameDragOver : undefined}
+      onDragEnter={
+        mode === "first-frame" || mode === "first-last-frame" || mode === "multimodal-reference"
+          ? onFrameDragEnter
+          : undefined
+      }
+      onDragLeave={
+        mode === "first-frame" || mode === "first-last-frame" || mode === "multimodal-reference"
+          ? onFrameDragLeave
+          : undefined
+      }
+      onDragOver={
+        mode === "first-frame" || mode === "first-last-frame" || mode === "multimodal-reference"
+          ? onFrameDragOver
+          : undefined
+      }
     >
       {dragActive && mode === "first-frame" ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 20,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            borderRadius: 8,
+            background: "rgba(22, 119, 255, 0.08)",
+            border: "2px dashed #1677ff",
+            pointerEvents: "auto",
+          }}
+          onDragOver={onFrameDragOver}
+          onDrop={(event) => onFrameDrop(event, "first")}
+        >
+          <UploadOutlined style={{ fontSize: 28, color: "#1677ff" }} />
+          <Typography.Text strong style={{ color: "#1677ff" }}>
+            松开上传首帧图片
+          </Typography.Text>
+        </div>
+      ) : null}
+      {dragActive && mode === "multimodal-reference" ? (
         <div
           style={{
             position: "absolute",
@@ -256,7 +293,7 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
         >
           <UploadOutlined style={{ fontSize: 28, color: "#1677ff" }} />
           <Typography.Text strong style={{ color: "#1677ff" }}>
-            松开上传资源
+            松开上传参考资源
           </Typography.Text>
         </div>
       ) : null}
@@ -324,6 +361,7 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
             options={[
               { label: "首帧", value: "first-frame" },
               { label: "首尾帧", value: "first-last-frame" },
+              { label: "多模态参考", value: "multimodal-reference" },
               { label: "文生视频", value: "text" },
             ]}
           />
@@ -470,6 +508,22 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
 
         {mode === "first-frame" ? (
           <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+            <Space wrap size={8} align="center">
+              {renderFrameUploadButton("首帧图片", firstFrameUrl, firstFrameUploadProps)}
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                严格首帧模式仅上传 1 张首帧图片，不混用参考视频/音频
+              </Typography.Text>
+            </Space>
+            {firstFrameUrl ? (
+              <Space wrap size={12} align="start">
+                {renderFramePreview("first", "首帧图片", firstFrameUrl, firstFrameFiles, clearFrameUpload)}
+              </Space>
+            ) : null}
+          </Space>
+        ) : null}
+
+        {mode === "multimodal-reference" ? (
+          <Space orientation="vertical" size={8} style={{ width: "100%" }}>
             <Space wrap align="center" size={8}>
               <Upload {...referenceUploadProps}>
                 <Button icon={<UploadOutlined />} loading={uploadingReference}>
@@ -477,7 +531,7 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
                 </Button>
               </Upload>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                支持拖拽到上方表单区域上传；拖动资源项可调整顺序（影响 @图片1 编号及提交顺序）；多张或含视频/音频时用参考模式（提示词中用 @图片1 指定首帧）
+                支持图片、视频、音频参考；拖动资源项可调整顺序（影响 @图片1/@视频1 编号）；如需首帧效果请在提示词中指定
               </Typography.Text>
             </Space>
             {referenceResources.length ? (

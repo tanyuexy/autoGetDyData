@@ -16,7 +16,6 @@ interface StructuredRequestBody {
   schema?: JsonSchemaObject;
   messages?: LlmMessage[];
   temperature?: number;
-  maxTokens?: number;
   topP?: number;
 }
 
@@ -78,7 +77,6 @@ export async function POST(request: NextRequest) {
       schema: body.schema,
       messages,
       temperature: typeof body.temperature === "number" ? body.temperature : 0,
-      maxTokens: typeof body.maxTokens === "number" ? body.maxTokens : undefined,
       topP: typeof body.topP === "number" ? body.topP : undefined,
       signal: request.signal,
     });

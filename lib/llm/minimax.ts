@@ -68,13 +68,12 @@ function extractMiniMaxMessageContent(response: unknown, providerLabel: string):
 
 function buildMinimaxStructuredPayload(request: StructuredRequest, model: string) {
   const base = buildStructuredPayload({ ...request, model }) as Record<string, unknown>;
-  const { max_tokens: maxTokens, response_format: _responseFormat, ...rest } = base;
+  const { response_format: _responseFormat, ...rest } = base;
 
   return {
     ...rest,
     model,
     reasoning_split: true,
-    ...(typeof maxTokens === "number" ? { max_completion_tokens: maxTokens } : {}),
   };
 }
 

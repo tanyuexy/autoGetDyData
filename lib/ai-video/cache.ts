@@ -38,7 +38,12 @@ export function readCachedConfig(): AiVideoCachedConfig {
 }
 
 export function isGenerationMode(value: unknown): value is GenerationMode {
-  return value === "text" || value === "first-frame" || value === "first-last-frame";
+  return (
+    value === "text" ||
+    value === "first-frame" ||
+    value === "first-last-frame" ||
+    value === "multimodal-reference"
+  );
 }
 
 export function readCachedUploadFiles(value: unknown): UploadFile[] {

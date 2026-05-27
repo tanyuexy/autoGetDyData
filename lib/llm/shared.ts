@@ -203,8 +203,6 @@ export function buildStructuredPayload(request: StructuredRequest) {
       content: String(message.content ?? ""),
     })),
     temperature: typeof request.temperature === "number" ? request.temperature : 0,
-    max_tokens:
-      typeof request.maxTokens === "number" ? request.maxTokens : undefined,
     top_p: typeof request.topP === "number" ? request.topP : undefined,
     response_format: {
       type: "json_schema",

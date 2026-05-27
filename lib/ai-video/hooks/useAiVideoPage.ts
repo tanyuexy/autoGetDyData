@@ -38,7 +38,6 @@ import {
   createClipId,
   createReferenceId,
   ensureUploadFilesFromUrl,
-  getFirstImageReference,
   getReferenceLabel,
   isClipCompleted,
   isFinished,
@@ -551,7 +550,11 @@ async function handleGeneratePrompt(input: { brief: string; stylePreference?: st
           name: resource.name,
           token: getReferenceLabel(referenceResources, resource),
         })),
-        hasFirstFrame: Boolean(firstFrameUrl.trim() || referenceResources.some((item) => item.kind === "image")),
+        hasFirstFrame: Boolean(
+          mode === "multimodal-reference"
+            ? referenceResources.some((item) => item.kind === "image")
+            : firstFrameUrl.trim()
+        ),
         hasLastFrame: Boolean(lastFrameUrl.trim()),
         existingPrompt: prompt.trim() || undefined,
       }),
@@ -589,13 +592,13 @@ async function submitTask() {
     message.warning("请选择或输入标签");
     return;
   }
-  const firstFrameReference = mode === "first-frame" ? getFirstImageReference(referenceResources) : null;
-  const resolvedFirstFrameUrl = mode === "first-frame" ? firstFrameReference?.url || "" : firstFrameUrl;
-  const requestMode = mode === "first-frame" && !resolvedFirstFrameUrl ? "text" : mode;
-  const resolvedReferenceResources = mode === "first-last-frame" ? [] : referenceResources;
+  const isMultimodalMode = mode === "multimodal-reference";
+  const resolvedFirstFrameUrl = mode === "first-frame" || mode === "first-last-frame" ? firstFrameUrl : "";
+  const requestMode = mode;
+  const resolvedReferenceResources = isMultimodalMode ? referenceResources : [];
 
-  if (mode === "first-frame" && !referenceResources.length) {
-    message.warning("请先上传图片、视频或音频资源");
+  if (mode === "first-frame" && !firstFrameUrl.trim()) {
+    message.warning("请上传首帧图片");
     return;
   }
   if (mode === "first-last-frame" && !firstFrameUrl.trim()) {
@@ -604,6 +607,14 @@ async function submitTask() {
   }
   if (mode === "first-last-frame" && !lastFrameUrl.trim()) {
     message.warning("请上传尾帧图片");
+    return;
+  }
+  if (isMultimodalMode && !referenceResources.length) {
+    message.warning("请先上传参考图片、视频或音频资源");
+    return;
+  }
+  if (isMultimodalMode && referenceResources.every((resource) => resource.kind === "audio")) {
+    message.warning("多模态参考不能只上传音频，请至少添加 1 个参考图片或视频");
     return;
   }
 
@@ -639,7 +650,6 @@ async function submitTask() {
           firstFrameUrl: resolvedFirstFrameUrl,
           lastFrameUrl,
           referenceResources: resolvedReferenceResources
-            .filter((resource) => !(mode === "first-frame" && resource.id === firstFrameReference?.id))
             .map((resource) => ({
               id: resource.id,
               name: resource.name,
@@ -665,12 +675,8 @@ async function submitTask() {
     const tokenUsage = normalizeTokenUsage(
       task.tokenUsage as AiVideoClipTokenUsage | null | undefined
     );
-    const snapshotFirstFrameUrl =
-      mode === "first-frame" ? firstFrameReference?.url || firstFrameUrl : firstFrameUrl;
-    const snapshotFirstFrameFiles =
-      mode === "first-frame" && firstFrameReference && !firstFrameFiles.length
-        ? ensureUploadFilesFromUrl(snapshotFirstFrameUrl, firstFrameFiles, "首帧图片")
-        : firstFrameFiles;
+    const snapshotFirstFrameUrl = mode === "multimodal-reference" ? "" : firstFrameUrl;
+    const snapshotFirstFrameFiles = mode === "multimodal-reference" ? [] : firstFrameFiles;
     const formSnapshot = buildClipFormSnapshot({
       model,
       mode,

@@ -14,7 +14,8 @@ import {
   isClipCompleted,
   isFinished,
 } from "@/lib/ai-video/clipUtils";
-import { formatTokenCountCompact, formatTokenUsageLabel } from "@/lib/ai-video/tokenUsage";
+import { resolveClipDisplayName } from "@/lib/ai-video/clipNameGenerator";
+import { formatTokenUsageLabel, formatTokenUsageTooltipLines } from "@/lib/ai-video/tokenUsage";
 import type { ClipItem } from "@/lib/ai-video/types";
 
 export interface BuildClipTableColumnsDeps {
@@ -80,24 +81,9 @@ export function buildClipTableColumns(
       render: (_, record) => {
         const label = formatTokenUsageLabel(record.tokenUsage);
         const usage = record.tokenUsage;
-        const hasBreakdown =
-          usage &&
-          (usage.promptTokens != null || usage.completionTokens != null) &&
-          label !== "—";
-        const tooltip = hasBreakdown ? (
-          <span style={{ whiteSpace: "pre-wrap" }}>
-            {[
-              usage.promptTokens != null
-                ? `输入：${formatTokenCountCompact(usage.promptTokens)}`
-                : null,
-              usage.completionTokens != null
-                ? `输出：${formatTokenCountCompact(usage.completionTokens)}`
-                : null,
-              `合计：${formatTokenCountCompact(usage.totalTokens)}`,
-            ]
-              .filter(Boolean)
-              .join("\n")}
-          </span>
+        const tooltipLines = formatTokenUsageTooltipLines(usage);
+        const tooltip = tooltipLines.length ? (
+          <span style={{ whiteSpace: "pre-wrap" }}>{tooltipLines.join("\n")}</span>
         ) : null;
 
         return tooltip ? (
@@ -118,7 +104,10 @@ export function buildClipTableColumns(
       align: "center",
       render: (_, record) => {
         const meta = `${record.ratio} · ${record.resolution} · ${record.duration}s`;
-        const tooltipContent = `${record.name}\n${meta}`;
+        const prompt = String(record.prompt || "").trim();
+        const rawName = String(record.name || "").trim();
+        const displayName = resolveClipDisplayName(rawName, prompt);
+        const tooltipContent = `${displayName || "—"}\n${meta}`;
 
         return (
           <Tooltip
@@ -131,7 +120,7 @@ export function buildClipTableColumns(
               style={{ width: "100%", maxWidth: 116, margin: "0 auto" }}
             >
               <Typography.Text strong ellipsis style={{ width: "100%", fontSize: 12 }}>
-                {record.name}
+                {displayName}
               </Typography.Text>
               <Typography.Text type="secondary" ellipsis style={{ width: "100%", fontSize: 11 }}>
                 {meta}

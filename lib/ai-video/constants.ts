@@ -10,13 +10,13 @@ export const FALLBACK_MODELS: SeedanceModelOption[] = [
   {
     label: "Seedance 2.0",
     value: "doubao-seedance-2-0-260128",
-    generation: ["文生视频", "首帧生视频", "首尾帧生视频"],
+    generation: ["文生视频", "首帧生视频", "首尾帧生视频", "多模态参考"],
     note: "质量优先",
   },
   {
     label: "Seedance 2.0 Fast",
     value: "doubao-seedance-2-0-fast-260128",
-    generation: ["文生视频", "首帧生视频", "首尾帧生视频"],
+    generation: ["文生视频", "首帧生视频", "首尾帧生视频", "多模态参考"],
     note: "速度优先",
   },
   {

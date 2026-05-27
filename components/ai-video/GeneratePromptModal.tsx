@@ -33,7 +33,8 @@ export interface GeneratePromptModalProps {
 function modeLabel(mode: GenerationMode) {
   if (mode === "text") return "文生视频";
   if (mode === "first-last-frame") return "首尾帧";
-  return "首帧/参考";
+  if (mode === "multimodal-reference") return "多模态参考";
+  return "首帧";
 }
 
 export function GeneratePromptModal({
@@ -133,7 +134,7 @@ export function GeneratePromptModal({
             onChange={setBrief}
             referenceResources={referenceResources}
             idPrefix="generate-prompt-picker"
-            placeholder="例如：@视频1 首帧参考，15 秒仙侠高燃战斗；或 @图片1 产品 5 秒竖屏仿实拍手持展示，自然光、生活化场景、带口播与音效"
+            placeholder="例如：以 @图片1 作为开场参考，参考 @视频1 的动作节奏，15 秒仙侠高燃战斗；或 @图片1 产品 5 秒竖屏仿实拍手持展示"
             autoSize={{ minRows: 3, maxRows: 6 }}
             maxLength={800}
           />

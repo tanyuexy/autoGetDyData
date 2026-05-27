@@ -88,7 +88,8 @@ export async function loadSeedancePromptSkillBody() {
 function modeLabel(mode: GenerationMode) {
   if (mode === "text") return "文生视频";
   if (mode === "first-last-frame") return "首尾帧生视频";
-  return "首帧/全能参考";
+  if (mode === "multimodal-reference") return "多模态参考生视频";
+  return "首帧生视频";
 }
 
 function buildReferenceSummary(resources: SeedancePromptReferenceInput[]) {
@@ -326,7 +327,6 @@ export async function generateSeedancePrompts(
     schemaName: "seedance_video_prompts",
     schema: PROMPT_SCHEMA,
     temperature: 0.65,
-    maxTokens: 4096,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: buildUserMessage(input) },

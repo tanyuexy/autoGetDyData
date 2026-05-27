@@ -17,7 +17,10 @@ function normalizeClip(doc: unknown): AiVideoClip | null {
     model: String(item.model || ""),
     prompt: String(item.prompt || ""),
     mode:
-      item.mode === "first-frame" || item.mode === "first-last-frame" || item.mode === "text"
+      item.mode === "first-frame" ||
+      item.mode === "first-last-frame" ||
+      item.mode === "multimodal-reference" ||
+      item.mode === "text"
         ? item.mode
         : "text",
     status: String(item.status || "unknown"),

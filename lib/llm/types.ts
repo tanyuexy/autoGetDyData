@@ -36,7 +36,6 @@ export interface StructuredRequest<T extends JsonValue = JsonValue> {
   schemaName: string;
   schema: JsonSchemaObject;
   temperature?: number;
-  maxTokens?: number;
   topP?: number;
   timeoutMs?: number;
   signal?: AbortSignal;

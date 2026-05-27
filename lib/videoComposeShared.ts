@@ -1,6 +1,7 @@
 export interface ComposeSegmentInput {
   id: string;
   name: string;
+  tooltipTitle?: string;
   videoUrl: string;
 }
 
@@ -73,7 +74,13 @@ export function inferComposeGroup(name: string, composeGroup?: string | null): s
 }
 
 export function buildComposeGroupsFromClips(
-  clips: Array<{ id: string; name: string; videoUrl?: string | null; composeGroup?: string | null }>
+  clips: Array<{
+    id: string;
+    name: string;
+    prompt?: string | null;
+    videoUrl?: string | null;
+    composeGroup?: string | null;
+  }>
 ): ComposeGroupInput[] {
   const grouped = new Map<string, ComposeSegmentInput[]>();
   for (const clip of clips) {
@@ -81,9 +88,11 @@ export function buildComposeGroupsFromClips(
     const groupName = inferComposeGroup(clip.name, clip.composeGroup);
     if (!groupName) continue;
     if (!grouped.has(groupName)) grouped.set(groupName, []);
+    const prompt = String(clip.prompt || "").trim();
     grouped.get(groupName)!.push({
       id: clip.id,
       name: clip.name,
+      tooltipTitle: prompt || clip.name,
       videoUrl: clip.videoUrl,
     });
   }

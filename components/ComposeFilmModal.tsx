@@ -13,6 +13,7 @@ import {
   Space,
   Switch,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
 import type { AiVideoClip } from "@/types";
@@ -51,6 +52,26 @@ interface ComposeFilmModalProps {
 
 const hintTextStyle = { marginBottom: 0, fontSize: 12, lineHeight: 1.5 };
 const compactAlertStyle = { padding: "6px 10px" };
+/** 合成弹窗片段名 / Tooltip 共用上限，避免超长提示撑出滚动条 */
+const COMPOSE_SEGMENT_TEXT_MAX_LEN = 60;
+
+const composeSegmentTooltipProps = {
+  getPopupContainer: () => document.body,
+  destroyOnHidden: true,
+  styles: { root: { maxWidth: 360 } },
+} as const;
+
+function truncateComposeSegmentText(text: string, maxLen = COMPOSE_SEGMENT_TEXT_MAX_LEN): string {
+  const normalized = String(text || "").trim();
+  if (!normalized) return "未命名片段";
+  if (normalized.length <= maxLen) return normalized;
+  return `${normalized.slice(0, maxLen)}…`;
+}
+
+function formatComposeSegmentLabel(name: string, tooltipTitle?: string): string {
+  const display = truncateComposeSegmentText(tooltipTitle || name);
+  return `· ${display}`;
+}
 
 export function ComposeFilmModal({
   open,
@@ -236,11 +257,42 @@ export function ComposeFilmModal({
             />
             {selectedClips.length ? (
               <Space orientation="vertical" size={2} style={{ width: "100%" }}>
-                {selectedClips.map((clip, index) => (
-                  <Typography.Text key={clip.id} style={{ fontSize: 12 }}>
-                    {index + 1}. {clip.name}{clip.tag ? ` · ${clip.tag}` : ""}
-                  </Typography.Text>
-                ))}
+                {selectedClips.map((clip, index) => {
+                  const lineLabel = `${clip.name}${clip.tag ? ` · ${clip.tag}` : ""}`;
+                  const tooltipTitle = truncateComposeSegmentText(
+                    clip.prompt?.trim() || `${index + 1}. ${lineLabel}`
+                  );
+                  const label = truncateComposeSegmentText(`${index + 1}. ${lineLabel}`);
+                  return (
+                    <Tooltip key={clip.id} title={tooltipTitle} {...composeSegmentTooltipProps}>
+                      <div
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          minWidth: 0,
+                          maxWidth: "100%",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 12,
+                            display: "block",
+                            width: "100%",
+                            minWidth: 0,
+                            maxWidth: "100%",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            cursor: "default",
+                          }}
+                        >
+                          {label}
+                        </span>
+                      </div>
+                    </Tooltip>
+                  );
+                })}
               </Space>
             ) : null}
           </>
@@ -308,9 +360,13 @@ export function ComposeFilmModal({
                 style={{
                   maxHeight: 180,
                   overflowY: "auto",
+                  overflowX: "hidden",
+                  width: "100%",
+                  minWidth: 0,
                   border: "1px solid var(--vol-hairline)",
                   borderRadius: 6,
                   padding: "6px 10px",
+                  boxSizing: "border-box",
                 }}
               >
                 {!composeTag.trim() ? (
@@ -318,12 +374,12 @@ export function ComposeFilmModal({
                     请先选择标签，再勾选该标签下的混剪分组。
                   </Typography.Text>
                 ) : allGroups.length ? (
-                  <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+                  <Space orientation="vertical" size={8} style={{ width: "100%", minWidth: 0 }}>
                     {allGroups.map((group, index) => {
                       const checked = selectedGroupNames.includes(group.name);
                       const orderIndex = selectedGroupNames.indexOf(group.name);
                       return (
-                        <div key={group.name}>
+                        <div key={group.name} style={{ width: "100%", minWidth: 0 }}>
                           <Checkbox
                             checked={checked}
                             style={{ alignItems: "flex-start" }}
@@ -345,17 +401,58 @@ export function ComposeFilmModal({
                               </Typography.Text>
                             </Space>
                           </Checkbox>
-                          <Space
-                            orientation="vertical"
-                            size={0}
-                            style={{ width: "100%", paddingLeft: 26, marginTop: 2 }}
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "minmax(0, 1fr)",
+                              paddingLeft: 26,
+                              marginTop: 2,
+                              boxSizing: "border-box",
+                            }}
                           >
-                            {group.segments.map((segment) => (
-                              <Typography.Text key={segment.id} type="secondary" style={{ fontSize: 12, lineHeight: 1.45 }}>
-                                · {segment.name}
-                              </Typography.Text>
-                            ))}
-                          </Space>
+                            {group.segments.map((segment) => {
+                              const rawTitle = segment.tooltipTitle || segment.name;
+                              const tooltipTitle = truncateComposeSegmentText(rawTitle);
+                              const label = formatComposeSegmentLabel(segment.name, rawTitle);
+                              return (
+                                <Tooltip
+                                  key={segment.id}
+                                  title={tooltipTitle}
+                                  {...composeSegmentTooltipProps}
+                                >
+                                  <div
+                                    className="compose-segment-ellipsis-wrap"
+                                    style={{
+                                      display: "block",
+                                      width: "100%",
+                                      minWidth: 0,
+                                      maxWidth: "100%",
+                                      overflow: "hidden",
+                                    }}
+                                  >
+                                    <span
+                                      className="compose-segment-ellipsis"
+                                      style={{
+                                        display: "block",
+                                        width: "100%",
+                                        minWidth: 0,
+                                        maxWidth: "100%",
+                                        fontSize: 12,
+                                        lineHeight: 1.45,
+                                        color: "var(--ant-color-text-description)",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        whiteSpace: "nowrap",
+                                        cursor: "default",
+                                      }}
+                                    >
+                                      {label}
+                                    </span>
+                                  </div>
+                                </Tooltip>
+                              );
+                            })}
+                          </div>
                         </div>
                       );
                     })}

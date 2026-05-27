@@ -1,4 +1,4 @@
-export type SeedanceGenerationMode = "text" | "first-frame" | "first-last-frame";
+export type SeedanceGenerationMode = "text" | "first-frame" | "first-last-frame" | "multimodal-reference";
 export type SeedanceReferenceKind = "image" | "video" | "audio";
 
 import type { AiVideoClipTokenUsage } from "@/types";
@@ -29,13 +29,13 @@ export const SEEDANCE_MODELS: SeedanceModelOption[] = [
   {
     label: "Seedance 2.0",
     value: "doubao-seedance-2-0-260128",
-    generation: ["文生视频", "首帧生视频", "首尾帧生视频"],
+    generation: ["文生视频", "首帧生视频", "首尾帧生视频", "多模态参考"],
     note: "质量优先，适合成片主镜头",
   },
   {
     label: "Seedance 2.0 Fast",
     value: "doubao-seedance-2-0-fast-260128",
-    generation: ["文生视频", "首帧生视频", "首尾帧生视频"],
+    generation: ["文生视频", "首帧生视频", "首尾帧生视频", "多模态参考"],
     note: "速度优先，适合批量出片段",
   },
   {
@@ -283,12 +283,8 @@ function buildContent(input: CreateSeedanceTaskInput) {
   const useMultimodalReference = referenceResources.length > 0;
 
   if (useMultimodalReference) {
-    if (firstFrameUrl && input.mode === "first-frame") {
-      content.push({
-        type: "image_url",
-        image_url: { url: firstFrameUrl },
-        role: "reference_image",
-      });
+    if (referenceResources.every((resource) => resource.kind === "audio")) {
+      throw new Error("多模态参考不能只传音频，请至少添加 1 个参考图片或视频");
     }
     appendReferenceResources(content, referenceResources);
     return content;

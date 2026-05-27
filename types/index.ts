@@ -126,7 +126,7 @@ export interface CommentItem {
 }
 
 
-export type AiVideoGenerationMode = "text" | "first-frame" | "first-last-frame";
+export type AiVideoGenerationMode = "text" | "first-frame" | "first-last-frame" | "multimodal-reference";
 
 /** Seedance（即梦/方舟）视频任务 token 消耗 */
 export interface AiVideoClipTokenUsage {

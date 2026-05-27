@@ -20,7 +20,12 @@ function getServerMiniMaxApiKey() {
 }
 
 function isGenerationMode(value: unknown): value is GenerationMode {
-  return value === "text" || value === "first-frame" || value === "first-last-frame";
+  return (
+    value === "text" ||
+    value === "first-frame" ||
+    value === "first-last-frame" ||
+    value === "multimodal-reference"
+  );
 }
 
 function normalizeReferences(input: unknown): SeedancePromptReferenceInput[] {

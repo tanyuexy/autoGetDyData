@@ -1,7 +1,7 @@
 import type { UploadFile } from "antd/es/upload/interface";
 import type { AiVideoClip, AiVideoClipFormSnapshot, AiVideoReferenceResource } from "@/types";
 
-export type GenerationMode = "text" | "first-frame" | "first-last-frame";
+export type GenerationMode = "text" | "first-frame" | "first-last-frame" | "multimodal-reference";
 export type ReferenceKind = "image" | "video" | "audio";
 
 export interface SeedanceModelOption {
