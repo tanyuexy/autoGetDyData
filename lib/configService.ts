@@ -8,6 +8,18 @@ import {
 import { normalizePublishMaxConcurrent, PUBLISH_MAX_CONCURRENT_DEFAULT } from "@/lib/creator-publish/publishConcurrency";
 
 function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigData {
+  const defaultCreatorBitable = {
+    baseUrl:
+      "https://a5bgloffd0.feishu.cn/base/SjmubvbmCazk27sqcTucsSAmnPb?table=tblYnPxQjhaI4sWc&view=vewJjxCUVz",
+    appToken: "SjmubvbmCazk27sqcTucsSAmnPb",
+    tableId: "tblYnPxQjhaI4sWc",
+    keepRows: 0,
+  };
+  const creatorBitable =
+    data?.feishu?.creator?.appToken && data?.feishu?.creator?.tableId
+      ? data.feishu.creator
+      : defaultCreatorBitable;
+
   return {
     accounts: data?.accounts || [],
     emails: data?.emails || [],
@@ -42,7 +54,7 @@ function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigDa
     },
     feishu: {
       shop: data?.feishu?.shop || { appToken: "", tableId: "" },
-      creator: data?.feishu?.creator || { appToken: "", tableId: "", keepRows: 0 },
+      creator: creatorBitable,
       task: data?.feishu?.task || {
         baseUrl: "https://a5bgloffd0.feishu.cn/base/T64RbXS6wak6QqsaSqzcx0F8n4f?table=tblVym8chEalMZgl&view=vew11jDYDk",
         appToken: "T64RbXS6wak6QqsaSqzcx0F8n4f",

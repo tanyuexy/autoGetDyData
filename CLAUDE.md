@@ -69,6 +69,20 @@ HEADLESS=false node scripts/douyin-creator/publish/dom-stability-test.js  # 有�
 
 Pages call API routes → API enqueues a task → the Playwright script scrapes data → script calls back to an internal API (e.g. `/api/review/save`, `/api/feishu/sync`) via `scripts/common/internal-api-client.js` to persist results. The internal API base URL defaults to `http://127.0.0.1:3000` (overridable via `INTERNAL_API_BASE_URL`).
 
+### Creator insights dashboard
+
+`/creator` is the Douyin Creator data dashboard. It no longer uses the account-status table as the main surface; account selection remains only for export/push actions.
+
+- Data source: Feishu bitable profile `feishu.creator`
+- Default bitable: `SjmubvbmCazk27sqcTucsSAmnPb`, table `tblYnPxQjhaI4sWc`
+- Mongo collection: `creator_bitable_items`
+- Service: `lib/creator/insights.ts`
+- API: `GET /api/creator/insights` lists dashboard rows; `POST /api/creator/insights` reads all Feishu records and upserts them into MongoDB
+
+The service normalizes fields such as `所属店铺`, `发布时间`, `体裁`, `审核状态`, `播放量`, `完播率`, `5秒完播率`, `2秒跳出率`, `点赞量`, `分享量`, `评论量`, `收藏量`, `主页访量`, `增粉`, `销售额`, `商品ID`, `关联产品`, and `视频链接`. Keep the raw Feishu row in `rawFields` so new metrics can be added without another full schema migration.
+
+When calling the Feishu reader directly from app code, remember that the bitable config loader expects `PROJECT_CONFIG_JSON`; `syncCreatorInsightsFromFeishu()` prepares this from Mongo `app_config` before calling `readBitable("creator")`.
+
 ### SSE task monitoring
 
 `contexts/TaskContext.tsx` provides `startTask(url, body, namespace)` which POSTs to an API, gets back a `taskId`, then connects to `/api/progress/[taskId]` (SSE). The SSE endpoint polls the on-disk task log (`lib/tasks/taskLogStore.ts`) every 500ms and emits `log`, `progress`, and `done` events. The context auto-reconciles finished tasks by polling `/api/progress/tasks` every 3s — if a tracked task disappears from the running list, it loads the disk snapshot and marks it done.
@@ -128,6 +142,7 @@ mongosh "mongodb://127.0.0.1:27017/autoGetDyData"
 - `app_config` — singleton config document (`_id: "default"`)
 - `task_jobs` — queued/running/completed tasks for the background worker
 - `runtime_processes` — child process registry for crash recovery
+- `creator_bitable_items` — normalized Feishu creator dashboard rows, keyed by `recordId`
 - `creator_publish_tasks` — publish task queue with Feishu record linking
 - `creator_review_items` — scraped review/audit status of published posts
 - `shop_export_items` — shop data export records
@@ -205,12 +220,23 @@ To add a new page:
 
 使用 antd 组件前，先确认该属性/方法在当前版本是否已弃用（deprecated）。遇到控制台 deprecation warning 时主动修复，不要留下已知的弃用警告。
 
+`deprecated` 表示旧属性或方法当前可能仍能运行，但 antd 官方已经不推荐继续使用，未来版本可能移除。控制台出现这类 warning 时，不要把它当作无关噪音；应改成新版 API，以免后续升级 antd 后产生运行时问题。
+
 已知的弃用项：
 
 - `InputNumber` 的 `addonBefore` / `addonAfter` → 用 `Space.Compact` + `Button` 替代
 - `Modal` 的 `destroyOnClose` → 用 `destroyOnHidden` 替代
 - `Space` 的 `direction` → 用 `orientation` 替代
 - `Tag` 的 `bordered={false}`（antd v6）→ 用 **`variant="filled"`** 替代；“无边框实心”语义与旧时 `bordered={false}` 一致。**不要**把这些 Tag 写法套到 **`Table`** 上：`Table` 仍是 `bordered={false}` 控制是否显示格子线，`Table` 没有与 Tag 通用的 `variant` 用法。
+
+### 表格对齐约定
+
+项目中的业务数据表格默认使用“表头 + 单元格内容都居中”的对齐方式，保持各页面的数据展示一致。
+
+- 优先在列定义中显式写 `align: "center"`
+- 自定义 `render` 里的内容也要同步居中，不能只改列配置
+- 如果页面已有统一表格样式，可补充 `th` / `td { text-align: center; }`
+- 只有在内容天然更适合左对齐时（如长段正文、日志、代码片段），才作为例外单独处理
 
 ### 企业微信推送与验证码回复
 

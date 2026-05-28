@@ -4,7 +4,6 @@ import { Button, Modal, Space, Tooltip, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { AiVideoComposedFilm } from "@/types";
 import { ClipVideoThumbnail } from "@/components/ai-video/ClipVideoThumbnail";
-import { resolveMediaUrl } from "@/lib/ai-video/media";
 import type { ClipItem } from "@/lib/ai-video/types";
 
 export interface BuildFilmTableColumnsDeps {
@@ -12,13 +11,14 @@ export interface BuildFilmTableColumnsDeps {
   clipById: Map<string, ClipItem>;
   onPreviewFilm: (film: AiVideoComposedFilm) => void;
   onPreviewClip: (clip: ClipItem) => void;
+  onDownloadFilm: (film: AiVideoComposedFilm) => void;
   onDeleteFilm: (film: AiVideoComposedFilm) => Promise<void>;
 }
 
 export function buildFilmTableColumns(
   deps: BuildFilmTableColumnsDeps
 ): NonNullable<TableProps<AiVideoComposedFilm>["columns"]> {
-  const { canDeleteMaterials, clipById, onPreviewFilm, onPreviewClip, onDeleteFilm } = deps;
+  const { canDeleteMaterials, clipById, onPreviewFilm, onPreviewClip, onDownloadFilm, onDeleteFilm } = deps;
 
   return [
     {
@@ -151,8 +151,8 @@ export function buildFilmTableColumns(
           <Button size="small" type="link" style={{ padding: 0 }} onClick={() => onPreviewFilm(record)}>
             预览
           </Button>
-          <Button size="small" type="link" style={{ padding: 0 }} href={resolveMediaUrl(record.videoUrl)} target="_blank">
-            打开
+          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => onDownloadFilm(record)}>
+            下载
           </Button>
           {canDeleteMaterials ? (
             <Button

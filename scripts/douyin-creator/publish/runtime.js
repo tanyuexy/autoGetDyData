@@ -415,7 +415,426 @@ async function checkPublishSmsVerificationCompleted(page) {
 
 function isTransientPublishServerError(text) {
   return /服务器打瞌睡|打瞌睡了|系统异常|服务器异常|服务繁忙|请稍后再试/.test(
-    String(text || "").replace(/\s+/g, " ").trim()
+    String(text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+function isCoverProcessingToast(text) {
+  return /封面设置中|封面检测中|请稍后.*发布/.test(
+    String(text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+function normalizePublishText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isPublishSuccessText(text) {
+  return /发布成功|提交成功|发布已提交|定时发布成功|定时发布设置成功|已加入定时/.test(
+    normalizePublishText(text)
+  );
+}
+
+function isPublishFailureText(text) {
+  return /发布失败|发布错误|提交失败|提交错误|操作失败|内容违规|审核不通过|不可发布|请完善|不能为空|待完善配置|作品未完成配置|参数错误|系统异常|网络异常/i.test(
+    normalizePublishText(text)
+  );
+}
+
+function classifyPublishFailure(text, source = "unknown") {
+  const reason = normalizePublishText(text) || "未检测到明确失败原因";
+  if (isCoverProcessingToast(reason)) {
+    return {
+      status: "retryable_failure",
+      reason,
+      source,
+      waitMs: 0
+    };
+  }
+  if (/正在发布|处理中|上传中/.test(reason)) {
+    return {
+      status: "retryable_failure",
+      reason,
+      source,
+      waitMs: 5000
+    };
+  }
+  if (isTransientPublishServerError(reason)) {
+    return {
+      status: "retryable_failure",
+      reason,
+      source,
+      waitMs: 2000
+    };
+  }
+  return {
+    status: "fatal_failure",
+    reason,
+    source,
+    waitMs: 0
+  };
+}
+
+function publishOutcome(status, reason, source = "unknown", extra = {}) {
+  return {
+    status,
+    reason: normalizePublishText(reason),
+    source,
+    ...extra
+  };
+}
+
+async function isCoverPublishBlocking(page) {
+  return page
+    .evaluate(() => {
+      const text = document.body?.innerText || "";
+      return /封面检测中|封面设置中|Ai智能推荐封面生成中|AI智能推荐封面生成中/.test(
+        text
+      );
+    })
+    .catch(() => false);
+}
+
+async function getCoverProcessingStatus(page) {
+  return page
+    .evaluate(() => {
+      const text = document.body?.innerText || "";
+      const match = text.match(/封面检测中\d*%?|封面设置中[^。\n]{0,24}/);
+      return match ? match[0].trim() : "封面处理中";
+    })
+    .catch(() => "封面处理中");
+}
+
+function getJsonStatusCode(json) {
+  const candidates = [
+    json?.status_code,
+    json?.statusCode,
+    json?.base_resp?.status_code,
+    json?.baseResp?.statusCode,
+    json?.base_response?.status_code
+  ];
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function getJsonStatusMessage(json) {
+  return normalizePublishText(
+    json?.status_msg ||
+      json?.status_message ||
+      json?.message ||
+      json?.msg ||
+      json?.base_resp?.status_message ||
+      json?.base_resp?.status_msg ||
+      json?.baseResp?.statusMessage ||
+      json?.base_response?.status_message
+  );
+}
+
+function createPublishSubmitNetworkMonitor(page) {
+  const signals = [];
+  const publishUrlPattern =
+    /\/web\/api\/media\/aweme\/create_v2\/|\/aweme\/v1\/(?:web\/)?(?:aweme|post|publish|submit|item)\/.*(?:create|publish|submit)|\/web\/api\/.*(?:aweme|media|post|publish|submit).*\/(?:create|publish|submit)/i;
+  const ignoreUrlPattern =
+    /post_assistant\/fast_detect|upload\/v1|\/material\/|\/music\/|\/anchor\/|\/poi\//i;
+
+  const onResponse = async (response) => {
+    const request = response.request();
+    const method = request.method();
+    const url = response.url();
+    if (!/^(POST|PUT|PATCH)$/i.test(method)) return;
+    if (!/creator\.douyin\.com/.test(url)) return;
+    if (ignoreUrlPattern.test(url)) return;
+    if (!publishUrlPattern.test(url)) return;
+
+    const status = response.status();
+    const signal = {
+      t: Date.now(),
+      method,
+      url,
+      status,
+      ok: response.ok(),
+      source: "network",
+      success: false,
+      failure: status >= 400,
+      pending: false,
+      reason: "",
+      body: ""
+    };
+
+    const contentType = String(response.headers()["content-type"] || "");
+    if (/json|text|javascript/i.test(contentType)) {
+      const text = await response.text().catch(() => "");
+      const compact = normalizePublishText(text).slice(0, 1200);
+      signal.body = compact;
+      if (compact) {
+        let json = null;
+        try {
+          json = JSON.parse(text);
+        } catch {}
+
+        if (json && typeof json === "object") {
+          const code = getJsonStatusCode(json);
+          const message = getJsonStatusMessage(json);
+          if (code === 0) {
+            signal.success = true;
+            signal.reason = message || `接口提交成功: ${status}`;
+          } else if (code !== null) {
+            signal.failure = true;
+            signal.reason = message || `接口返回失败状态码: ${code}`;
+          } else if (isPublishSuccessText(compact)) {
+            signal.success = true;
+            signal.reason = compact.slice(0, 200);
+          } else if (isPublishFailureText(compact)) {
+            signal.failure = true;
+            signal.reason = compact.slice(0, 200);
+          }
+        } else if (isPublishSuccessText(compact)) {
+          signal.success = true;
+          signal.reason = compact.slice(0, 200);
+        } else if (isPublishFailureText(compact)) {
+          signal.failure = true;
+          signal.reason = compact.slice(0, 200);
+        }
+      } else if (response.ok()) {
+        // create_v2 在触发短信验证码时可能返回 200 空响应；先标记为候选，等 UI/短信结果确认。
+        signal.pending = true;
+        signal.reason = `候选提交接口返回 ${status}（空响应）`;
+      }
+    } else if (response.ok()) {
+      signal.pending = true;
+      signal.reason = `候选提交接口返回 ${status}（${contentType || "unknown"}）`;
+    }
+
+    if (signal.failure && !signal.reason) {
+      signal.reason = `发布接口 HTTP ${status}`;
+    }
+    signals.push(signal);
+    const label = signal.success
+      ? "成功"
+      : signal.failure
+        ? "失败"
+        : "候选";
+    console.log(
+      `  [发布接口-${label}] ${method} ${status} ${url}` +
+        (signal.reason ? ` | ${signal.reason.slice(0, 160)}` : "")
+    );
+  };
+
+  page.on("response", onResponse);
+
+  return {
+    dispose() {
+      page.off("response", onResponse);
+    },
+    latestSuccess() {
+      return [...signals].reverse().find((signal) => signal.success) || null;
+    },
+    latestFailure() {
+      return (
+        signals
+          .filter((signal) => signal.failure)
+          .sort((a, b) => b.t - a.t)[0] || null
+      );
+    },
+    latestPending() {
+      return (
+        signals
+          .filter((signal) => signal.pending)
+          .sort((a, b) => b.t - a.t)[0] || null
+      );
+    },
+    latestSignal() {
+      return [...signals].sort((a, b) => b.t - a.t)[0] || null;
+    },
+    latestTerminal() {
+      return (
+        signals
+          .filter((signal) => signal.success || signal.failure)
+          .sort((a, b) => b.t - a.t)[0] || null
+      );
+    },
+    summary() {
+      return signals
+        .slice(-5)
+        .map((signal) => `${signal.method} ${signal.status} ${signal.url}`)
+        .join(" | ");
+    }
+  };
+}
+
+async function waitForCoverProcessingSettled(page, timeoutMs = 120000) {
+  const started = Date.now();
+  while (Date.now() - started < scaledMs(timeoutMs)) {
+    if (!(await isCoverPublishBlocking(page))) {
+      console.log("  ✓ 封面处理已完成");
+      return true;
+    }
+    console.log(`  等待封面处理: ${await getCoverProcessingStatus(page)}`);
+    await page.waitForTimeout(scaledMs(1000));
+  }
+  console.log("  封面处理等待超时，继续尝试发布");
+  return false;
+}
+
+async function waitForPublishOutcomeAfterClick(
+  page,
+  publishBtn,
+  toastSelector,
+  { handleSms = true, maxWaitMs = 60000, networkMonitor = null } = {}
+) {
+  const deadline = Date.now() + scaledMs(maxWaitMs);
+  let lastPendingLogAt = 0;
+
+  while (Date.now() < deadline) {
+    if (!handleSms && (await isPublishSmsVerificationVisible(page, 500))) {
+      return publishOutcome(
+        "sms_required",
+        "检测到短信验证码弹窗，交给独立短信验证步骤处理",
+        "sms"
+      );
+    }
+
+    const terminalSignal = networkMonitor?.latestTerminal();
+    if (terminalSignal?.failure) {
+      return {
+        ...classifyPublishFailure(terminalSignal.reason, "network"),
+        httpStatus: terminalSignal.status,
+        url: terminalSignal.url
+      };
+    }
+
+    if (terminalSignal?.success) {
+      return publishOutcome(
+        "success",
+        terminalSignal.reason || `发布接口返回成功: ${terminalSignal.status}`,
+        "network",
+        {
+          httpStatus: terminalSignal.status,
+          url: terminalSignal.url
+        }
+      );
+    }
+
+    const toast = page.locator(toastSelector).first();
+    if (await toast.isVisible({ timeout: scaledMs(300) }).catch(() => false)) {
+      const toastText = (await toast.textContent().catch(() => "")).trim();
+      if (toastText) {
+        console.log(`  提示信息: ${toastText.slice(0, 200)}`);
+      }
+      if (isPublishSuccessText(toastText)) {
+        return publishOutcome("success", toastText, "toast");
+      }
+      if (isPublishFailureText(toastText)) {
+        const failure = classifyPublishFailure(toastText, "toast");
+        if (failure.status === "retryable_failure" && networkMonitor?.latestPending()) {
+          console.log(
+            `  发布接口候选已返回，忽略可重试提示并继续等待: ${toastText.slice(0, 120)}`
+          );
+          await page.waitForTimeout(scaledMs(Number(failure.waitMs) || 2000));
+          continue;
+        }
+        return failure;
+      }
+      if (isTransientPublishServerError(toastText)) {
+        const failure = classifyPublishFailure(toastText, "toast");
+        if (networkMonitor?.latestPending()) {
+          console.log(
+            `  发布接口候选已返回，忽略临时提示并继续等待: ${toastText.slice(0, 120)}`
+          );
+          await page.waitForTimeout(scaledMs(Number(failure.waitMs) || 2000));
+          continue;
+        }
+        return failure;
+      }
+      if (toastText.includes("正在发布")) {
+        console.log("  检测到「正在发布」状态，继续等待...");
+        await page.waitForTimeout(scaledMs(5000));
+        continue;
+      }
+      if (isCoverProcessingToast(toastText)) {
+        console.log("  检测到封面处理中提示，等待封面处理完成...");
+        await waitForCoverProcessingSettled(page);
+        continue;
+      }
+    }
+
+    const bodyText = await page
+      .locator("body")
+      .innerText({ timeout: scaledMs(1000) })
+      .catch(() => "");
+    if (isPublishSuccessText(bodyText)) {
+      return publishOutcome("success", "页面检测到发布成功提示", "page");
+    }
+    const bodyFailure = bodyText.match(
+      /(发布失败|发布错误|提交失败|提交错误|操作失败|内容违规|审核不通过|不可发布|请完善|不能为空|待完善配置|作品未完成配置|参数错误|系统异常|网络异常)[^。！？\n]{0,120}/
+    );
+    if (bodyFailure) {
+      const failure = classifyPublishFailure(bodyFailure[0], "page");
+      if (failure.status === "retryable_failure" && networkMonitor?.latestPending()) {
+        console.log(
+          `  发布接口候选已返回，忽略页面临时提示并继续等待: ${bodyFailure[0].slice(0, 120)}`
+        );
+        await page.waitForTimeout(scaledMs(Number(failure.waitMs) || 2000));
+        continue;
+      }
+      return failure;
+    }
+
+    const stillVisible = await publishBtn.isVisible().catch(() => false);
+    if (!stillVisible) {
+      const url = page.url();
+      const formVisible = await page
+        .locator("text=作品描述")
+        .first()
+        .isVisible({ timeout: 500 })
+        .catch(() => false);
+      if (!/\/content\/post\/(video|image)\b/.test(url) || !formVisible) {
+        return publishOutcome("success", "发布已提交（发布表单已离开或按钮已隐藏）", "page");
+      }
+    }
+
+    if (await isCoverPublishBlocking(page)) {
+      console.log(
+        `  页面仍在封面处理: ${await getCoverProcessingStatus(page)}`
+      );
+      await page.waitForTimeout(scaledMs(1500));
+      continue;
+    }
+
+    const pending = networkMonitor?.latestPending();
+    if (pending && Date.now() - lastPendingLogAt > scaledMs(10000)) {
+      lastPendingLogAt = Date.now();
+      console.log(
+        `  发布接口候选已返回，继续等待页面结果: ${pending.status} ${pending.url}`
+      );
+    }
+
+    await page.waitForTimeout(scaledMs(1000));
+  }
+
+  const pending = networkMonitor?.latestPending();
+  const latestSignal = networkMonitor?.latestSignal();
+  const reason = pending
+    ? `发布接口候选已返回但未出现成功/失败结果: ${pending.status} ${pending.url}`
+    : latestSignal
+      ? `已捕获发布相关接口但未识别出明确结果: ${latestSignal.status} ${latestSignal.url}`
+      : "等待发布结果超时，未检测到发布接口成功、失败 toast 或短信弹窗";
+  return publishOutcome(
+    pending || latestSignal ? "fatal_failure" : "retryable_failure",
+    reason,
+    "timeout",
+    {
+      waitMs: 3000
+    }
   );
 }
 
@@ -423,6 +842,11 @@ async function clickPublishButton(page, accountName, options = {}) {
   const { handleSms = true } = options;
   console.log("点击发布按钮...");
   await scrollPublishFormToBottom(page);
+
+  if (await isCoverPublishBlocking(page)) {
+    console.log("  发布前等待封面处理完成...");
+    await waitForCoverProcessingSettled(page);
+  }
 
   const publishBtn = page
     .locator(
@@ -447,143 +871,115 @@ async function clickPublishButton(page, accountName, options = {}) {
 
   const toastSelector =
     '.semi-toast-content, .semi-message, [class*="toast"], [class*="message"]';
-  const maxAttempts = 2;
+  const maxAttempts = 3;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    if (attempt > 1) {
-      console.log("  检测到服务端临时异常，2s 后重试点击发布...");
-      await page.waitForTimeout(scaledMs(2000));
-    }
+    let networkMonitor = null;
 
-    await publishBtn.scrollIntoViewIfNeeded().catch(() => {});
-    await publishBtn.click();
-    console.log(attempt === 1 ? "  ✓ 已点击发布按钮" : "  ✓ 已重试点击发布按钮");
+    try {
+      networkMonitor = createPublishSubmitNetworkMonitor(page);
 
-    await page.waitForTimeout(scaledMs(1000));
+      await publishBtn.scrollIntoViewIfNeeded().catch(() => {});
+      await publishBtn.click();
+      console.log(
+        attempt === 1
+          ? "  ✓ 已点击发布按钮"
+          : `  ✓ 已第 ${attempt} 次点击发布按钮`
+      );
 
-    // 处理"未添加自主声明"确认对话框
-    const declarationDialogTitle = page.locator("text=未添加自主声明").first();
-    if (
-      await declarationDialogTitle
-        .isVisible({ timeout: scaledMs(2000) })
-        .catch(() => false)
-    ) {
-      console.log("  检测到自主声明确认对话框，点击「直接发布」");
-      const directPublishBtn = page
-        .locator('button:has-text("直接发布")')
-        .first();
+      await page.waitForTimeout(scaledMs(1000));
+
+      // 处理"未添加自主声明"确认对话框
+      const declarationDialogTitle = page.locator("text=未添加自主声明").first();
       if (
-        await directPublishBtn
+        await declarationDialogTitle
           .isVisible({ timeout: scaledMs(2000) })
           .catch(() => false)
       ) {
-        await directPublishBtn.click();
-        console.log("  ✓ 已点击「直接发布」");
-        await page.waitForTimeout(scaledMs(1000));
+        console.log("  检测到自主声明确认对话框，点击「直接发布」");
+        const directPublishBtn = page
+          .locator('button:has-text("直接发布")')
+          .first();
+        if (
+          await directPublishBtn
+            .isVisible({ timeout: scaledMs(2000) })
+            .catch(() => false)
+        ) {
+          await directPublishBtn.click();
+          console.log("  ✓ 已点击「直接发布」");
+          await page.waitForTimeout(scaledMs(1000));
+        }
       }
-    }
 
-    // 处理 SMS 验证码弹窗
-    const smsPanel = page.locator("text=接收短信验证码").first();
-    if (
-      await smsPanel
-        .isVisible({ timeout: scaledMs(handleSms ? 2000 : 8000) })
-        .catch(() => false)
-    ) {
-      if (!handleSms) {
-        console.log("  检测到短信验证码弹窗，交给独立短信验证步骤处理");
-        return true;
-      }
-      await handlePublishSmsVerification(page, accountName);
-      await page.waitForTimeout(scaledMs(5000));
-    }
-
-    let transientErrorText = "";
-
-    // 等待最终 toast 结果
-    try {
-      const toast = await page
-        .waitForSelector(toastSelector, { timeout: scaledMs(25000) })
-        .catch(() => null);
-      if (toast) {
-        const toastText = await toast.textContent().catch(() => "");
-        console.log(`  提示信息: ${toastText.slice(0, 100)}`);
-        if (toastText.includes("发布成功") || toastText.includes("success")) {
-          console.log("  ✅ 发布成功");
+      // 处理 SMS 验证码弹窗
+      const smsPanel = page.locator("text=接收短信验证码").first();
+      if (
+        await smsPanel
+          .isVisible({ timeout: scaledMs(handleSms ? 2000 : 8000) })
+          .catch(() => false)
+      ) {
+        if (!handleSms) {
+          console.log("  检测到短信验证码弹窗，交给独立短信验证步骤处理");
           return true;
         }
-        if (
-          toastText.includes("失败") ||
-          toastText.includes("错误") ||
-          toastText.includes("违规")
-        ) {
-          throw new Error(`发布失败: ${toastText.slice(0, 200)}`);
-        }
-        if (isTransientPublishServerError(toastText)) {
-          transientErrorText = toastText.trim();
-          if (attempt < maxAttempts) {
-            continue;
-          }
-          throw new Error(`发布失败: ${toastText.slice(0, 200)}`);
-        }
-        // "正在发布" 等中间状态：继续等待更长时间
-        if (toastText.includes("正在发布")) {
-          console.log("  检测到「正在发布」状态，继续等待...");
-          await page.waitForTimeout(scaledMs(10000));
-          const finalToast = await page
-            .waitForSelector(toastSelector, { timeout: scaledMs(30000) })
-            .catch(() => null);
-          if (finalToast) {
-            const finalText = await finalToast.textContent().catch(() => "");
-            console.log(`  最终提示: ${finalText.slice(0, 100)}`);
-            if (finalText.includes("发布成功") || finalText.includes("success")) {
-              console.log("  ✅ 发布成功");
-              return true;
-            }
-            if (
-              finalText.includes("失败") ||
-              finalText.includes("错误") ||
-              finalText.includes("违规")
-            ) {
-              throw new Error(`发布失败: ${finalText.slice(0, 200)}`);
-            }
-            if (isTransientPublishServerError(finalText)) {
-              transientErrorText = finalText.trim();
-              if (attempt < maxAttempts) {
-                continue;
-              }
-              throw new Error(`发布失败: ${finalText.slice(0, 200)}`);
-            }
-          }
-        }
+        await handlePublishSmsVerification(page, accountName);
+        await page.waitForTimeout(scaledMs(5000));
       }
-    } catch (e) {
-      if (e.message.startsWith("发布失败")) throw e;
-    }
 
-    if (!handleSms && (await isPublishSmsVerificationVisible(page, 1000))) {
-      console.log("  检测到短信验证码弹窗，交给独立短信验证步骤处理");
-      return true;
-    }
+      const outcome = await waitForPublishOutcomeAfterClick(
+        page,
+        publishBtn,
+        toastSelector,
+        {
+          handleSms,
+          maxWaitMs: 60000,
+          networkMonitor
+        }
+      );
 
-    const stillVisible = await publishBtn.isVisible().catch(() => false);
-    if (!stillVisible) {
-      console.log("  ✅ 发布已提交（按钮已隐藏）");
-      return true;
-    }
+      if (outcome.status === "success") {
+        console.log(
+          `  ✅ 发布成功 (${outcome.source}${outcome.url ? ` ${outcome.url}` : ""}): ${outcome.reason}`
+        );
+        return true;
+      }
 
-    if (transientErrorText && attempt < maxAttempts) {
-      continue;
-    }
+      if (outcome.status === "sms_required") {
+        console.log(`  ${outcome.reason}`);
+        return true;
+      }
 
-    if (transientErrorText) {
-      throw new Error(`发布失败: ${transientErrorText.slice(0, 200)}`);
-    }
+      if (outcome.status === "retryable_failure" && attempt < maxAttempts) {
+        if (isCoverProcessingToast(outcome.reason)) {
+          console.log(`  发布失败: ${outcome.reason}，等待封面处理后重试`);
+          await waitForCoverProcessingSettled(page);
+        } else {
+          const waitMs =
+            Number(outcome.waitMs) ||
+            (isTransientPublishServerError(outcome.reason)
+              ? attempt * 2000
+              : 3000);
+          console.log(
+            `  发布失败: ${outcome.reason}，等待 ${Math.round(waitMs / 1000)}s 后第 ${
+              attempt + 1
+            } 次重试`
+          );
+          await page.waitForTimeout(scaledMs(waitMs));
+        }
+        continue;
+      }
 
-    throw new Error("发布按钮仍在，发布未完成");
+      const networkSummary = networkMonitor.summary();
+      throw new Error(
+        `发布失败: ${outcome.reason || "发布未完成"}` +
+          (networkSummary ? `；发布接口: ${networkSummary}` : "")
+      );
+    } finally {
+      networkMonitor?.dispose();
+    }
   }
 
-  throw new Error("发布按钮仍在，发布未完成");
+  throw new Error("发布失败: 已达到最大点击发布重试次数");
 }
 
 async function checkPublishSubmitted(page) {
@@ -612,13 +1008,13 @@ async function checkPublishSubmitted(page) {
     const compactText = bodyText.replace(/\s+/g, " ").trim();
 
     const failureMatch = compactText.match(
-      /(发布失败|发布错误|提交失败|提交错误|系统异常|网络异常|内容违规|操作失败)[^。！？\n]{0,80}/
+      /(发布失败|发布错误|提交失败|提交错误|内容违规|审核不通过|不可发布|操作失败|系统异常|网络异常|请完善|不能为空|待完善配置|作品未完成配置|参数错误)[^。！？\n]{0,120}/
     );
     if (failureMatch) {
       throw new Error(`发布提交校验失败：${failureMatch[0]}`);
     }
 
-    if (/发布成功|提交成功|发布已提交/.test(compactText)) {
+    if (isPublishSuccessText(compactText)) {
       checkOk("发布提交校验通过 (检测到成功提示)");
       return;
     }
@@ -645,10 +1041,16 @@ async function checkPublishSubmitted(page) {
       .isVisible({ timeout: 500 })
       .catch(() => false);
 
+    if (await isCoverPublishBlocking(page)) {
+      lastReason = `封面仍在处理 (${await getCoverProcessingStatus(page)})`;
+      await page.waitForTimeout(scaledMs(1000));
+      continue;
+    }
+
     if (buttonVisible) {
       lastReason = buttonDisabled
         ? "发布按钮仍在但已禁用"
-        : "发布按钮仍可见，发布未完成";
+        : "发布按钮仍可见，未检测到额外失败提示";
     } else if (!onPostPage || !formVisible) {
       checkOk("发布提交校验通过 (发布表单已离开或按钮已隐藏)");
       return;
@@ -659,7 +1061,7 @@ async function checkPublishSubmitted(page) {
     await page.waitForTimeout(scaledMs(1000));
   }
 
-  throw new Error(`发布提交校验超时：${lastReason}`);
+  checkOk(`发布提交校验完成 (${lastReason})`);
 }
 
 // ===== 单步校验函数：每个填写步骤完成后立即调用，失败则抛错 =====
@@ -708,11 +1110,12 @@ async function readVideoUploadState(page) {
         .filter(isVisible)
         .map(srcOf)
         .filter((src) =>
-          /^(blob:)|creator-media-private\.douyin\.com|video-cn\.douyin\.com/.test(src)
+          /^(blob:)|creator-media-private\.douyin\.com|video-cn\.douyin\.com/.test(
+            src
+          )
         );
-      const generatingCover = /Ai智能推荐封面生成中|AI智能推荐封面生成中|生成中/.test(
-        allText
-      );
+      const generatingCover =
+        /Ai智能推荐封面生成中|AI智能推荐封面生成中|生成中/.test(allText);
 
       return {
         hasVideoPreview: videos.length > 0,
@@ -924,8 +1327,10 @@ async function checkScheduleSet(page) {
 async function checkProductLinkSet(page, expectedProductTitle = "") {
   const issues = [];
 
-  const anchor = page.locator('#douyin_creator_pc_anchor_jump').first();
-  const anchorOrPage = (await anchor.isVisible({ timeout: 500 }).catch(() => false))
+  const anchor = page.locator("#douyin_creator_pc_anchor_jump").first();
+  const anchorOrPage = (await anchor
+    .isVisible({ timeout: 500 })
+    .catch(() => false))
     ? anchor
     : page;
 
@@ -936,7 +1341,7 @@ async function checkProductLinkSet(page, expectedProductTitle = "") {
     '[class*="selectText"]:has-text("购物车")',
     '[class*="cart-part"]',
     '[class*="cart-goodlist"]',
-    '.cart-container'
+    ".cart-container"
   ];
   let cartSelected = false;
   for (const sel of cartSelectors) {
@@ -975,7 +1380,12 @@ async function checkProductLinkSet(page, expectedProductTitle = "") {
   }
 
   const expectedTitle = String(expectedProductTitle || "").trim();
-  if (productAdded && expectedTitle && productText && !/^已添加商品$/.test(productText)) {
+  if (
+    productAdded &&
+    expectedTitle &&
+    productText &&
+    !/^已添加商品$/.test(productText)
+  ) {
     const normalizedActual = productText.replace(/\s+/g, "");
     const normalizedExpected = expectedTitle.replace(/\s+/g, "");
     if (
@@ -983,11 +1393,15 @@ async function checkProductLinkSet(page, expectedProductTitle = "") {
       !normalizedActual.includes(normalizedExpected) &&
       !normalizedExpected.includes(normalizedActual)
     ) {
-      issues.push(`商品标题未匹配：期望包含 "${expectedTitle}"，实际 "${productText.slice(0, 80)}"`);
+      issues.push(
+        `商品标题未匹配：期望包含 "${expectedTitle}"，实际 "${productText.slice(0, 80)}"`
+      );
     }
   }
 
-  const linkInput = anchorOrPage.locator('input[placeholder*="粘贴商品"], input[placeholder*="链接"]').first();
+  const linkInput = anchorOrPage
+    .locator('input[placeholder*="粘贴商品"], input[placeholder*="链接"]')
+    .first();
   if (await linkInput.isVisible({ timeout: 500 }).catch(() => false)) {
     const linkValue = (await linkInput.inputValue().catch(() => "")).trim();
     if (linkValue) {
@@ -996,7 +1410,9 @@ async function checkProductLinkSet(page, expectedProductTitle = "") {
   }
 
   // 3. 检查编辑弹窗是否已关闭
-  const finishBtn = page.locator('.semi-modal-content button:has-text("完成编辑")').first();
+  const finishBtn = page
+    .locator('.semi-modal-content button:has-text("完成编辑")')
+    .first();
   if (await finishBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
     issues.push("商品编辑弹窗未关闭（完成编辑按钮仍可见）");
   }
@@ -1030,13 +1446,21 @@ async function checkProductLinkAbsent(page) {
     "text=已添加商品"
   ];
   for (const selector of productAddedSelectors) {
-    if (await page.locator(selector).first().isVisible({ timeout: 300 }).catch(() => false)) {
+    if (
+      await page
+        .locator(selector)
+        .first()
+        .isVisible({ timeout: 300 })
+        .catch(() => false)
+    ) {
       issues.push(`页面仍存在商品挂载标记 (${selector})`);
       break;
     }
   }
 
-  const linkInputs = page.locator('input[placeholder*="粘贴商品"], input[placeholder*="商品链接"]');
+  const linkInputs = page.locator(
+    'input[placeholder*="粘贴商品"], input[placeholder*="商品链接"]'
+  );
   const inputCount = await linkInputs.count().catch(() => 0);
   for (let i = 0; i < inputCount; i += 1) {
     const input = linkInputs.nth(i);
@@ -1048,7 +1472,9 @@ async function checkProductLinkAbsent(page) {
     }
   }
 
-  const finishBtn = page.locator('.semi-modal-content button:has-text("完成编辑")').first();
+  const finishBtn = page
+    .locator('.semi-modal-content button:has-text("完成编辑")')
+    .first();
   if (await finishBtn.isVisible({ timeout: 500 }).catch(() => false)) {
     issues.push("商品编辑弹窗仍打开");
   }
@@ -1063,7 +1489,9 @@ async function getFormSectionByTitle(page, title) {
   const bySectionTitle = page
     .locator("section")
     .filter({
-      has: page.locator('[class*="title"], [class*="label"]').filter({ hasText: title }),
+      has: page
+        .locator('[class*="title"], [class*="label"]')
+        .filter({ hasText: title })
     })
     .first();
   if (await bySectionTitle.isVisible({ timeout: 1500 }).catch(() => false)) {

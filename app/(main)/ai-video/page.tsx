@@ -118,6 +118,9 @@ export default function AiVideoPage() {
             clipTagFilter={vm.clipTagFilter}
             clipTagFilterOptions={vm.clipTagFilterOptions}
             onClipTagFilterChange={vm.setClipTagFilter}
+            clipComposeGroupFilter={vm.clipComposeGroupFilter}
+            clipComposeGroupFilterOptions={vm.clipComposeGroupFilterOptions}
+            onClipComposeGroupFilterChange={vm.setClipComposeGroupFilter}
             clipsHydrated={vm.clipsHydrated}
             clipColumns={vm.clipColumns}
             selectedClipIds={vm.selectedClipIds}
@@ -132,6 +135,11 @@ export default function AiVideoPage() {
             onOpenComposeModal={() => vm.setComposeModalOpen(true)}
             composedFilms={vm.composedFilms}
             filmsHydrated={vm.filmsHydrated}
+            selectedFilmIds={vm.selectedFilmIds}
+            selectedFilms={vm.selectedFilms}
+            downloadingFilms={vm.downloadingFilms}
+            onFilmSelectionChange={vm.handleFilmSelectionChange}
+            onDownloadSelectedFilms={vm.downloadSelectedFilms}
             filmColumns={vm.filmColumns}
             composeModalOpen={vm.composeModalOpen}
             onCloseComposeModal={() => vm.setComposeModalOpen(false)}

@@ -2,7 +2,10 @@ const fse = require("fs-extra");
 const path = require("path");
 const XLSX = require("xlsx");
 const { ACCOUNTS_DIR } = require("./env");
-const { getInternalApiBaseUrl } = require("../../common/internal-api-client");
+const {
+  getInternalApiBaseUrl,
+  getInternalApiToken,
+} = require("../../common/internal-api-client");
 const {
   buildExpectedExportDates,
   countRequiredExportDays,
@@ -124,7 +127,13 @@ function appendDataDateColumn(filePath, dataDate) {
 
 async function calcDaysToExport() {
   const baseUrl = getInternalApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/shop/export`, { cache: "no-store" });
+  const internalApiToken = getInternalApiToken();
+  const response = await fetch(`${baseUrl}/api/shop/export`, {
+    cache: "no-store",
+    headers: {
+      ...(internalApiToken ? { "X-Internal-Api-Token": internalApiToken } : {}),
+    },
+  });
   const text = await response.text();
   let data = {};
   try {

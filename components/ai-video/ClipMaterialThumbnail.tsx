@@ -1,6 +1,7 @@
 "use client";
 
-import { Tooltip } from "antd";
+import { useEffect, useState } from "react";
+import { Spin, Tooltip } from "antd";
 import { PlayCircleOutlined, SoundOutlined } from "@ant-design/icons";
 import { ClipVideoThumbnail } from "@/components/ai-video/ClipVideoThumbnail";
 import { resolveMediaUrl } from "@/lib/ai-video/media";
@@ -34,6 +35,73 @@ function MaterialLabelBadge({ label }: { label: string }) {
   );
 }
 
+function ImageMaterialThumbnail({
+  imageUrl,
+  name,
+  label,
+  showBadge,
+  tooltipTitle,
+  onClick,
+}: {
+  imageUrl: string;
+  name: string;
+  label: string;
+  showBadge: boolean;
+  tooltipTitle: string;
+  onClick: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+  }, [imageUrl]);
+
+  return (
+    <Tooltip title={tooltipTitle}>
+      <button
+        type="button"
+        aria-label={`预览${label}`}
+        onClick={onClick}
+        style={{
+          position: "relative",
+          width: THUMB_SIZE,
+          height: THUMB_SIZE,
+          padding: 0,
+          border: "1px solid var(--vol-hairline)",
+          borderRadius: 6,
+          overflow: "hidden",
+          cursor: "pointer",
+          background: "var(--vol-canvas)",
+          flexShrink: 0,
+        }}
+      >
+        {loading ? (
+          <span
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1,
+            }}
+          >
+            <Spin size="small" />
+          </span>
+        ) : null}
+        <img
+          src={imageUrl}
+          alt={name}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          onLoad={() => setLoading(false)}
+          onError={() => setLoading(false)}
+        />
+        {showBadge ? <MaterialLabelBadge label={label} /> : null}
+      </button>
+    </Tooltip>
+  );
+}
+
 export function ClipMaterialThumbnail({
   material,
   onClick,
@@ -58,32 +126,14 @@ export function ClipMaterialThumbnail({
 
   if (material.kind === "image") {
     return (
-      <Tooltip title={tooltipTitle}>
-        <button
-          type="button"
-          aria-label={`预览${material.label}`}
-          onClick={onClick}
-          style={{
-            position: "relative",
-            width: THUMB_SIZE,
-            height: THUMB_SIZE,
-            padding: 0,
-            border: "1px solid var(--vol-hairline)",
-            borderRadius: 6,
-            overflow: "hidden",
-            cursor: "pointer",
-            background: "#111",
-            flexShrink: 0,
-          }}
-        >
-          <img
-            src={resolveMediaUrl(material.url)}
-            alt={material.name}
-            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-          />
-          {showBadge ? <MaterialLabelBadge label={material.label} /> : null}
-        </button>
-      </Tooltip>
+      <ImageMaterialThumbnail
+        imageUrl={resolveMediaUrl(material.url)}
+        name={material.name}
+        label={material.label}
+        showBadge={showBadge}
+        tooltipTitle={tooltipTitle}
+        onClick={onClick}
+      />
     );
   }
 
@@ -102,7 +152,7 @@ export function ClipMaterialThumbnail({
           borderRadius: 6,
           overflow: "hidden",
           cursor: "pointer",
-          background: "#111",
+          background: "var(--vol-canvas)",
           color: "#fff",
           flexShrink: 0,
         }}

@@ -1,9 +1,28 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Tooltip } from "antd";
+import { Spin, Tooltip } from "antd";
 import { PlayCircleOutlined } from "@ant-design/icons";
 import { isLocalMediaUrl, resolveMediaUrl } from "@/lib/ai-video/media";
+
+function ThumbnailLoadingMask({ loading }: { loading: boolean }) {
+  if (!loading) return null;
+  return (
+    <span
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "var(--vol-canvas)",
+        zIndex: 1,
+      }}
+    >
+      <Spin size="small" />
+    </span>
+  );
+}
 
 export function VideoFrameThumbnail({
   videoUrl,
@@ -23,7 +42,18 @@ export function VideoFrameThumbnail({
   borderRadius?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [thumbUrl, setThumbUrl] = useState<string | null>(coverUrl ? resolveMediaUrl(coverUrl) : null);
+  const resolvedCover = coverUrl ? resolveMediaUrl(coverUrl) : null;
+  const [thumbUrl, setThumbUrl] = useState<string | null>(resolvedCover);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    setThumbUrl(resolvedCover);
+  }, [videoUrl, coverUrl, resolvedCover]);
+
+  useEffect(() => {
+    if (thumbUrl) setLoading(true);
+  }, [thumbUrl]);
 
   useEffect(() => {
     if (thumbUrl || !isLocalMediaUrl(videoUrl)) return;
@@ -70,12 +100,19 @@ export function VideoFrameThumbnail({
         height,
         borderRadius,
         overflow: "hidden",
-        background: "#111",
+        background: "var(--vol-canvas)",
         flexShrink: 0,
       }}
     >
+      <ThumbnailLoadingMask loading={loading} />
       {thumbUrl ? (
-        <img src={thumbUrl} alt="视频首帧" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <img
+          src={thumbUrl}
+          alt="视频首帧"
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          onLoad={() => setLoading(false)}
+          onError={() => setLoading(false)}
+        />
       ) : (
         <video
           ref={videoRef}
@@ -84,6 +121,8 @@ export function VideoFrameThumbnail({
           muted
           playsInline
           style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }}
+          onLoadedData={() => setLoading(false)}
+          onError={() => setLoading(false)}
         />
       )}
       {typeof orderBadge === "number" ? (
@@ -109,7 +148,7 @@ export function VideoFrameThumbnail({
           {orderBadge}
         </span>
       ) : null}
-      {showPlayIcon ? (
+      {showPlayIcon && !loading ? (
         <span
           style={{
             position: "absolute",
@@ -120,6 +159,7 @@ export function VideoFrameThumbnail({
             background: "rgba(0, 0, 0, 0.28)",
             color: "#fff",
             fontSize: Math.max(14, Math.round(width * 0.25)),
+            zIndex: 2,
           }}
         >
           <PlayCircleOutlined />
@@ -162,7 +202,7 @@ export function ClipVideoThumbnail({
         borderRadius: 6,
         overflow: "hidden",
         cursor: "pointer",
-        background: "#111",
+        background: "var(--vol-canvas)",
       }}
     >
       <VideoFrameThumbnail

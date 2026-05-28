@@ -14,6 +14,18 @@ npm run worker:dev
 npx tsc --noEmit
 ```
 
+## 抖创数据看板
+
+`/creator` 是抖创数据看板页，用于查看从飞书多维表格同步到 MongoDB 的作品数据：
+
+- 页面入口：侧边栏「抖创数据」
+- 入库按钮：「从飞书入库」
+- API：`GET /api/creator/insights` 读取看板数据，`POST /api/creator/insights` 从飞书重新拉取并 upsert 入库
+- Mongo 集合：`creator_bitable_items`
+- 默认飞书表：`feishu.creator`，默认指向 `SjmubvbmCazk27sqcTucsSAmnPb / tblYnPxQjhaI4sWc`
+
+看板包含作品数、播放量、互动量、销售额、平均完播率，以及播放趋势、店铺播放排行、体裁分布和明细表。页面顶部仍保留抖创导出、推送飞书、导出并推送任务入口。
+
 ## 开发约束
 
 ### 企业微信推送与验证码回复
@@ -60,6 +72,8 @@ OTP_BRIDGE_TIMEOUT_MS=3600
 
 项目使用 `antd v6`。开发或改动组件时，先确认当前属性 / API 是否已弃用；如果控制台出现 deprecation warning，需要顺手修掉，不要把已知弃用写法继续留在代码里。
 
+`deprecated` 的意思是：旧写法当前可能仍可运行，但 antd 官方已经不推荐继续使用，后续版本可能移除。控制台出现这类 warning 时，不一定是功能报错，但需要改成新版 API，避免升级后突然失效，也减少开发调试噪音。
+
 当前已知需要避免的写法：
 
 - `InputNumber` 的 `addonBefore` / `addonAfter`
@@ -78,6 +92,15 @@ OTP_BRIDGE_TIMEOUT_MS=3600
 - `Tag`：`bordered={false}` 已弃用，使用 `variant="filled"`
 - `Table`：仍然使用 `bordered={false}` 控制是否显示表格边框
 - `Table` 没有和 `Tag` 对应的 `variant` 用法
+
+### 表格对齐约定
+
+项目内新增或改造数据表格时，默认要求表头与单元格内容都使用居中对齐，保持不同页面的数据视图风格一致。
+
+- 优先在 `Table` 列定义中显式设置 `align: "center"`
+- 自定义 `render` 内容也要一起居中，不要只改表头
+- 如果有全局或页面级表格样式，可补充 `th` / `td` 的 `text-align: center`
+- 除非该列明显更适合左对齐（例如超长富文本、代码片段、日志正文），否则不要单独改回左对齐
 
 ## 说明
 

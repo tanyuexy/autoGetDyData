@@ -584,10 +584,20 @@ async function buildRunArgs(task) {
 async function markFeishuPublished(task, runtimeTaskId) {
   if (!task.feishuRecordId) return;
   try {
+    appendTaskLog(
+      runtimeTaskId,
+      "info",
+      `[feishu-writeback] 开始回写发布成功 record ${task.feishuRecordId} (${task.accountName})`
+    );
     await postInternalApi("/api/feishu/task-writeback", {
       action: "published",
       recordId: task.feishuRecordId
     });
+    appendTaskLog(
+      runtimeTaskId,
+      "info",
+      `[feishu-writeback] 已回写发布成功 record ${task.feishuRecordId} (${task.accountName})`
+    );
   } catch (error) {
     appendTaskLog(
       runtimeTaskId,
@@ -645,11 +655,21 @@ async function markFeishuFailed(task, errorText, runtimeTaskId) {
     return;
   }
   try {
+    appendTaskLog(
+      runtimeTaskId,
+      "info",
+      `[feishu-writeback] 开始回写失败状态 record ${task.feishuRecordId} (${task.accountName})`
+    );
     await postInternalApi("/api/feishu/task-writeback", {
       recordId: task.feishuRecordId,
       statusText: formatFeishuFailureStatus(errorText),
       approvalText: "异常待修改"
     });
+    appendTaskLog(
+      runtimeTaskId,
+      "info",
+      `[feishu-writeback] 已回写失败状态 record ${task.feishuRecordId} (${task.accountName})`
+    );
   } catch (error) {
     appendTaskLog(
       runtimeTaskId,

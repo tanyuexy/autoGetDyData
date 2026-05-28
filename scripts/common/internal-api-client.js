@@ -7,15 +7,18 @@ function getInternalApiBaseUrl() {
   ).replace(/\/+$/, "");
 }
 
+function getInternalApiToken() {
+  return String(process.env.INTERNAL_API_TOKEN || process.env.APP_AUTH_SECRET || "").trim();
+}
+
 async function postInternalApi(path, body) {
   const url = `${getInternalApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+  const internalApiToken = getInternalApiToken();
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(process.env.INTERNAL_API_TOKEN
-        ? { "X-Internal-Api-Token": process.env.INTERNAL_API_TOKEN }
-        : {}),
+      ...(internalApiToken ? { "X-Internal-Api-Token": internalApiToken } : {}),
     },
     body: JSON.stringify(body || {}),
   });
@@ -34,6 +37,7 @@ async function postInternalApi(path, body) {
 
 async function waitForTaskDone(taskId, options = {}) {
   const baseUrl = getInternalApiBaseUrl();
+  const internalApiToken = getInternalApiToken();
   const timeoutMs = Number(options.timeoutMs || 30 * 60 * 1000);
   const startedAt = Date.now();
   let printedLogs = 0;
@@ -44,7 +48,12 @@ async function waitForTaskDone(taskId, options = {}) {
     }
     const response = await fetch(
       `${baseUrl}/api/progress/${encodeURIComponent(taskId)}/snapshot`,
-      { cache: "no-store" }
+      {
+        cache: "no-store",
+        headers: {
+          ...(internalApiToken ? { "X-Internal-Api-Token": internalApiToken } : {}),
+        },
+      }
     );
     const data = await response.json().catch(() => ({}));
     const logs = Array.isArray(data.logs) ? data.logs : [];
@@ -71,6 +80,7 @@ async function startAndWaitInternalApiTask(path, body, options = {}) {
 
 module.exports = {
   getInternalApiBaseUrl,
+  getInternalApiToken,
   postInternalApi,
   startAndWaitInternalApiTask,
   waitForTaskDone,

@@ -6,7 +6,14 @@ import type { ComposeFilmModalResult } from "@/components/ComposeFilmModal";
 import type { SeedancePromptVersion } from "@/components/ai-video/GeneratePromptModal";
 import { buildClipTableColumns } from "@/components/ai-video/clipTableColumns";
 import { getClipGenerationMaterials, type ClipGenerationMaterial } from "@/lib/ai-video/clipMaterials";
-import { buildClipTagOptions, collectClipTags, filterClipsByTag, normalizeClipTag } from "@/lib/ai-video/clipTags";
+import {
+  buildClipTagOptions,
+  buildComposeGroupOptions,
+  collectClipTags,
+  collectComposeGroups,
+  filterClips,
+  normalizeClipTag,
+} from "@/lib/ai-video/clipTags";
 import type { MaterialPreviewSession } from "@/components/ai-video/AiVideoMaterialPreviewModal";
 import { buildFilmTableColumns } from "@/components/ai-video/filmTableColumns";
 import {
@@ -94,6 +101,7 @@ const [seed, setSeed] = useState<number | null>(
 const [callbackUrl, setCallbackUrl] = useState(cachedConfig.callbackUrl || "");
 const [clipTag, setClipTag] = useState(cachedConfig.clipTag || "");
 const [clipTagFilter, setClipTagFilter] = useState<string | null>(null);
+const [clipComposeGroupFilter, setClipComposeGroupFilter] = useState<string | null>(null);
 const [clips, setClips] = useState<ClipItem[]>([]);
 const [clipsHydrated, setClipsHydrated] = useState(false);
 const [selectedClipIds, setSelectedClipIds] = useState<React.Key[]>([]);
@@ -110,6 +118,8 @@ const [assigningGroup, setAssigningGroup] = useState(false);
 const [listTab, setListTab] = useState<"clips" | "films">("clips");
 const [composedFilms, setComposedFilms] = useState<AiVideoComposedFilm[]>([]);
 const [filmsHydrated, setFilmsHydrated] = useState(false);
+const [selectedFilmIds, setSelectedFilmIds] = useState<React.Key[]>([]);
+const [downloadingFilms, setDownloadingFilms] = useState(false);
 const [previewFilm, setPreviewFilm] = useState<AiVideoComposedFilm | null>(null);
 const [previewClip, setPreviewClip] = useState<ClipItem | null>(null);
 const [materialPreview, setMaterialPreview] = useState<MaterialPreviewSession | null>(null);
@@ -347,22 +357,34 @@ const handleClipSelectionChange = useCallback((keys: React.Key[]) => {
   });
 }, []);
 
+const selectedFilms = useMemo(() => {
+  const filmMap = new Map(composedFilms.map((film) => [film.id, film]));
+  return selectedFilmIds
+    .map((id) => filmMap.get(String(id)))
+    .filter((film): film is AiVideoComposedFilm => Boolean(film?.videoUrl));
+}, [composedFilms, selectedFilmIds]);
+
+const handleFilmSelectionChange = useCallback((keys: React.Key[]) => {
+  setSelectedFilmIds((prev) => {
+    const keySet = new Set(keys.map(String));
+    const kept = prev.filter((id) => keySet.has(String(id)));
+    const keptSet = new Set(kept.map(String));
+    const added = keys.filter((id) => !keptSet.has(String(id)));
+    return [...kept, ...added];
+  });
+}, []);
+
 
 const selectedDuration = selectedClips.reduce((sum, item) => sum + (item.duration || 0), 0);
 
-const existingComposeGroups = useMemo(() => {
-  const names = new Set<string>();
-  for (const clip of clips) {
-    const name = String(clip.composeGroup || "").trim();
-    if (name) names.add(name);
-  }
-  return [...names].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-}, [clips]);
+const existingComposeGroups = useMemo(() => collectComposeGroups(clips), [clips]);
 
 const composeGroupOptions = useMemo(
-  () => existingComposeGroups.map((name) => ({ value: name, label: name })),
+  () => buildComposeGroupOptions(existingComposeGroups),
   [existingComposeGroups]
 );
+
+const clipComposeGroupFilterOptions = composeGroupOptions;
 
 const existingClipTags = useMemo(() => collectClipTags(clips), [clips]);
 
@@ -373,7 +395,10 @@ const clipTagFilterOptions = useMemo(
   [clipTagOptions]
 );
 
-const visibleClips = useMemo(() => filterClipsByTag(clips, clipTagFilter), [clipTagFilter, clips]);
+const visibleClips = useMemo(
+  () => filterClips(clips, { tag: clipTagFilter, composeGroup: clipComposeGroupFilter }),
+  [clipComposeGroupFilter, clipTagFilter, clips]
+);
 
 const updateClip = useCallback((id: string, patch: Partial<ClipItem>) => {
   setClips((prev) => prev.map((clip) => (clip.id === id ? { ...clip, ...patch } : clip)));
@@ -1172,6 +1197,78 @@ async function handleComposeSubmit(payload: {
   }
 }
 
+function buildFilmDownloadFilename(record: AiVideoComposedFilm, disambiguate = false) {
+  const segmentLabel = record.segments.map((segment) => segment.name).filter(Boolean).join("_");
+  let base = (segmentLabel || "film").replace(/[^\w\u4e00-\u9fa5.-]+/g, "_").slice(0, 40);
+  if (disambiguate) {
+    const suffix = record.comboIndex != null ? `_v${record.comboIndex}` : `_${record.id.slice(-6)}`;
+    base = `${base}${suffix}`;
+  }
+  return `${base}.mp4`;
+}
+
+async function downloadFilmFile(record: AiVideoComposedFilm, options?: { disambiguate?: boolean }) {
+  if (!record.videoUrl) return false;
+  const url = resolveMediaUrl(record.videoUrl);
+  const filename = buildFilmDownloadFilename(record, options?.disambiguate);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("下载失败");
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(blobUrl);
+    return true;
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return false;
+  }
+}
+
+async function downloadFilm(record: AiVideoComposedFilm) {
+  if (!record.videoUrl) {
+    message.warning("视频尚未就绪");
+    return;
+  }
+  const ok = await downloadFilmFile(record);
+  if (ok) message.success("视频已开始下载");
+  else message.info("已在新标签页打开，可右键保存视频");
+}
+
+const downloadSelectedFilms = useCallback(async () => {
+  if (!selectedFilms.length) {
+    message.warning("请先勾选要下载的成片");
+    return;
+  }
+  setDownloadingFilms(true);
+  try {
+    let downloaded = 0;
+    let opened = 0;
+    const disambiguate = selectedFilms.length > 1;
+    for (let i = 0; i < selectedFilms.length; i++) {
+      const film = selectedFilms[i];
+      const ok = await downloadFilmFile(film, { disambiguate });
+      if (ok) downloaded += 1;
+      else opened += 1;
+      if (i < selectedFilms.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    }
+    if (downloaded && !opened) {
+      message.success(`已开始下载 ${downloaded} 个成片`);
+    } else if (downloaded && opened) {
+      message.success(`已开始下载 ${downloaded} 个成片，${opened} 个已在新标签页打开`);
+    } else {
+      message.info(`已在浏览器打开 ${opened} 个成片，可右键保存视频`);
+    }
+  } finally {
+    setDownloadingFilms(false);
+  }
+}, [message, selectedFilms]);
+
 async function downloadClip(record: ClipItem) {
   if (!record.videoUrl) {
     message.warning("视频尚未就绪");
@@ -1419,9 +1516,10 @@ const handleReferenceDrop = useCallback(
         clipById,
         onPreviewFilm: handlePreviewFilm,
         onPreviewClip: handlePreviewClip,
+        onDownloadFilm: downloadFilm,
         onDeleteFilm: handleDeleteFilm,
       }),
-    [canDeleteMaterials, clipById, handleDeleteFilm, handlePreviewClip, handlePreviewFilm]
+    [canDeleteMaterials, clipById, downloadFilm, handleDeleteFilm, handlePreviewClip, handlePreviewFilm]
   );
 
   const clipColumns = useMemo(
@@ -1497,6 +1595,9 @@ const handleReferenceDrop = useCallback(
     clipTagFilter,
     setClipTagFilter,
     clipTagFilterOptions,
+    clipComposeGroupFilter,
+    setClipComposeGroupFilter,
+    clipComposeGroupFilterOptions,
     clipsHydrated,
     selectedClipIds,
     submitting,
@@ -1514,6 +1615,11 @@ const handleReferenceDrop = useCallback(
     setListTab,
     composedFilms,
     filmsHydrated,
+    selectedFilmIds,
+    selectedFilms,
+    downloadingFilms,
+    handleFilmSelectionChange,
+    downloadSelectedFilms,
     previewFilm,
     setPreviewFilm,
     previewClip,

@@ -14,7 +14,7 @@ import {
   Upload,
 } from "antd";
 import type { TableProps, UploadProps } from "antd";
-import { GroupOutlined, ScissorOutlined, UploadOutlined } from "@ant-design/icons";
+import { DownloadOutlined, GroupOutlined, ScissorOutlined, UploadOutlined } from "@ant-design/icons";
 import { ComposeFilmModal, type ComposeFilmModalResult } from "@/components/ComposeFilmModal";
 import type { AiVideoComposedFilm } from "@/types";
 import { sectionStyle } from "@/lib/ai-video/styles";
@@ -28,6 +28,9 @@ export interface AiVideoListTabsProps {
   clipTagFilter: string | null;
   clipTagFilterOptions: Array<{ value: string; label: string }>;
   onClipTagFilterChange: (value: string | null) => void;
+  clipComposeGroupFilter: string | null;
+  clipComposeGroupFilterOptions: Array<{ value: string; label: string }>;
+  onClipComposeGroupFilterChange: (value: string | null) => void;
   clipsHydrated: boolean;
   clipColumns: NonNullable<TableProps<ClipItem>["columns"]>;
   selectedClipIds: React.Key[];
@@ -42,6 +45,11 @@ export interface AiVideoListTabsProps {
   onOpenComposeModal: () => void;
   composedFilms: AiVideoComposedFilm[];
   filmsHydrated: boolean;
+  selectedFilmIds: React.Key[];
+  selectedFilms: AiVideoComposedFilm[];
+  downloadingFilms: boolean;
+  onFilmSelectionChange: (keys: React.Key[]) => void;
+  onDownloadSelectedFilms: () => void | Promise<void>;
   filmColumns: NonNullable<TableProps<AiVideoComposedFilm>["columns"]>;
   composeModalOpen: boolean;
   onCloseComposeModal: () => void;
@@ -64,6 +72,9 @@ export function AiVideoListTabs({
   clipTagFilter,
   clipTagFilterOptions,
   onClipTagFilterChange,
+  clipComposeGroupFilter,
+  clipComposeGroupFilterOptions,
+  onClipComposeGroupFilterChange,
   clipsHydrated,
   clipColumns,
   selectedClipIds,
@@ -78,6 +89,11 @@ export function AiVideoListTabs({
   onOpenComposeModal,
   composedFilms,
   filmsHydrated,
+  selectedFilmIds,
+  selectedFilms,
+  downloadingFilms,
+  onFilmSelectionChange,
+  onDownloadSelectedFilms,
   filmColumns,
   composeModalOpen,
   onCloseComposeModal,
@@ -88,6 +104,7 @@ export function AiVideoListTabs({
     <>
       <section style={sectionStyle}>
         <Tabs
+          className={`ai-video-list-tabs${listTab === "films" ? " ai-video-list-tabs--films" : ""}`}
           activeKey={listTab}
           onChange={(key) => setListTab(key as "clips" | "films")}
           items={[
@@ -98,7 +115,7 @@ export function AiVideoListTabs({
                   <span>片段列表</span>
                   {clipsHydrated ? (
                     <Tag variant="filled" color="default">
-                      {clipTagFilter ? `${visibleClips.length}/${clips.length}` : clips.length}
+                      {clipTagFilter || clipComposeGroupFilter ? `${visibleClips.length}/${clips.length}` : clips.length}
                     </Tag>
                   ) : (
                     <Spin size="small" />
@@ -125,6 +142,20 @@ export function AiVideoListTabs({
                             .includes(input.trim().toLowerCase())
                         }
                         onChange={(value) => onClipTagFilterChange(value ? String(value) : null)}
+                      />
+                      <Select
+                        allowClear
+                        showSearch
+                        placeholder="筛选混剪分组"
+                        value={clipComposeGroupFilter ?? undefined}
+                        options={clipComposeGroupFilterOptions}
+                        style={{ minWidth: 180 }}
+                        filterOption={(input, option) =>
+                          String(option?.label ?? option?.value ?? "")
+                            .toLowerCase()
+                            .includes(input.trim().toLowerCase())
+                        }
+                        onChange={(value) => onClipComposeGroupFilterChange(value ? String(value) : null)}
                       />
                     </Space>
                     <Space wrap>
@@ -178,7 +209,7 @@ export function AiVideoListTabs({
                       }}
                     />
                   ) : (
-                    <Empty description={clipTagFilter ? "当前标签下暂无片段" : "还没有片段"} />
+                    <Empty description={clipTagFilter || clipComposeGroupFilter ? "当前筛选条件下暂无片段" : "还没有片段"} />
                   )}
                 </Space>
               ),
@@ -198,18 +229,48 @@ export function AiVideoListTabs({
                 </Space>
               ),
               children: (
-                <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+                <Space orientation="vertical" size={8} style={{ width: "100%" }}>
                   {composedFilms.length ? (
-                    <Table
-                      rowKey="id"
-                      size="small"
-                      className="ai-video-films-table"
-                      tableLayout="fixed"
-                      scroll={{ x: 988 }}
-                      pagination={{ pageSize: 8 }}
-                      dataSource={composedFilms}
-                      columns={filmColumns}
-                    />
+                    <>
+                      <Space align="center" style={{ width: "100%", justifyContent: "space-between" }} wrap>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          勾选成片后可批量下载
+                        </Typography.Text>
+                        <Button
+                          icon={<DownloadOutlined />}
+                          disabled={!selectedFilms.length}
+                          loading={downloadingFilms}
+                          onClick={() => void onDownloadSelectedFilms()}
+                        >
+                          下载选中
+                        </Button>
+                      </Space>
+                      {selectedFilms.length ? (
+                        <Alert
+                          type="info"
+                          showIcon
+                          banner
+                          style={{ padding: "4px 12px", marginBottom: 0 }}
+                          title={`已选 ${selectedFilms.length} 个成片`}
+                        />
+                      ) : null}
+                      <Table
+                        rowKey="id"
+                        size="small"
+                        className="ai-video-films-table"
+                        tableLayout="fixed"
+                        scroll={{ x: 988 }}
+                        pagination={{ pageSize: 8 }}
+                        dataSource={composedFilms}
+                        columns={filmColumns}
+                        rowSelection={{
+                          selectedRowKeys: selectedFilmIds,
+                          onChange: onFilmSelectionChange,
+                          getCheckboxProps: (record) => ({ disabled: !record.videoUrl }),
+                          align: "center",
+                        }}
+                      />
+                    </>
                   ) : filmsHydrated ? (
                     <Empty description="还没有成片，合成后会自动出现在这里" />
                   ) : (

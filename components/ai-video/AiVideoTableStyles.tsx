@@ -21,6 +21,12 @@ export function AiVideoTableStyles() {
       .ai-video-films-table .ant-table-cell {
         vertical-align: middle;
       }
+      .ai-video-films-table .ant-table-selection-column {
+        text-align: center;
+      }
+      .ai-video-list-tabs--films .ant-tabs-nav {
+        margin-bottom: 8px;
+      }
     `}</style>
   );
 }
