@@ -15,12 +15,11 @@ import {
   isFinished,
 } from "@/lib/ai-video/clipUtils";
 import { resolveClipDisplayName } from "@/lib/ai-video/clipNameGenerator";
-import { formatTokenUsageLabel, formatTokenUsageTooltipLines } from "@/lib/ai-video/tokenUsage";
+import { formatTokenUsageLabel, formatTokenUsageTooltipLines, getTokenUsageSortValue } from "@/lib/ai-video/tokenUsage";
 import type { ClipItem } from "@/lib/ai-video/types";
 
 export interface BuildClipTableColumnsDeps {
   canDeleteMaterials: boolean;
-  composeOrderMap: Map<string, number>;
   onCopyPrompt: (text: string) => void;
   onPreviewClip: (clip: ClipItem) => void;
   onPreviewMaterial: (material: ClipGenerationMaterial, clip: ClipItem) => void;
@@ -35,7 +34,6 @@ export function buildClipTableColumns(
 ): NonNullable<TableProps<ClipItem>["columns"]> {
   const {
     canDeleteMaterials,
-    composeOrderMap,
     onCopyPrompt,
     onPreviewClip,
     onPreviewMaterial,
@@ -46,24 +44,6 @@ export function buildClipTableColumns(
   } = deps;
 
   return [
-    {
-      title: "序号",
-      key: "order",
-      width: 64,
-      align: "center",
-      render: (_, record) => {
-        const composeOrder = composeOrderMap.get(record.id);
-        return composeOrder ? (
-          <Tag style={{ ...antdTagPresetStyle("blue"), margin: 0, minWidth: 24, textAlign: "center" }}>
-            {composeOrder}
-          </Tag>
-        ) : (
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            —
-          </Typography.Text>
-        );
-      },
-    },
     {
       title: "用户",
       dataIndex: "username",
@@ -78,6 +58,8 @@ export function buildClipTableColumns(
       key: "tokenUsage",
       width: 88,
       align: "center",
+      sorter: (a, b) => getTokenUsageSortValue(a.tokenUsage) - getTokenUsageSortValue(b.tokenUsage),
+      sortDirections: ["descend", "ascend"],
       render: (_, record) => {
         const label = formatTokenUsageLabel(record.tokenUsage);
         const usage = record.tokenUsage;
@@ -272,6 +254,26 @@ export function buildClipTableColumns(
             等待
           </Typography.Text>
         ),
+    },
+    {
+      title: "创建时间",
+      dataIndex: "createdAt",
+      width: 168,
+      align: "center",
+      render: (value: string) => (
+        <Typography.Text style={{ fontSize: 12 }}>
+          {value
+            ? new Date(String(value)).toLocaleString("zh-CN", {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+              })
+            : "—"}
+        </Typography.Text>
+      ),
     },
     {
       title: "操作",

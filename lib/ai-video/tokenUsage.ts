@@ -136,6 +136,11 @@ export function formatTokenUsageLabel(usage?: AiVideoClipTokenUsage | null): str
   return formatTokenCountCompact(normalized.totalTokens);
 }
 
+/** 表格排序：无 token 时用 -Infinity，升序时排在最前 */
+export function getTokenUsageSortValue(usage?: AiVideoClipTokenUsage | null): number {
+  return normalizeTokenUsage(usage)?.totalTokens ?? Number.NEGATIVE_INFINITY;
+}
+
 function toNonNegativeInt(value: unknown): number | null {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return null;

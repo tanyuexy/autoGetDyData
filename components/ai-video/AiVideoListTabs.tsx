@@ -17,6 +17,7 @@ import type { TableProps, UploadProps } from "antd";
 import { DownloadOutlined, GroupOutlined, ScissorOutlined, UploadOutlined } from "@ant-design/icons";
 import { ComposeFilmModal, type ComposeFilmModalResult } from "@/components/ComposeFilmModal";
 import type { AiVideoComposedFilm } from "@/types";
+import { antdTagPresetStyle } from "@/lib/semanticTagStyles";
 import { sectionStyle } from "@/lib/ai-video/styles";
 import type { ClipItem } from "@/lib/ai-video/types";
 
@@ -33,6 +34,7 @@ export interface AiVideoListTabsProps {
   onClipComposeGroupFilterChange: (value: string | null) => void;
   clipsHydrated: boolean;
   clipColumns: NonNullable<TableProps<ClipItem>["columns"]>;
+  composeOrderMap: Map<string, number>;
   selectedClipIds: React.Key[];
   onClipSelectionChange: (keys: React.Key[]) => void;
   selectedClips: ClipItem[];
@@ -77,6 +79,7 @@ export function AiVideoListTabs({
   onClipComposeGroupFilterChange,
   clipsHydrated,
   clipColumns,
+  composeOrderMap,
   selectedClipIds,
   onClipSelectionChange,
   selectedClips,
@@ -206,6 +209,33 @@ export function AiVideoListTabs({
                         onChange: onClipSelectionChange,
                         getCheckboxProps: (record) => ({ disabled: !record.videoUrl }),
                         align: "center",
+                        columnWidth: 52,
+                        renderCell: (_checked, record, _index, originNode) => {
+                          const order = composeOrderMap.get(record.id);
+                          if (!order) return originNode;
+                          return (
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                gap: 2,
+                              }}
+                            >
+                              <Tag
+                                style={{
+                                  ...antdTagPresetStyle("blue"),
+                                  margin: 0,
+                                  minWidth: 22,
+                                  textAlign: "center",
+                                }}
+                              >
+                                {order}
+                              </Tag>
+                              {originNode}
+                            </div>
+                          );
+                        },
                       }}
                     />
                   ) : (

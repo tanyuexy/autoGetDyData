@@ -136,7 +136,16 @@ export function buildFilmTableColumns(
       align: "center" as const,
       render: (value: string) => (
         <Typography.Text style={{ fontSize: 12 }}>
-          {value ? new Date(String(value)).toLocaleString("zh-CN") : "—"}
+          {value
+            ? new Date(String(value)).toLocaleString("zh-CN", {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+              })
+            : "—"}
         </Typography.Text>
       ),
     },

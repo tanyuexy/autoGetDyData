@@ -42,6 +42,7 @@ export function VideoFrameThumbnail({
   borderRadius?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
   const resolvedCover = coverUrl ? resolveMediaUrl(coverUrl) : null;
   const [thumbUrl, setThumbUrl] = useState<string | null>(resolvedCover);
   const [loading, setLoading] = useState(true);
@@ -51,9 +52,22 @@ export function VideoFrameThumbnail({
     setThumbUrl(resolvedCover);
   }, [videoUrl, coverUrl, resolvedCover]);
 
+  // 排序/翻页 remount 后，缓存图片可能不再触发 onLoad
   useEffect(() => {
-    if (thumbUrl) setLoading(true);
+    if (!thumbUrl) return;
+    const img = imgRef.current;
+    if (img?.complete && img.naturalWidth > 0) {
+      setLoading(false);
+    }
   }, [thumbUrl]);
+
+  useEffect(() => {
+    if (thumbUrl) return;
+    const video = videoRef.current;
+    if (video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      setLoading(false);
+    }
+  }, [thumbUrl, videoUrl]);
 
   useEffect(() => {
     if (thumbUrl || !isLocalMediaUrl(videoUrl)) return;
@@ -107,6 +121,7 @@ export function VideoFrameThumbnail({
       <ThumbnailLoadingMask loading={loading} />
       {thumbUrl ? (
         <img
+          ref={imgRef}
           src={thumbUrl}
           alt="视频首帧"
           style={{ width: "100%", height: "100%", objectFit: "cover" }}

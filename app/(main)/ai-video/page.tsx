@@ -123,6 +123,7 @@ export default function AiVideoPage() {
             onClipComposeGroupFilterChange={vm.setClipComposeGroupFilter}
             clipsHydrated={vm.clipsHydrated}
             clipColumns={vm.clipColumns}
+            composeOrderMap={vm.composeOrderMap}
             selectedClipIds={vm.selectedClipIds}
             onClipSelectionChange={vm.handleClipSelectionChange}
             selectedClips={vm.selectedClips}

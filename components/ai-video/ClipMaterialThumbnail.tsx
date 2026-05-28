@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Spin, Tooltip } from "antd";
 import { PlayCircleOutlined, SoundOutlined } from "@ant-design/icons";
 import { ClipVideoThumbnail } from "@/components/ai-video/ClipVideoThumbnail";
@@ -50,10 +50,15 @@ function ImageMaterialThumbnail({
   tooltipTitle: string;
   onClick: () => void;
 }) {
+  const imgRef = useRef<HTMLImageElement>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
+    const img = imgRef.current;
+    if (img?.complete && img.naturalWidth > 0) {
+      setLoading(false);
+    }
   }, [imageUrl]);
 
   return (
@@ -90,6 +95,7 @@ function ImageMaterialThumbnail({
           </span>
         ) : null}
         <img
+          ref={imgRef}
           src={imageUrl}
           alt={name}
           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}

@@ -1526,7 +1526,6 @@ const handleReferenceDrop = useCallback(
     () =>
       buildClipTableColumns({
         canDeleteMaterials,
-        composeOrderMap,
         onCopyPrompt: copyPrompt,
         onPreviewClip: handlePreviewClip,
         onPreviewMaterial: handlePreviewMaterial,
@@ -1535,7 +1534,7 @@ const handleReferenceDrop = useCallback(
         onRestoreFormFromClip: restoreFormFromClip,
         onDeleteClip: handleDeleteClip,
       }),
-    [canDeleteMaterials, composeOrderMap, copyPrompt, downloadClip, handleDeleteClip, handlePreviewClip, handlePreviewMaterial, pollTask, restoreFormFromClip]
+    [canDeleteMaterials, copyPrompt, downloadClip, handleDeleteClip, handlePreviewClip, handlePreviewMaterial, pollTask, restoreFormFromClip]
   );
 
   const handleGroupAssignConfirm = useCallback(async () => {
@@ -1645,6 +1644,7 @@ const handleReferenceDrop = useCallback(
     clipUploadProps,
     referenceUploadProps,
     clipColumns,
+    composeOrderMap,
     filmColumns,
     handleClipSelectionChange,
     openGroupAssignModal,
