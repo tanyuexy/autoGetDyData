@@ -260,7 +260,9 @@ export async function syncCreatorInsightsFromFeishu() {
     normalizeCreatorRecord(record, index, importedAt, { productionTeam: productionTeamMap })
   );
   const db = await getDb();
+  let deletedCount = 0;
   if (normalized.length) {
+    const activeRecordIds = normalized.map((item) => item.recordId);
     await db.collection(COLLECTION).bulkWrite(
       normalized.map((item) => {
         const { createdAt: _createdAt, ...setFields } = item;
@@ -277,10 +279,15 @@ export async function syncCreatorInsightsFromFeishu() {
       }),
       { ordered: false }
     );
+    const deleteResult = await db.collection(COLLECTION).deleteMany({
+      recordId: { $nin: activeRecordIds },
+    });
+    deletedCount = deleteResult.deletedCount || 0;
   }
   return {
     ok: true,
     importedCount: normalized.length,
+    deletedCount,
     fieldCount: Array.isArray(data.fields) ? data.fields.length : 0,
     importedAt: importedAt.toISOString(),
   };
@@ -298,7 +305,7 @@ function serializeItem(item: StoredCreatorInsightItem & { _id: unknown }): Creat
 export async function listCreatorInsights(options: { limit?: number } = {}) {
   await ensureCreatorInsightIndexes();
   const db = await getDb();
-  const limit = Math.min(Math.max(Number(options.limit || 500), 1), 2000);
+  const limit = Math.min(Math.max(Number(options.limit || 500), 1), 10000);
   const items = await db
     .collection<StoredCreatorInsightItem>(COLLECTION)
     .find({})

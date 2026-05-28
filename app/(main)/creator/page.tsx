@@ -602,7 +602,7 @@ export default function CreatorPage() {
   const fetchInsights = useCallback(async () => {
     setLoadingData(true);
     try {
-      const res = await fetch("/api/creator/insights?limit=2000", { cache: "no-store" });
+      const res = await fetch("/api/creator/insights?limit=10000", { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "加载抖创数据失败");
       setItems(data.items || []);
