@@ -11,10 +11,12 @@ import {
   Space,
   Table,
   Tag,
+  Tabs,
   Tooltip,
   Typography,
 } from "antd";
 import type { TableProps } from "antd";
+import type { EChartsOption } from "echarts";
 import {
   BarChartOutlined,
   CloudSyncOutlined,
@@ -24,6 +26,7 @@ import {
   SendOutlined,
 } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
+import ReactECharts from "echarts-for-react";
 import { ToolbarMultiSelect } from "@/components/ToolbarMultiSelect";
 import { useTaskContext } from "@/contexts/TaskContext";
 import { useToolbarMultiSelect } from "@/hooks/useToolbarMultiSelect";
@@ -35,6 +38,31 @@ const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
 
 const CREATOR_SELECTION_CACHE_KEY = "creator:selectedAccounts";
+
+type DatePreset =
+  | "all"
+  | "today"
+  | "tomorrow"
+  | "yesterday"
+  | "last7"
+  | "thisWeek"
+  | "lastWeek"
+  | "thisMonth"
+  | "lastMonth"
+  | "custom";
+
+const DATE_PRESET_OPTIONS: { label: string; value: DatePreset }[] = [
+  { label: "全部日期", value: "all" },
+  { label: "今天", value: "today" },
+  { label: "明天", value: "tomorrow" },
+  { label: "昨天", value: "yesterday" },
+  { label: "过去 7 天内", value: "last7" },
+  { label: "本周", value: "thisWeek" },
+  { label: "上周", value: "lastWeek" },
+  { label: "本月", value: "thisMonth" },
+  { label: "上月", value: "lastMonth" },
+  { label: "自定义范围", value: "custom" },
+];
 
 type CreatorInsightItem = {
   id: string;
@@ -87,6 +115,14 @@ function money(value: number) {
   return `¥${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }).format(value || 0)}`;
 }
 
+function formatMetricValue(
+  metric: keyof Pick<GroupPoint, "playCount" | "salesAmount" | "interactionCount" | "itemCount">,
+  value: number
+) {
+  if (metric === "salesAmount") return money(value);
+  return compactNumber(value);
+}
+
 function percent(value: number | null) {
   if (value == null || !Number.isFinite(value)) return "-";
   return `${(value * 100).toFixed(1)}%`;
@@ -94,6 +130,40 @@ function percent(value: number | null) {
 
 function interactionCount(item: CreatorInsightItem) {
   return item.likeCount + item.shareCount + item.commentCount + item.favoriteCount;
+}
+
+function dateRangeFromPreset(preset: DatePreset): [Dayjs, Dayjs] | null {
+  const today = dayjs();
+  switch (preset) {
+    case "today":
+      return [today.startOf("day"), today.startOf("day")];
+    case "tomorrow": {
+      const tomorrow = today.add(1, "day");
+      return [tomorrow.startOf("day"), tomorrow.startOf("day")];
+    }
+    case "yesterday": {
+      const yesterday = today.subtract(1, "day");
+      return [yesterday.startOf("day"), yesterday.startOf("day")];
+    }
+    case "last7":
+      return [today.subtract(6, "day").startOf("day"), today.startOf("day")];
+    case "thisWeek":
+      return [today.startOf("week"), today.startOf("day")];
+    case "lastWeek": {
+      const lastWeek = today.subtract(1, "week");
+      return [lastWeek.startOf("week"), lastWeek.endOf("week").startOf("day")];
+    }
+    case "thisMonth":
+      return [today.startOf("month"), today.startOf("day")];
+    case "lastMonth": {
+      const lastMonth = today.subtract(1, "month");
+      return [lastMonth.startOf("month"), lastMonth.endOf("month").startOf("day")];
+    }
+    case "all":
+    case "custom":
+    default:
+      return null;
+  }
 }
 
 function MetricTile({
@@ -120,7 +190,228 @@ function MetricTile({
   );
 }
 
+function ChartEmpty({ text }: { text: string }) {
+  return (
+    <div className="creator-chart-empty">
+      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text} />
+    </div>
+  );
+}
+
+function CreatorChart({ option }: { option: EChartsOption }) {
+  return (
+    <ReactECharts
+      option={option}
+      notMerge
+      lazyUpdate
+      style={{ width: "100%", height: "100%" }}
+      opts={{ renderer: "svg" }}
+    />
+  );
+}
+
 function MiniBarChart({
+  data,
+  metric,
+  emptyText,
+  scrollable = false,
+  maxVisibleRows = 8,
+  labelWidth,
+}: {
+  data: GroupPoint[];
+  metric: keyof Pick<GroupPoint, "playCount" | "salesAmount" | "interactionCount" | "itemCount">;
+  emptyText: string;
+  scrollable?: boolean;
+  maxVisibleRows?: number;
+  labelWidth?: number;
+}) {
+  const option = useMemo<EChartsOption | null>(() => {
+    const max = Math.max(...data.map((item) => item[metric]), 0);
+    if (!data.length || max <= 0) return null;
+    const axisMax = max * 1.18;
+
+    return {
+      animation: false,
+      grid: {
+        top: 6,
+        right: 18,
+        bottom: 4,
+        left: 6,
+        containLabel: true,
+      },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "shadow" },
+        backgroundColor: "rgba(255,255,255,0.98)",
+        borderColor: "#e0dbd5",
+        textStyle: { color: "#171717", fontSize: 12 },
+        formatter(params: unknown) {
+          const row = Array.isArray(params) ? params[0] : params;
+          if (!row || typeof row !== "object") return emptyText;
+          const datum = row as { axisValueLabel?: string; value?: number };
+          return `${datum.axisValueLabel || "未分组"}<br/>${formatMetricValue(metric, Number(datum.value || 0))}`;
+        },
+      },
+      xAxis: {
+        type: "value",
+        show: false,
+        max: axisMax,
+      },
+      yAxis: {
+        type: "category",
+        inverse: true,
+        data: data.map((item) => item.name || "未分组"),
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
+          color: "#2f2b28",
+          fontSize: 12,
+          width: labelWidth ?? (scrollable ? 156 : 112),
+          overflow: "break",
+        },
+      },
+      dataZoom: scrollable
+        ? [
+            {
+              type: "inside",
+              yAxisIndex: 0,
+              startValue: 0,
+              endValue: Math.min(maxVisibleRows - 1, data.length - 1),
+              zoomOnMouseWheel: false,
+              moveOnMouseWheel: true,
+              moveOnMouseMove: true,
+              filterMode: "empty",
+            },
+            {
+              type: "slider",
+              yAxisIndex: 0,
+              show: false,
+              startValue: 0,
+              endValue: Math.min(maxVisibleRows - 1, data.length - 1),
+              filterMode: "empty",
+            },
+          ]
+        : undefined,
+      series: [
+        {
+          type: "bar",
+          data: data.map((item) => item[metric]),
+          barWidth: 7,
+          itemStyle: {
+            color: "#171717",
+            borderRadius: [999, 999, 999, 999],
+          },
+          label: {
+            show: true,
+            position: "right",
+            distance: 10,
+            color: "#4f4943",
+            fontSize: 12,
+            formatter: ((params: any) => formatMetricValue(metric, Number(params?.value || 0))) as any,
+          },
+          showBackground: true,
+          backgroundStyle: {
+            color: "#ebe7e3",
+            borderRadius: [999, 999, 999, 999],
+          },
+        },
+      ],
+    };
+  }, [data, emptyText, labelWidth, maxVisibleRows, metric, scrollable]);
+
+  if (!option) {
+    return <ChartEmpty text={emptyText} />;
+  }
+
+  return <CreatorChart option={option} />;
+}
+
+function TrendChart({ data }: { data: GroupPoint[] }) {
+  const points = data;
+  const option = useMemo<EChartsOption | null>(() => {
+    const max = Math.max(...points.map((item) => item.playCount), 0);
+    if (points.length < 2 || max <= 0) return null;
+
+    return {
+      animation: false,
+      grid: {
+        top: 8,
+        right: 16,
+        bottom: 8,
+        left: 8,
+        containLabel: true,
+      },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: {
+          type: "line",
+          lineStyle: {
+            color: "rgba(17,17,17,0.2)",
+            type: "dashed",
+          },
+        },
+        backgroundColor: "rgba(255,255,255,0.98)",
+        borderColor: "#e0dbd5",
+        textStyle: { color: "#171717", fontSize: 12 },
+        formatter(params: unknown) {
+          const row = Array.isArray(params) ? params[0] : params;
+          if (!row || typeof row !== "object") return "暂无数据";
+          const datum = row as { axisValueLabel?: string; value?: number };
+          return `${datum.axisValueLabel || ""}<br/>播放量 ${plainNumber(Number(datum.value || 0))}`;
+        },
+      },
+      xAxis: {
+        type: "category",
+        boundaryGap: false,
+        data: points.map((item) => item.name),
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+      },
+      yAxis: {
+        type: "value",
+        show: false,
+      },
+      series: [
+        {
+          type: "line",
+          data: points.map((item) => item.playCount),
+          smooth: false,
+          symbol: "circle",
+          symbolSize: 6,
+          lineStyle: {
+            color: "#171717",
+            width: 2.5,
+          },
+          itemStyle: {
+            color: "#171717",
+          },
+          areaStyle: {
+            color: "rgba(17,17,17,0.06)",
+          },
+        },
+      ],
+    };
+  }, [points]);
+
+  if (!option) {
+    return <ChartEmpty text="暂无可绘制趋势" />;
+  }
+
+  return (
+    <div className="creator-trend-chart">
+      <div className="creator-trend-chart-body">
+        <CreatorChart option={option} />
+      </div>
+      <div className="creator-trend-axis">
+        <span>{points[0]?.name}</span>
+        <span>{points[points.length - 1]?.name}</span>
+      </div>
+    </div>
+  );
+}
+
+function DailyMetricBarChart({
   data,
   metric,
   emptyText,
@@ -129,70 +420,91 @@ function MiniBarChart({
   metric: keyof Pick<GroupPoint, "playCount" | "salesAmount" | "interactionCount" | "itemCount">;
   emptyText: string;
 }) {
-  const top = data.slice(0, 8);
-  const max = Math.max(...top.map((item) => item[metric]), 0);
-  if (!top.length || max <= 0) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} />;
+  const option = useMemo<EChartsOption | null>(() => {
+    if (!data.length) return null;
+    const values = data.map((item) => item[metric]);
+    const max = Math.max(...values, 0);
+    if (max <= 0) return null;
+
+    return {
+      animation: false,
+      grid: {
+        top: 24,
+        right: 18,
+        bottom: 60,
+        left: 18,
+        containLabel: true,
+      },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "shadow" },
+        backgroundColor: "rgba(255,255,255,0.98)",
+        borderColor: "#e0dbd5",
+        textStyle: { color: "#171717", fontSize: 12 },
+        formatter(params: unknown) {
+          const row = Array.isArray(params) ? params[0] : params;
+          if (!row || typeof row !== "object") return emptyText;
+          const datum = row as { axisValueLabel?: string; value?: number };
+          return `${datum.axisValueLabel || ""}<br/>${formatMetricValue(metric, Number(datum.value || 0))}`;
+        },
+      },
+      xAxis: {
+        type: "category",
+        data: data.map((item) => item.name),
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
+          color: "#7b746d",
+          fontSize: 11,
+          rotate: 45,
+          margin: 12,
+        },
+      },
+      yAxis: {
+        type: "value",
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: {
+          lineStyle: {
+            color: "rgba(123,116,109,0.14)",
+          },
+        },
+        axisLabel: {
+          color: "#8a837d",
+          fontSize: 11,
+          formatter: (value: number) => (metric === "salesAmount" ? `${Math.round(value)}` : compactNumber(value)),
+        },
+      },
+      series: [
+        {
+          type: "bar",
+          data: values,
+          barWidth: "48%",
+          itemStyle: {
+            color: "#171717",
+            borderRadius: [5, 5, 0, 0],
+          },
+          label: {
+            show: true,
+            position: "top",
+            color: "#4f4943",
+            fontSize: 11,
+            distance: 6,
+            formatter: ((params: any) => {
+              const value = Number(params?.value || 0);
+              return value > 0 ? formatMetricValue(metric, value) : "";
+            }) as any,
+          },
+        },
+      ],
+    };
+  }, [data, emptyText, metric]);
+
+  if (!option) {
+    return <ChartEmpty text={emptyText} />;
   }
 
-  return (
-    <div className="creator-bar-list">
-      {top.map((item) => {
-        const width = `${Math.max(5, (item[metric] / max) * 100)}%`;
-        return (
-          <div className="creator-bar-row" key={item.name}>
-            <Tooltip title={item.name}>
-              <Text ellipsis className="creator-bar-name">
-                {item.name || "未分组"}
-              </Text>
-            </Tooltip>
-            <div className="creator-bar-track" aria-hidden>
-              <div className="creator-bar-fill" style={{ width }} />
-            </div>
-            <Text className="creator-bar-number">
-              {metric === "salesAmount" ? money(item[metric]) : compactNumber(item[metric])}
-            </Text>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function TrendChart({ data }: { data: GroupPoint[] }) {
-  const points = data.slice(-14);
-  const width = 640;
-  const height = 150;
-  const padX = 28;
-  const padY = 18;
-  const max = Math.max(...points.map((item) => item.playCount), 0);
-  if (points.length < 2 || max <= 0) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可绘制趋势" />;
-  }
-  const step = (width - padX * 2) / Math.max(points.length - 1, 1);
-  const coords = points.map((item, index) => {
-    const x = padX + index * step;
-    const y = height - padY - (item.playCount / max) * (height - padY * 2);
-    return { x, y, item };
-  });
-  const d = coords.map((p, index) => `${index === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-  const fillD = `${d} L ${coords[coords.length - 1].x} ${height - padY} L ${coords[0].x} ${height - padY} Z`;
-
-  return (
-    <div className="creator-trend-wrap">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="播放量趋势">
-        <path d={fillD} fill="rgba(17,17,17,0.06)" />
-        <path d={d} fill="none" stroke="var(--vol-primary)" strokeWidth="2.5" strokeLinecap="round" />
-        {coords.map((p) => (
-          <circle key={p.item.name} cx={p.x} cy={p.y} r="3" fill="var(--vol-primary)" />
-        ))}
-      </svg>
-      <div className="creator-trend-axis">
-        <span>{points[0]?.name}</span>
-        <span>{points[points.length - 1]?.name}</span>
-      </div>
-    </div>
-  );
+  return <CreatorChart option={option} />;
 }
 
 function groupBy(items: CreatorInsightItem[], key: (item: CreatorInsightItem) => string): GroupPoint[] {
@@ -217,6 +529,43 @@ function groupBy(items: CreatorInsightItem[], key: (item: CreatorInsightItem) =>
   return [...map.values()];
 }
 
+function emptyGroupPoint(name: string): GroupPoint {
+  return {
+    name,
+    playCount: 0,
+    salesAmount: 0,
+    interactionCount: 0,
+    itemCount: 0,
+  };
+}
+
+function buildDailySeries(items: CreatorInsightItem[], range: [Dayjs, Dayjs] | null): GroupPoint[] {
+  const grouped = new Map<string, GroupPoint>();
+  for (const item of items) {
+    if (!item.publishDate) continue;
+    const name = item.publishDate;
+    const current = grouped.get(name) || emptyGroupPoint(name);
+    current.playCount += item.playCount || 0;
+    current.salesAmount += item.salesAmount || 0;
+    current.interactionCount += interactionCount(item);
+    current.itemCount += 1;
+    grouped.set(name, current);
+  }
+
+  if (!range) {
+    return [...grouped.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  const start = range[0].startOf("day");
+  const end = range[1].startOf("day");
+  const days: GroupPoint[] = [];
+  for (let current = start; !current.isAfter(end, "day"); current = current.add(1, "day")) {
+    const key = current.format("YYYY-MM-DD");
+    days.push(grouped.get(key) || emptyGroupPoint(key));
+  }
+  return days;
+}
+
 export default function CreatorPage() {
   const { message } = App.useApp();
   const [accounts, setAccounts] = useState<CreatorAccount[]>([]);
@@ -229,8 +578,10 @@ export default function CreatorPage() {
   const [shopFilter, setShopFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [productionTeamFilter, setProductionTeamFilter] = useState<string[]>([]);
   const [keyword, setKeyword] = useState("");
-  const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [datePreset, setDatePreset] = useState<DatePreset>("thisMonth");
+  const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(() => dateRangeFromPreset("thisMonth"));
 
   const { startTask, isNamespaceBusy } = useTaskContext();
 
@@ -325,23 +676,32 @@ export default function CreatorPage() {
     }
   }
 
+  function handleDatePresetChange(value: DatePreset) {
+    setDatePreset(value);
+    if (value !== "custom") {
+      setDateRange(dateRangeFromPreset(value));
+    }
+  }
+
   const filteredItems = useMemo(() => {
     const q = keyword.trim().toLowerCase();
     return items.filter((item) => {
       if (shopFilter !== "all" && item.shopName !== shopFilter) return false;
       if (typeFilter !== "all" && item.workType !== typeFilter) return false;
       if (statusFilter !== "all" && item.reviewStatus !== statusFilter) return false;
-      if (dateRange && item.publishDate) {
+      if (productionTeamFilter.length && !productionTeamFilter.includes(item.productionTeam || "")) return false;
+      if (dateRange) {
+        if (!item.publishDate) return false;
         const d = dayjs(item.publishDate);
         if (d.isBefore(dateRange[0], "day") || d.isAfter(dateRange[1], "day")) return false;
       }
       if (q) {
-        const haystack = `${item.title} ${item.shopName} ${item.relatedProduct}`.toLowerCase();
+        const haystack = `${item.title} ${item.shopName} ${item.relatedProduct} ${item.productionTeam}`.toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       return true;
     });
-  }, [dateRange, items, keyword, shopFilter, statusFilter, typeFilter]);
+  }, [dateRange, items, keyword, productionTeamFilter, shopFilter, statusFilter, typeFilter]);
 
   const shopOptions = useMemo(
     () => [
@@ -376,6 +736,15 @@ export default function CreatorPage() {
     [items]
   );
 
+  const productionTeamOptions = useMemo(
+    () =>
+      Array.from(new Set(items.map((item) => item.productionTeam).filter(Boolean))).map((name) => ({
+        label: name,
+        value: name,
+      })),
+    [items]
+  );
+
   const metrics = useMemo(() => {
     const count = filteredItems.length;
     const playCount = filteredItems.reduce((sum, item) => sum + (item.playCount || 0), 0);
@@ -398,8 +767,8 @@ export default function CreatorPage() {
   );
 
   const dailyTrend = useMemo(
-    () => groupBy(filteredItems.filter((item) => item.publishDate), (item) => item.publishDate || "").sort((a, b) => a.name.localeCompare(b.name)),
-    [filteredItems]
+    () => buildDailySeries(filteredItems, dateRange),
+    [dateRange, filteredItems]
   );
 
   const columns = useMemo<TableProps<CreatorInsightItem>["columns"]>(
@@ -428,6 +797,7 @@ export default function CreatorPage() {
         ),
       },
       { title: "店铺", dataIndex: "shopName", width: 150, ellipsis: true, align: "center" },
+      { title: "制作团队", dataIndex: "productionTeam", width: 160, ellipsis: true, align: "center", render: (v) => v || "-" },
       { title: "发布时间", dataIndex: "publishTime", width: 150, render: (v) => v || "-", align: "center" },
       {
         title: "体裁",
@@ -491,83 +861,105 @@ export default function CreatorPage() {
   return (
     <div className="app-page-scroll creator-dashboard-page">
       <div className="creator-page-header">
-        <div>
-          <Title level={3} style={{ margin: 0, fontSize: 18 }}>
-            抖创数据
-          </Title>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            已入库 {plainNumber(total)} 条，最近同步：{lastImportText}
-          </Text>
+        <div className="creator-page-header-top">
+          <div className="creator-page-header-meta">
+            <Title level={3} className="creator-page-title" style={{ margin: 0, fontSize: 16 }}>
+              抖创数据
+            </Title>
+            <Text type="secondary" className="creator-page-subtitle" style={{ fontSize: 11 }}>
+              已入库 {plainNumber(total)} 条，最近同步：{lastImportText}
+            </Text>
+          </div>
+          <Space wrap>
+            <Button icon={<ReloadOutlined />} onClick={() => void fetchInsights()} loading={loadingData}>
+              刷新
+            </Button>
+            <Button
+              type="primary"
+              icon={<CloudSyncOutlined />}
+              onClick={() => void handleSyncFromFeishu()}
+              loading={syncingData}
+            >
+              从飞书入库
+            </Button>
+          </Space>
         </div>
-        <Space wrap>
-          <Button icon={<ReloadOutlined />} onClick={() => void fetchInsights()} loading={loadingData}>
-            刷新
-          </Button>
-          <Button
-            type="primary"
-            icon={<CloudSyncOutlined />}
-            onClick={() => void handleSyncFromFeishu()}
-            loading={syncingData}
-          >
-            从飞书入库
-          </Button>
-        </Space>
-      </div>
 
-      <div className="creator-action-band">
-        <Space wrap size={8}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            抖创账号：
-          </Text>
-          <ToolbarMultiSelect
-            value={toolbarMultiSelect.sanitized}
-            onChange={toolbarMultiSelect.handleChange}
-            options={toolbarMultiSelect.selectOptions}
-            placeholder="选择已登录账号"
-            minWidth={300}
-          />
-          <Button
-            className="creator-action-button"
-            icon={<DownloadOutlined />}
-            onClick={() => void handleTask("export")}
-            disabled={loadingAccounts || isNamespaceBusy("creator-export")}
-          >
-            导出
-          </Button>
-          <Button
-            className="creator-action-button"
-            icon={<CloudSyncOutlined />}
-            onClick={() => void handleTask("feishu-sync")}
-            disabled={loadingAccounts || isNamespaceBusy("creator-export")}
-          >
-            推送飞书
-          </Button>
-          <Button
-            className="creator-action-button creator-action-button-danger"
-            danger
-            icon={<SendOutlined />}
-            onClick={() => void handleTask("sync-feishu")}
-            disabled={loadingAccounts || isNamespaceBusy("creator-export")}
-          >
-            导出并推送
-          </Button>
-        </Space>
+        <div className="creator-page-header-bottom">
+          <Space wrap size={8}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              抖创账号：
+            </Text>
+            <ToolbarMultiSelect
+              value={toolbarMultiSelect.sanitized}
+              onChange={toolbarMultiSelect.handleChange}
+              options={toolbarMultiSelect.selectOptions}
+              placeholder="选择已登录账号"
+              minWidth={260}
+              size="small"
+              maxTagCount={2}
+            />
+            <Button
+              className="creator-action-button"
+              icon={<DownloadOutlined />}
+              onClick={() => void handleTask("export")}
+              disabled={loadingAccounts || isNamespaceBusy("creator-export")}
+            >
+              导出
+            </Button>
+            <Button
+              className="creator-action-button"
+              icon={<CloudSyncOutlined />}
+              onClick={() => void handleTask("feishu-sync")}
+              disabled={loadingAccounts || isNamespaceBusy("creator-export")}
+            >
+              推送飞书
+            </Button>
+            <Button
+              className="creator-action-button creator-action-button-danger"
+              danger
+              icon={<SendOutlined />}
+              onClick={() => void handleTask("sync-feishu")}
+              disabled={loadingAccounts || isNamespaceBusy("creator-export")}
+            >
+              导出并推送
+            </Button>
+          </Space>
+        </div>
       </div>
 
       <div className="creator-filter-row">
         <Select value={shopFilter} onChange={setShopFilter} options={shopOptions} showSearch style={{ width: 190 }} />
         <Select value={typeFilter} onChange={setTypeFilter} options={typeOptions} style={{ width: 130 }} />
         <Select value={statusFilter} onChange={setStatusFilter} options={statusOptions} style={{ width: 130 }} />
-        <RangePicker
-          value={dateRange ?? undefined}
-          onChange={(value) => {
-            if (!value || !value[0] || !value[1]) {
-              setDateRange(null);
-              return;
-            }
-            setDateRange([value[0].startOf("day"), value[1].startOf("day")]);
-          }}
+        <Select
+          mode="multiple"
+          allowClear
+          value={productionTeamFilter}
+          onChange={setProductionTeamFilter}
+          options={productionTeamOptions}
+          placeholder="制作团队"
+          maxTagCount="responsive"
+          style={{ width: 220 }}
         />
+        <Select
+          value={datePreset}
+          onChange={handleDatePresetChange}
+          options={DATE_PRESET_OPTIONS}
+          style={{ width: 150 }}
+        />
+        {datePreset === "custom" ? (
+          <RangePicker
+            value={dateRange ?? undefined}
+            onChange={(value) => {
+              if (!value || !value[0] || !value[1]) {
+                setDateRange(null);
+                return;
+              }
+              setDateRange([value[0].startOf("day"), value[1].startOf("day")]);
+            }}
+          />
+        ) : null}
         <Input
           allowClear
           prefix={<SearchOutlined />}
@@ -586,43 +978,95 @@ export default function CreatorPage() {
         <MetricTile label="平均完播率" value={percent(metrics.avgCompletion)} sub="仅统计有完播率记录" />
       </div>
 
-      <div className="creator-chart-grid">
-        <section className="creator-chart-panel">
-          <div className="creator-panel-title">
-            <BarChartOutlined />
-            <span>播放趋势</span>
-          </div>
-          <TrendChart data={dailyTrend} />
-        </section>
-        <section className="creator-chart-panel">
-          <div className="creator-panel-title">
-            <BarChartOutlined />
-            <span>店铺播放排行</span>
-          </div>
-          <MiniBarChart data={shopRanking} metric="playCount" emptyText="暂无店铺数据" />
-        </section>
-        <section className="creator-chart-panel">
-          <div className="creator-panel-title">
-            <BarChartOutlined />
-            <span>体裁分布</span>
-          </div>
-          <MiniBarChart data={typeRanking} metric="itemCount" emptyText="暂无体裁数据" />
-        </section>
-      </div>
+      <div className="creator-data-tabs">
+        <Tabs
+          defaultActiveKey="charts"
+          items={[
+            {
+              key: "charts",
+              label: "图表概览",
+              children: (
+                <div className="creator-chart-stack">
+                  <section className="creator-chart-panel creator-chart-panel-wide">
+                    <div className="creator-panel-title">
+                      <BarChartOutlined />
+                      <span>销售额</span>
+                    </div>
+                    <div className="creator-chart-body creator-chart-body-wide">
+                      <DailyMetricBarChart
+                        data={dailyTrend}
+                        metric="salesAmount"
+                        emptyText="当前筛选范围暂无可绘制销售额数据"
+                      />
+                    </div>
+                  </section>
 
-      <div className="creator-table-wrap">
-        <Table
-          rowKey="recordId"
-          size="small"
-          bordered={false}
-          loading={loadingData}
-          dataSource={filteredItems}
-          columns={columns}
-          tableLayout="fixed"
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (count) => `共 ${count} 条` }}
-          scroll={{ x: "max-content" }}
-          sticky
-          locale={{ emptyText: "暂无抖创数据，请点击「从飞书入库」" }}
+                  <div className="creator-chart-grid">
+                    <section className="creator-chart-panel">
+                      <div className="creator-panel-title">
+                        <BarChartOutlined />
+                        <span>播放趋势</span>
+                      </div>
+                      <div className="creator-chart-body">
+                        <TrendChart data={dailyTrend} />
+                      </div>
+                    </section>
+                    <section className="creator-chart-panel">
+                      <div className="creator-panel-title">
+                        <BarChartOutlined />
+                        <span>店铺播放排行</span>
+                      </div>
+                      <div className="creator-chart-body">
+                        <MiniBarChart
+                          data={shopRanking}
+                          metric="playCount"
+                          emptyText="暂无店铺数据"
+                          scrollable
+                          maxVisibleRows={5}
+                          labelWidth={164}
+                        />
+                      </div>
+                    </section>
+                    <section className="creator-chart-panel">
+                      <div className="creator-panel-title">
+                        <BarChartOutlined />
+                        <span>体裁分布</span>
+                      </div>
+                      <div className="creator-chart-body">
+                        <MiniBarChart
+                          data={typeRanking}
+                          metric="itemCount"
+                          emptyText="暂无体裁数据"
+                          labelWidth={92}
+                        />
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: "table",
+              label: "数据明细",
+              children: (
+                <div className="creator-table-wrap">
+                  <Table
+                    rowKey="recordId"
+                    size="small"
+                    bordered={false}
+                    loading={loadingData}
+                    dataSource={filteredItems}
+                    columns={columns}
+                    tableLayout="fixed"
+                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (count) => `共 ${count} 条` }}
+                    scroll={{ x: "max-content" }}
+                    sticky
+                    locale={{ emptyText: "暂无抖创数据，请点击「从飞书入库」" }}
+                  />
+                </div>
+              ),
+            },
+          ]}
         />
       </div>
     </div>

@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import { getDb } from "@/lib/db/mongo";
 import { getConfig } from "@/lib/configService";
 import { readBitable } from "@/lib/feishu/core/readBitable";
+import { getValidAccessToken } from "@/lib/feishu/core/oauth";
+import { listBitableFields } from "@/lib/feishu/core/bitable";
 
 const COLLECTION = "creator_bitable_items";
 
@@ -76,6 +78,33 @@ function pickString(fields: Record<string, unknown>, names: string[]): string {
   return valueToString(pickField(fields, names));
 }
 
+function valueToOptionNameString(value: unknown, optionNameMap: Map<string, string>): string {
+  if (value == null) return "";
+  if (typeof value === "string") {
+    const parts = value
+      .split(/[、,，]/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (parts.length > 1) {
+      return Array.from(new Set(parts.map((part) => optionNameMap.get(part) || part))).join("、");
+    }
+    return optionNameMap.get(value.trim()) || value.trim();
+  }
+  if (Array.isArray(value)) {
+    return Array.from(new Set(value.map((item) => valueToOptionNameString(item, optionNameMap)).filter(Boolean))).join("、");
+  }
+  const text = valueToString(value);
+  return optionNameMap.get(text) || text;
+}
+
+function pickOptionNameString(
+  fields: Record<string, unknown>,
+  names: string[],
+  optionNameMap: Map<string, string>
+): string {
+  return valueToOptionNameString(pickField(fields, names), optionNameMap);
+}
+
 function toNumber(value: unknown): number | null {
   if (value == null || value === "") return null;
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -142,12 +171,40 @@ function stableRecordId(fields: Record<string, unknown>, index: number): string 
   return `local_${crypto.createHash("sha1").update(key).digest("hex").slice(0, 18)}`;
 }
 
-function normalizeCreatorRecord(record: any, index: number, importedAt: Date): StoredCreatorInsightItem {
+function fieldOptionNameMap(field: any): Map<string, string> {
+  const options = field?.property?.options;
+  if (!Array.isArray(options)) return new Map();
+  return new Map(
+    options
+      .map((option: any) => [String(option?.id || "").trim(), String(option?.name || "").trim()] as const)
+      .filter(([id, name]) => id && name)
+  );
+}
+
+async function buildLookupOptionNameMap(data: any, fieldName: string): Promise<Map<string, string>> {
+  const sourceField = data?.fieldMapByName?.[fieldName];
+  const targetTable = String(sourceField?.property?.filter_info?.target_table || "").trim();
+  const targetField = String(sourceField?.property?.target_field || "").trim();
+  if (!targetTable || !targetField) return fieldOptionNameMap(sourceField);
+
+  const cache = await getValidAccessToken(data.config);
+  const targetFields = await listBitableFields(data.config, cache.accessToken, targetTable);
+  const field = targetFields.find((item: any) => item?.field_id === targetField);
+  return fieldOptionNameMap(field);
+}
+
+function normalizeCreatorRecord(
+  record: any,
+  index: number,
+  importedAt: Date,
+  optionMaps: { productionTeam?: Map<string, string> } = {}
+): StoredCreatorInsightItem {
   const fields = (record?.fields || {}) as Record<string, unknown>;
   const publishDateValue = pickField(fields, ["发布时间", "发布日"]);
   const publishDate = parseDateValue(publishDateValue);
   const recordId = String(record?.record_id || record?.recordId || "").trim() || stableRecordId(fields, index);
   const title = pickString(fields, ["作品标题", "作品名", "作品名称"]);
+  const productionTeamOptionMap = optionMaps.productionTeam || new Map<string, string>();
 
   return {
     recordId,
@@ -173,7 +230,7 @@ function normalizeCreatorRecord(record: any, index: number, importedAt: Date): S
     productId: pickString(fields, ["商品ID"]),
     relatedProduct: pickString(fields, ["关联产品"]),
     videoLink: pickString(fields, ["视频链接"]),
-    productionTeam: pickString(fields, ["制作团队"]),
+    productionTeam: pickOptionNameString(fields, ["制作团队"], productionTeamOptionMap),
     rawFields: fields,
     createdAt: importedAt,
     importedAt,
@@ -198,8 +255,9 @@ export async function syncCreatorInsightsFromFeishu() {
   const data = await readBitable("creator");
   const importedAt = new Date();
   const records = Array.isArray(data.records) ? data.records : [];
+  const productionTeamMap = await buildLookupOptionNameMap(data, "制作团队");
   const normalized = records.map((record: unknown, index: number) =>
-    normalizeCreatorRecord(record, index, importedAt)
+    normalizeCreatorRecord(record, index, importedAt, { productionTeam: productionTeamMap })
   );
   const db = await getDb();
   if (normalized.length) {
