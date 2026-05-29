@@ -494,9 +494,7 @@ async function isCoverPublishBlocking(page) {
   return page
     .evaluate(() => {
       const text = document.body?.innerText || "";
-      return /封面检测中|封面设置中|Ai智能推荐封面生成中|AI智能推荐封面生成中/.test(
-        text
-      );
+      return /封面检测中|封面设置中/.test(text);
     })
     .catch(() => false);
 }
@@ -1114,8 +1112,7 @@ async function readVideoUploadState(page) {
             src
           )
         );
-      const generatingCover =
-        /Ai智能推荐封面生成中|AI智能推荐封面生成中|生成中/.test(allText);
+      const generatingCover = false;
 
       return {
         hasVideoPreview: videos.length > 0,

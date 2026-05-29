@@ -79,18 +79,8 @@ async function selectCartOption(page) {
   throw new Error(`未找到购物车选项；当前可见选项: ${texts.join(" / ") || "(空)"}`);
 }
 
-async function waitForCoverRecommendationSettled(page, timeoutMs = 45000) {
-  const started = Date.now();
-  while (Date.now() - started < scaledMs(timeoutMs)) {
-    const generating = await page
-      .evaluate(() =>
-        /Ai智能推荐封面生成中|AI智能推荐封面生成中/.test(document.body?.innerText || "")
-      )
-      .catch(() => false);
-    if (!generating) return;
-    await page.waitForTimeout(scaledMs(500));
-  }
-  info("封面推荐仍在生成中，继续挂车步骤");
+async function waitForCoverRecommendationSettled(_page, _timeoutMs = 45000) {
+  // 「AI 智能推荐封面生成中」不参与阻塞，挂车步骤无需等待
 }
 
 async function isCartUiVisible(page) {
