@@ -46,6 +46,41 @@ Both layers share the same `scripts/run.js` routing table and namespace concurre
 - **`scripts/**/*.js`**：仍由 `node scripts/run.js` 子进程执行，保持 CommonJS（`require` / `module.exports`）。API 若需脚本侧工具函数，优先抽到 `lib/`，或在路由顶层 `import` CJS 模块（依赖 `esModuleInterop`）。
 - **环境变量**：需在路由里加载 `.env` 时用 `import dotenv from "dotenv"` 后 `dotenv.config()`，或 `import "dotenv/config"`。
 
+### 浏览器端 localStorage 缓存
+
+前端需要在浏览器里记住 UI 状态（筛选条件、工具栏多选、主题等）时，**不要**在 `app/`、`lib/`、`hooks/`、`contexts/` 里直接调用 `window.localStorage`，统一走 **`lib/browserStorage.ts`**：
+
+| 方法 | 用途 |
+| --- | --- |
+| `readLocalStorageJson(key, fallback)` | 读 JSON，解析失败或无值时返回 `fallback` |
+| `readLocalStorageJsonNullable(key)` | 读 JSON，无值返回 `null` |
+| `writeLocalStorageJson(key, value)` | 写 JSON（返回是否成功） |
+| `readLocalStorageString` / `writeLocalStorageRaw` | 纯字符串（如 UI 主题） |
+| `removeLocalStorageItem(key)` | 删除项 |
+
+封装已处理 SSR（`typeof window`）、`JSON.parse` 异常、quota / 隐私模式写入失败。
+
+**推荐分层：**
+
+1. **底层**：`lib/browserStorage.ts` — 只做 key 读写，不含业务校验。
+2. **领域层**：`lib/<domain>/*-cache.ts` 或模块内导出常量 + `read*` / `write*` — 定义 cache key、字段结构与默认值/校验；页面与 hook 只调这一层。
+
+**已有 cache key（勿随意改名，否则用户本地状态会丢）：**
+
+| Key | 模块 | 内容 |
+| --- | --- | --- |
+| `creator:selectedAccounts` | `hooks/useToolbarMultiSelect`（`/creator` 导出区） | 已选抖创账号 |
+| `creator:insightsFilters` | `lib/creator/insights-filter-cache.ts`（`/creator` 数据看板） | 店铺/体裁/状态/制作团队/关键词/日期预设；自定义范围另存 `customDateStart`/`customDateEnd`（`YYYY-MM-DD`） |
+| `shop:selectedShopNames` | `hooks/useToolbarMultiSelect`（`/shop`） | 已选店铺 |
+| `autogetdy-ui-theme` | `contexts/UIThemeContext.tsx`（`APP_UI_THEME_STORAGE_KEY`） | `intercom` \| `voltagent` |
+| `ai-video:seedance-config` | `lib/ai-video/cache.ts` | Seedance 页配置 |
+| `ai-video:seedance-reference-resources` | `lib/ai-video/cache.ts` | 参考资源列表 |
+| `ai-video:seedance-clips` | `lib/ai-video/cache.ts` | 旧版 clips（仅清理遗留） |
+
+**例外：** `app/layout.tsx` 内联脚本在 React hydration 前读取主题，仍直接使用 `localStorage.getItem`（须与 `APP_UI_THEME_STORAGE_KEY` 一致）。
+
+新增页面需持久化筛选/表单状态时：先加 `lib/.../*-cache.ts`，内部用 `browserStorage`；在 `useEffect` 挂载时 hydrate，筛选变更后写入。更多示例见 [`docs/browser-storage.md`](docs/browser-storage.md)。
+
 ### 浏览器测试（playwright-cli）
 
 需要用真实浏览器做页面验证、DOM 调试或复现 Playwright 自动化流程时：**先读取并遵循本仓库的 playwright-cli skill**（`.claude/skills/playwright-cli/SKILL.md`），按其中的 `playwright-cli` 命令与 snapshot / refs 交互；不要凭空写选择器或臆测页面结构，在操作的时候每一步操作告诉我你的思考与后续详细执行步骤。
@@ -82,6 +117,8 @@ Pages call API routes → API enqueues a task → the Playwright script scrapes 
 The service normalizes fields such as `所属店铺`, `发布时间`, `体裁`, `审核状态`, `播放量`, `完播率`, `5秒完播率`, `2秒跳出率`, `点赞量`, `分享量`, `评论量`, `收藏量`, `主页访量`, `增粉`, `销售额`, `商品ID`, `关联产品`, and `视频链接`. Keep the raw Feishu row in `rawFields` so new metrics can be added without another full schema migration.
 
 When calling the Feishu reader directly from app code, remember that the bitable config loader expects `PROJECT_CONFIG_JSON`; `syncCreatorInsightsFromFeishu()` prepares this from Mongo `app_config` before calling `readBitable("creator")`.
+
+看板筛选（店铺、体裁、日期等）通过 `lib/creator/insights-filter-cache.ts` 写入 `creator:insightsFilters`，刷新页面后自动恢复（见上文「浏览器端 localStorage 缓存」）。
 
 ### SSE task monitoring
 
@@ -211,6 +248,7 @@ To add a new page:
 3. Add API routes under `app/api/<route>/`
 4. If it triggers a Playwright task: register a route in `scripts/run.js`, add namespace to `TaskNamespace` in `lib/tasks/taskManager.ts`
 5. If persistent data: create a service in `lib/`, add MongoDB indexes in `lib/db/mongo.ts`, define types in `types/index.ts`
+6. If browser UI state should persist across visits: add `lib/<domain>/*-cache.ts` using `lib/browserStorage.ts` (do not call `localStorage` directly)
 
 ### LLM 调用规范
 

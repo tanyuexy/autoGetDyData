@@ -1,5 +1,10 @@
 import type { UploadFile } from "antd/es/upload/interface";
 import {
+  readLocalStorageJson,
+  removeLocalStorageItem,
+  writeLocalStorageJson,
+} from "@/lib/browserStorage";
+import {
   CONFIG_CACHE_KEY,
   LEGACY_CLIPS_CACHE_KEY,
   REFERENCE_CACHE_KEY,
@@ -7,34 +12,19 @@ import {
 import type { AiVideoCachedConfig, ClipItem, GenerationMode, ReferenceResource } from "./types";
 
 export function readLegacyCachedClips(): ClipItem[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(LEGACY_CLIPS_CACHE_KEY) || "[]");
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item) => item && typeof item.id === "string");
-  } catch {
-    return [];
-  }
+  const parsed = readLocalStorageJson<ClipItem[]>(LEGACY_CLIPS_CACHE_KEY, []);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((item): item is ClipItem => Boolean(item && typeof item.id === "string"));
 }
 
 export function readCachedReferenceResources(): ReferenceResource[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(REFERENCE_CACHE_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  const parsed = readLocalStorageJson<unknown[]>(REFERENCE_CACHE_KEY, []);
+  return Array.isArray(parsed) ? (parsed as ReferenceResource[]) : [];
 }
 
 export function readCachedConfig(): AiVideoCachedConfig {
-  if (typeof window === "undefined") return {};
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(CONFIG_CACHE_KEY) || "{}");
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
+  const parsed = readLocalStorageJson<unknown>(CONFIG_CACHE_KEY, {});
+  return parsed && typeof parsed === "object" ? (parsed as AiVideoCachedConfig) : {};
 }
 
 export function isGenerationMode(value: unknown): value is GenerationMode {
@@ -70,35 +60,19 @@ export function serializeUploadFiles(files: UploadFile[]): UploadFile[] {
   }));
 }
 
-function readStoredConfig(): AiVideoCachedConfig {
-  try {
-    return JSON.parse(window.localStorage.getItem(CONFIG_CACHE_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
 export function writeStoredConfig(patch: AiVideoCachedConfig) {
-  try {
-    const current = readStoredConfig();
-    window.localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify({ ...current, ...patch }));
-  } catch {}
+  const current = readCachedConfig();
+  writeLocalStorageJson(CONFIG_CACHE_KEY, { ...current, ...patch });
 }
 
 export function writeReferenceResourcesCache(resources: ReferenceResource[]) {
-  try {
-    window.localStorage.setItem(REFERENCE_CACHE_KEY, JSON.stringify(resources));
-  } catch {}
+  writeLocalStorageJson(REFERENCE_CACHE_KEY, resources);
 }
 
 export function clearReferenceResourcesCache() {
-  try {
-    window.localStorage.removeItem(REFERENCE_CACHE_KEY);
-  } catch {}
+  removeLocalStorageItem(REFERENCE_CACHE_KEY);
 }
 
 export function clearLegacyClipsCache() {
-  try {
-    window.localStorage.removeItem(LEGACY_CLIPS_CACHE_KEY);
-  } catch {}
+  removeLocalStorageItem(LEGACY_CLIPS_CACHE_KEY);
 }

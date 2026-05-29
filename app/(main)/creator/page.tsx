@@ -21,7 +21,6 @@ import {
   BarChartOutlined,
   CloudSyncOutlined,
   DownloadOutlined,
-  ReloadOutlined,
   SearchOutlined,
   SendOutlined,
 } from "@ant-design/icons";
@@ -32,6 +31,18 @@ import { useTaskContext } from "@/contexts/TaskContext";
 import { useToolbarMultiSelect } from "@/hooks/useToolbarMultiSelect";
 import { SELECT_ALL_CREATOR_EXPORT } from "@/lib/toolbarMultiSelect";
 import { semanticTagStyle } from "@/lib/semanticTagStyles";
+import type { CreatorInsightItem } from "@/lib/creator/insights-types";
+import {
+  normalizeWorkTitleKey,
+  sumShopSalesEntries,
+  sumShopSalesEntriesForItems,
+} from "@/lib/creator/insights-types";
+import {
+  readCreatorInsightsFiltersCache,
+  writeCreatorInsightsFiltersCache,
+  type CreatorInsightsDatePreset,
+  type CreatorInsightsFiltersCache,
+} from "@/lib/creator/insights-filter-cache";
 import type { CreatorAccount } from "@/types";
 
 const { Text, Title } = Typography;
@@ -39,17 +50,7 @@ const { RangePicker } = DatePicker;
 
 const CREATOR_SELECTION_CACHE_KEY = "creator:selectedAccounts";
 
-type DatePreset =
-  | "all"
-  | "today"
-  | "tomorrow"
-  | "yesterday"
-  | "last7"
-  | "thisWeek"
-  | "lastWeek"
-  | "thisMonth"
-  | "lastMonth"
-  | "custom";
+type DatePreset = CreatorInsightsDatePreset;
 
 const DATE_PRESET_OPTIONS: { label: string; value: DatePreset }[] = [
   { label: "全部日期", value: "all" },
@@ -63,34 +64,6 @@ const DATE_PRESET_OPTIONS: { label: string; value: DatePreset }[] = [
   { label: "上月", value: "lastMonth" },
   { label: "自定义范围", value: "custom" },
 ];
-
-type CreatorInsightItem = {
-  id: string;
-  recordId: string;
-  title: string;
-  shopName: string;
-  publishTime: string | null;
-  publishDate: string | null;
-  workType: string;
-  reviewStatus: string;
-  playCount: number;
-  completionRate: number | null;
-  fiveSecondCompletionRate: number | null;
-  coverClickRate: number | null;
-  twoSecondBounceRate: number | null;
-  avgPlayDuration: number | null;
-  likeCount: number;
-  shareCount: number;
-  commentCount: number;
-  favoriteCount: number;
-  profileVisitCount: number;
-  followerCount: number;
-  salesAmount: number;
-  productId: string;
-  relatedProduct: string;
-  videoLink: string;
-  productionTeam: string;
-};
 
 type GroupPoint = {
   name: string;
@@ -166,17 +139,30 @@ function dateRangeFromPreset(preset: DatePreset): [Dayjs, Dayjs] | null {
   }
 }
 
+function dateRangeFromFiltersCache(cached: CreatorInsightsFiltersCache): [Dayjs, Dayjs] | null {
+  if (cached.datePreset === "custom") {
+    if (!cached.customDateStart || !cached.customDateEnd) return null;
+    const start = dayjs(cached.customDateStart, "YYYY-MM-DD");
+    const end = dayjs(cached.customDateEnd, "YYYY-MM-DD");
+    if (!start.isValid() || !end.isValid()) return null;
+    return [start.startOf("day"), end.startOf("day")];
+  }
+  return dateRangeFromPreset(cached.datePreset);
+}
+
 function MetricTile({
   label,
   value,
   sub,
+  tone = "neutral",
 }: {
   label: string;
   value: string;
   sub?: string;
+  tone?: "neutral" | "volume" | "engagement" | "sales" | "publishSales" | "rate";
 }) {
   return (
-    <div className="creator-metric-tile">
+    <div className={`creator-metric-tile creator-metric-tile-${tone}`}>
       <Text type="secondary" style={{ fontSize: 12 }}>
         {label}
       </Text>
@@ -198,13 +184,61 @@ function ChartEmpty({ text }: { text: string }) {
   );
 }
 
+function formatChartDayLabel(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match ? `${match[2]}/${match[3]}` : value;
+}
+
+const CREATOR_CHART_COLORS = {
+  sales: "#2563eb",
+  salesLight: "#7dd3fc",
+  play: "#0f766e",
+  playLight: "#5eead4",
+  rank: "#4f46e5",
+  rankLight: "#c4b5fd",
+  count: "#be185d",
+  countLight: "#f9a8d4",
+  neutralText: "#3f3a34",
+  axisText: "#7a736b",
+  gridLine: "rgba(78,91,112,0.12)",
+  track: "#e7edf3",
+};
+
+function chartLinearColor(from: string, to: string) {
+  return {
+    type: "linear" as const,
+    x: 0,
+    y: 0,
+    x2: 1,
+    y2: 0,
+    colorStops: [
+      { offset: 0, color: from },
+      { offset: 1, color: to },
+    ],
+  };
+}
+
+function chartVerticalColor(from: string, to: string) {
+  return {
+    type: "linear" as const,
+    x: 0,
+    y: 0,
+    x2: 0,
+    y2: 1,
+    colorStops: [
+      { offset: 0, color: from },
+      { offset: 1, color: to },
+    ],
+  };
+}
+
 function CreatorChart({ option }: { option: EChartsOption }) {
   return (
     <ReactECharts
       option={option}
       notMerge
       lazyUpdate
-      style={{ width: "100%", height: "100%" }}
+      style={{ width: "100%", height: "100%", minHeight: 0 }}
       opts={{ renderer: "svg" }}
     />
   );
@@ -229,9 +263,15 @@ function MiniBarChart({
     const max = Math.max(...data.map((item) => item[metric]), 0);
     if (!data.length || max <= 0) return null;
     const axisMax = max * 1.18;
+    const colorFrom = metric === "itemCount" ? CREATOR_CHART_COLORS.countLight : CREATOR_CHART_COLORS.rankLight;
+    const colorTo = metric === "itemCount" ? CREATOR_CHART_COLORS.count : CREATOR_CHART_COLORS.rank;
 
     return {
-      animation: false,
+      animation: true,
+      animationDuration: 700,
+      animationDurationUpdate: 360,
+      animationEasing: "cubicOut",
+      animationDelay: (index: number) => index * 45,
       grid: {
         top: 6,
         right: 18,
@@ -244,7 +284,7 @@ function MiniBarChart({
         axisPointer: { type: "shadow" },
         backgroundColor: "rgba(255,255,255,0.98)",
         borderColor: "#e0dbd5",
-        textStyle: { color: "#171717", fontSize: 12 },
+        textStyle: { color: "#2f2b28", fontSize: 12 },
         formatter(params: unknown) {
           const row = Array.isArray(params) ? params[0] : params;
           if (!row || typeof row !== "object") return emptyText;
@@ -298,20 +338,20 @@ function MiniBarChart({
           data: data.map((item) => item[metric]),
           barWidth: 7,
           itemStyle: {
-            color: "#171717",
+            color: chartLinearColor(colorFrom, colorTo),
             borderRadius: [999, 999, 999, 999],
           },
           label: {
             show: true,
             position: "right",
             distance: 10,
-            color: "#4f4943",
+            color: CREATOR_CHART_COLORS.neutralText,
             fontSize: 12,
             formatter: ((params: any) => formatMetricValue(metric, Number(params?.value || 0))) as any,
           },
           showBackground: true,
           backgroundStyle: {
-            color: "#ebe7e3",
+            color: CREATOR_CHART_COLORS.track,
             borderRadius: [999, 999, 999, 999],
           },
         },
@@ -333,7 +373,10 @@ function TrendChart({ data }: { data: GroupPoint[] }) {
     if (points.length < 2 || max <= 0) return null;
 
     return {
-      animation: false,
+      animation: true,
+      animationDuration: 900,
+      animationDurationUpdate: 420,
+      animationEasing: "cubicOut",
       grid: {
         top: 8,
         right: 16,
@@ -346,13 +389,13 @@ function TrendChart({ data }: { data: GroupPoint[] }) {
         axisPointer: {
           type: "line",
           lineStyle: {
-            color: "rgba(17,17,17,0.2)",
+            color: "rgba(15,118,110,0.24)",
             type: "dashed",
           },
         },
         backgroundColor: "rgba(255,255,255,0.98)",
         borderColor: "#e0dbd5",
-        textStyle: { color: "#171717", fontSize: 12 },
+        textStyle: { color: "#2f2b28", fontSize: 12 },
         formatter(params: unknown) {
           const row = Array.isArray(params) ? params[0] : params;
           if (!row || typeof row !== "object") return "暂无数据";
@@ -380,14 +423,14 @@ function TrendChart({ data }: { data: GroupPoint[] }) {
           symbol: "circle",
           symbolSize: 6,
           lineStyle: {
-            color: "#171717",
+            color: CREATOR_CHART_COLORS.play,
             width: 2.5,
           },
           itemStyle: {
-            color: "#171717",
+            color: CREATOR_CHART_COLORS.play,
           },
           areaStyle: {
-            color: "rgba(17,17,17,0.06)",
+            color: chartVerticalColor("rgba(15,118,110,0.2)", "rgba(15,118,110,0.03)"),
           },
         },
       ],
@@ -415,10 +458,13 @@ function DailyMetricBarChart({
   data,
   metric,
   emptyText,
+  showAverageLine = false,
 }: {
   data: GroupPoint[];
   metric: keyof Pick<GroupPoint, "playCount" | "salesAmount" | "interactionCount" | "itemCount">;
   emptyText: string;
+  /** 区间销售额等场景：展示日均水平虚线 */
+  showAverageLine?: boolean;
 }) {
   const option = useMemo<EChartsOption | null>(() => {
     if (!data.length) return null;
@@ -426,13 +472,22 @@ function DailyMetricBarChart({
     const max = Math.max(...values, 0);
     if (max <= 0) return null;
 
+    const denseAxis = data.length > 12;
+    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const averageLabel =
+      metric === "salesAmount" ? `日均 ${money(average)}` : `日均 ${formatMetricValue(metric, average)}`;
+
     return {
-      animation: false,
+      animation: true,
+      animationDuration: 850,
+      animationDurationUpdate: 420,
+      animationEasing: "cubicOut",
+      animationDelay: (index: number) => index * 24,
       grid: {
-        top: 24,
-        right: 18,
-        bottom: 60,
-        left: 18,
+        top: showAverageLine ? 28 : 18,
+        right: showAverageLine ? 72 : 12,
+        bottom: denseAxis ? 28 : 20,
+        left: 8,
         containLabel: true,
       },
       tooltip: {
@@ -440,7 +495,7 @@ function DailyMetricBarChart({
         axisPointer: { type: "shadow" },
         backgroundColor: "rgba(255,255,255,0.98)",
         borderColor: "#e0dbd5",
-        textStyle: { color: "#171717", fontSize: 12 },
+        textStyle: { color: "#2f2b28", fontSize: 12 },
         formatter(params: unknown) {
           const row = Array.isArray(params) ? params[0] : params;
           if (!row || typeof row !== "object") return emptyText;
@@ -454,10 +509,12 @@ function DailyMetricBarChart({
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
-          color: "#7b746d",
+          color: CREATOR_CHART_COLORS.axisText,
           fontSize: 11,
-          rotate: 45,
-          margin: 12,
+          rotate: denseAxis ? 35 : 0,
+          margin: 6,
+          hideOverlap: !denseAxis,
+          formatter: (value: string) => formatChartDayLabel(value),
         },
       },
       yAxis: {
@@ -466,7 +523,7 @@ function DailyMetricBarChart({
         axisTick: { show: false },
         splitLine: {
           lineStyle: {
-            color: "rgba(123,116,109,0.14)",
+            color: CREATOR_CHART_COLORS.gridLine,
           },
         },
         axisLabel: {
@@ -481,13 +538,13 @@ function DailyMetricBarChart({
           data: values,
           barWidth: "48%",
           itemStyle: {
-            color: "#171717",
+            color: chartVerticalColor(CREATOR_CHART_COLORS.salesLight, CREATOR_CHART_COLORS.sales),
             borderRadius: [5, 5, 0, 0],
           },
           label: {
             show: true,
             position: "top",
-            color: "#4f4943",
+            color: CREATOR_CHART_COLORS.sales,
             fontSize: 11,
             distance: 6,
             formatter: ((params: any) => {
@@ -495,10 +552,29 @@ function DailyMetricBarChart({
               return value > 0 ? formatMetricValue(metric, value) : "";
             }) as any,
           },
+          markLine: showAverageLine
+            ? {
+                silent: true,
+                symbol: ["none", "none"],
+                lineStyle: {
+                  type: "dashed",
+                  color: "rgba(37, 99, 235, 0.55)",
+                  width: 1.5,
+                },
+                label: {
+                  show: true,
+                  formatter: averageLabel,
+                  color: CREATOR_CHART_COLORS.sales,
+                  fontSize: 11,
+                  position: "insideEndTop",
+                },
+                data: [{ yAxis: average, name: "日均" }],
+              }
+            : undefined,
         },
       ],
     };
-  }, [data, emptyText, metric]);
+  }, [data, emptyText, metric, showAverageLine]);
 
   if (!option) {
     return <ChartEmpty text={emptyText} />;
@@ -566,6 +642,71 @@ function buildDailySeries(items: CreatorInsightItem[], range: [Dayjs, Dayjs] | n
   return days;
 }
 
+function buildShopSalesDailySeries(items: CreatorInsightItem[], range: [Dayjs, Dayjs] | null): GroupPoint[] {
+  const grouped = new Map<string, GroupPoint>();
+  const seenTitles = new Set<string>();
+  for (const item of items) {
+    const titleKey = normalizeWorkTitleKey(item.title);
+    if (!titleKey || seenTitles.has(titleKey)) continue;
+    seenTitles.add(titleKey);
+    for (const entry of item.shopSalesEntries || []) {
+      if (!entry.salesDate) continue;
+      if (range) {
+        const salesDay = dayjs(entry.salesDate);
+        if (salesDay.isBefore(range[0], "day") || salesDay.isAfter(range[1], "day")) continue;
+      }
+      const current = grouped.get(entry.salesDate) || emptyGroupPoint(entry.salesDate);
+      current.salesAmount += entry.amount || 0;
+      grouped.set(entry.salesDate, current);
+    }
+  }
+
+  if (!range) {
+    return [...grouped.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  const start = range[0].startOf("day");
+  const end = range[1].startOf("day");
+  const days: GroupPoint[] = [];
+  for (let current = start; !current.isAfter(end, "day"); current = current.add(1, "day")) {
+    const key = current.format("YYYY-MM-DD");
+    days.push(grouped.get(key) || emptyGroupPoint(key));
+  }
+  return days;
+}
+
+function filterInsightItems(
+  items: CreatorInsightItem[],
+  options: {
+    shopFilter: string;
+    typeFilter: string;
+    statusFilter: string;
+    productionTeamFilter: string[];
+    keyword: string;
+    dateRange?: [Dayjs, Dayjs] | null;
+  }
+) {
+  const q = options.keyword.trim().toLowerCase();
+  return items.filter((item) => {
+    if (options.shopFilter !== "all" && item.shopName !== options.shopFilter) return false;
+    if (options.typeFilter !== "all" && item.workType !== options.typeFilter) return false;
+    if (options.statusFilter !== "all" && item.reviewStatus !== options.statusFilter) return false;
+    if (options.productionTeamFilter.length && !options.productionTeamFilter.includes(item.productionTeam || "")) {
+      return false;
+    }
+    if (options.dateRange) {
+      if (!item.publishDate) return false;
+      const d = dayjs(item.publishDate);
+      if (d.isBefore(options.dateRange[0], "day") || d.isAfter(options.dateRange[1], "day")) return false;
+    }
+    if (q) {
+      const haystack = `${item.title} ${item.shopName} ${item.relatedProduct} ${item.productionTeam}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
 export default function CreatorPage() {
   const { message } = App.useApp();
   const [accounts, setAccounts] = useState<CreatorAccount[]>([]);
@@ -582,8 +723,46 @@ export default function CreatorPage() {
   const [keyword, setKeyword] = useState("");
   const [datePreset, setDatePreset] = useState<DatePreset>("thisMonth");
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(() => dateRangeFromPreset("thisMonth"));
+  const [filtersHydrated, setFiltersHydrated] = useState(false);
 
   const { startTask, isNamespaceBusy } = useTaskContext();
+
+  useEffect(() => {
+    const cached = readCreatorInsightsFiltersCache();
+    if (cached) {
+      setShopFilter(cached.shopFilter);
+      setTypeFilter(cached.typeFilter);
+      setStatusFilter(cached.statusFilter);
+      setProductionTeamFilter(cached.productionTeamFilter);
+      setKeyword(cached.keyword);
+      setDatePreset(cached.datePreset);
+      setDateRange(dateRangeFromFiltersCache(cached));
+    }
+    setFiltersHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!filtersHydrated) return;
+    writeCreatorInsightsFiltersCache({
+      shopFilter,
+      typeFilter,
+      statusFilter,
+      productionTeamFilter,
+      keyword,
+      datePreset,
+      customDateStart: datePreset === "custom" ? dateRange?.[0]?.format("YYYY-MM-DD") ?? null : null,
+      customDateEnd: datePreset === "custom" ? dateRange?.[1]?.format("YYYY-MM-DD") ?? null : null,
+    });
+  }, [
+    datePreset,
+    dateRange,
+    filtersHydrated,
+    keyword,
+    productionTeamFilter,
+    shopFilter,
+    statusFilter,
+    typeFilter,
+  ]);
 
   const fetchAccounts = useCallback(async () => {
     setLoadingAccounts(true);
@@ -667,7 +846,9 @@ export default function CreatorPage() {
       const res = await fetch("/api/creator/insights", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "同步飞书数据失败");
-      message.success(`已从飞书入库 ${data.importedCount || 0} 条记录`);
+      message.success(
+        `已从飞书入库 ${data.importedCount || 0} 条作品，${data.shopMatchedCount || 0} 条已关联抖店成交明细`
+      );
       await fetchInsights();
     } catch (e: unknown) {
       message.error(e instanceof Error ? e.message : "同步飞书数据失败");
@@ -683,25 +864,38 @@ export default function CreatorPage() {
     }
   }
 
-  const filteredItems = useMemo(() => {
-    const q = keyword.trim().toLowerCase();
-    return items.filter((item) => {
-      if (shopFilter !== "all" && item.shopName !== shopFilter) return false;
-      if (typeFilter !== "all" && item.workType !== typeFilter) return false;
-      if (statusFilter !== "all" && item.reviewStatus !== statusFilter) return false;
-      if (productionTeamFilter.length && !productionTeamFilter.includes(item.productionTeam || "")) return false;
-      if (dateRange) {
-        if (!item.publishDate) return false;
-        const d = dayjs(item.publishDate);
-        if (d.isBefore(dateRange[0], "day") || d.isAfter(dateRange[1], "day")) return false;
-      }
-      if (q) {
-        const haystack = `${item.title} ${item.shopName} ${item.relatedProduct} ${item.productionTeam}`.toLowerCase();
-        if (!haystack.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [dateRange, items, keyword, productionTeamFilter, shopFilter, statusFilter, typeFilter]);
+  const filteredItems = useMemo(
+    () =>
+      filterInsightItems(items, {
+        shopFilter,
+        typeFilter,
+        statusFilter,
+        productionTeamFilter,
+        keyword,
+        dateRange,
+      }),
+    [dateRange, items, keyword, productionTeamFilter, shopFilter, statusFilter, typeFilter]
+  );
+
+  const salesScopeItems = useMemo(
+    () =>
+      filterInsightItems(items, {
+        shopFilter,
+        typeFilter,
+        statusFilter,
+        productionTeamFilter,
+        keyword,
+      }),
+    [items, keyword, productionTeamFilter, shopFilter, statusFilter, typeFilter]
+  );
+
+  const salesDateRange = useMemo(() => {
+    if (!dateRange) return null;
+    return {
+      start: dateRange[0].format("YYYY-MM-DD"),
+      end: dateRange[1].format("YYYY-MM-DD"),
+    };
+  }, [dateRange]);
 
   const shopOptions = useMemo(
     () => [
@@ -748,13 +942,14 @@ export default function CreatorPage() {
   const metrics = useMemo(() => {
     const count = filteredItems.length;
     const playCount = filteredItems.reduce((sum, item) => sum + (item.playCount || 0), 0);
-    const salesAmount = filteredItems.reduce((sum, item) => sum + (item.salesAmount || 0), 0);
+    const cumulativeSalesAmount = sumShopSalesEntriesForItems(filteredItems, salesDateRange);
+    const periodSalesAmount = sumShopSalesEntriesForItems(salesScopeItems, salesDateRange);
     const interactions = filteredItems.reduce((sum, item) => sum + interactionCount(item), 0);
     const avgCompletion =
       filteredItems.reduce((sum, item) => sum + (item.completionRate || 0), 0) /
       Math.max(filteredItems.filter((item) => item.completionRate != null).length, 1);
-    return { count, playCount, salesAmount, interactions, avgCompletion };
-  }, [filteredItems]);
+    return { count, playCount, cumulativeSalesAmount, periodSalesAmount, interactions, avgCompletion };
+  }, [filteredItems, salesDateRange, salesScopeItems]);
 
   const shopRanking = useMemo(
     () => groupBy(filteredItems, (item) => item.shopName).sort((a, b) => b.playCount - a.playCount),
@@ -769,6 +964,11 @@ export default function CreatorPage() {
   const dailyTrend = useMemo(
     () => buildDailySeries(filteredItems, dateRange),
     [dateRange, filteredItems]
+  );
+
+  const shopSalesDailyTrend = useMemo(
+    () => buildShopSalesDailySeries(salesScopeItems, dateRange),
+    [dateRange, salesScopeItems]
   );
 
   const columns = useMemo<TableProps<CreatorInsightItem>["columns"]>(
@@ -807,6 +1007,28 @@ export default function CreatorPage() {
         render: (value: string) => <Tag style={{ margin: 0 }}>{value || "-"}</Tag>,
       },
       {
+        title: "类型",
+        dataIndex: "creationType",
+        width: 108,
+        align: "center",
+        render: (value: string) => (
+          <Tag
+            style={{
+              margin: 0,
+              ...semanticTagStyle(
+                value === "实拍"
+                  ? "success"
+                  : value === "AI创作"
+                    ? "processing"
+                    : "default"
+              ),
+            }}
+          >
+            {value || "-"}
+          </Tag>
+        ),
+      },
+      {
         title: "状态",
         dataIndex: "reviewStatus",
         width: 92,
@@ -841,17 +1063,26 @@ export default function CreatorPage() {
         render: (_, item) => plainNumber(interactionCount(item)),
       },
       {
-        title: "销售额",
+        title: "累积销售额",
         dataIndex: "salesAmount",
-        width: 110,
+        width: 118,
         align: "center",
         sorter: (a, b) => a.salesAmount - b.salesAmount,
         render: (value: number) => money(value),
       },
+      {
+        title: "区间销售额",
+        width: 118,
+        align: "center",
+        sorter: (a, b) =>
+          sumShopSalesEntries(a.shopSalesEntries, salesDateRange) -
+          sumShopSalesEntries(b.shopSalesEntries, salesDateRange),
+        render: (_, item) => money(sumShopSalesEntries(item.shopSalesEntries, salesDateRange)),
+      },
       { title: "主页访量", dataIndex: "profileVisitCount", width: 100, render: plainNumber, align: "center" },
       { title: "增粉", dataIndex: "followerCount", width: 84, render: plainNumber, align: "center" },
     ],
-    []
+    [salesDateRange]
   );
 
   const lastImportText = lastImportedAt
@@ -860,46 +1091,44 @@ export default function CreatorPage() {
 
   return (
     <div className="app-page-scroll creator-dashboard-page">
-      <div className="creator-page-header">
-        <div className="creator-page-header-top">
+      <div className="creator-page-header creator-page-header-single">
+        <div className="creator-page-header-leading">
           <div className="creator-page-header-meta">
             <Title level={3} className="creator-page-title" style={{ margin: 0, fontSize: 16 }}>
               抖创数据
             </Title>
             <Text type="secondary" className="creator-page-subtitle" style={{ fontSize: 11 }}>
-              已入库 {plainNumber(total)} 条，最近同步：{lastImportText}
+              已入库 {plainNumber(total)} 条 · 同步 {lastImportText}
             </Text>
           </div>
-          <Space wrap>
-            <Button icon={<ReloadOutlined />} onClick={() => void fetchInsights()} loading={loadingData}>
-              刷新
-            </Button>
-            <Button
-              type="primary"
-              icon={<CloudSyncOutlined />}
-              onClick={() => void handleSyncFromFeishu()}
-              loading={syncingData}
-            >
-              从飞书入库
-            </Button>
-          </Space>
+          <Button
+            size="small"
+            type="primary"
+            icon={<CloudSyncOutlined />}
+            onClick={() => void handleSyncFromFeishu()}
+            loading={syncingData}
+          >
+            从飞书入库
+          </Button>
         </div>
-
-        <div className="creator-page-header-bottom">
-          <Space wrap size={8}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              抖创账号：
+        <div className="creator-page-header-toolbar">
+          <div className="creator-page-header-account">
+            <Text type="secondary" className="creator-page-header-account-label">
+              导出账号
             </Text>
             <ToolbarMultiSelect
               value={toolbarMultiSelect.sanitized}
               onChange={toolbarMultiSelect.handleChange}
               options={toolbarMultiSelect.selectOptions}
               placeholder="选择已登录账号"
-              minWidth={260}
+              minWidth={200}
               size="small"
               maxTagCount={2}
             />
+          </div>
+          <Space wrap size={8} className="creator-page-header-actions">
             <Button
+              size="small"
               className="creator-action-button"
               icon={<DownloadOutlined />}
               onClick={() => void handleTask("export")}
@@ -908,6 +1137,7 @@ export default function CreatorPage() {
               导出
             </Button>
             <Button
+              size="small"
               className="creator-action-button"
               icon={<CloudSyncOutlined />}
               onClick={() => void handleTask("feishu-sync")}
@@ -916,6 +1146,7 @@ export default function CreatorPage() {
               推送飞书
             </Button>
             <Button
+              size="small"
               className="creator-action-button creator-action-button-danger"
               danger
               icon={<SendOutlined />}
@@ -971,11 +1202,31 @@ export default function CreatorPage() {
       </div>
 
       <div className="creator-metric-grid">
-        <MetricTile label="作品数" value={plainNumber(metrics.count)} sub={`筛选后 / 总 ${plainNumber(total)}`} />
-        <MetricTile label="播放量" value={compactNumber(metrics.playCount)} sub={plainNumber(metrics.playCount)} />
-        <MetricTile label="互动量" value={compactNumber(metrics.interactions)} sub="赞评藏转合计" />
-        <MetricTile label="销售额" value={money(metrics.salesAmount)} sub="按飞书销售额字段汇总" />
-        <MetricTile label="平均完播率" value={percent(metrics.avgCompletion)} sub="仅统计有完播率记录" />
+        <MetricTile
+          label="作品数"
+          value={plainNumber(metrics.count)}
+          sub={`筛选后 / 总 ${plainNumber(total)}`}
+          tone="neutral"
+        />
+        <MetricTile label="播放量" value={compactNumber(metrics.playCount)} sub={plainNumber(metrics.playCount)} tone="volume" />
+        <MetricTile label="互动量" value={compactNumber(metrics.interactions)} sub="赞评藏转合计" tone="engagement" />
+        <MetricTile
+          label="区间销售额"
+          value={money(metrics.periodSalesAmount)}
+          tone="sales"
+          sub={
+            dateRange
+              ? `${dateRange[0].format("MM-DD")} ~ ${dateRange[1].format("MM-DD")} 销售额`
+              : "按抖店成交日期汇总（不受发布日期筛选）"
+          }
+        />
+        <MetricTile
+          label="日期内发布作品销售额"
+          value={money(metrics.cumulativeSalesAmount)}
+          sub="筛选日期内发布作品的销售额"
+          tone="publishSales"
+        />
+        <MetricTile label="平均完播率" value={percent(metrics.avgCompletion)} sub="仅统计有完播率记录" tone="rate" />
       </div>
 
       <div className="creator-data-tabs">
@@ -987,22 +1238,23 @@ export default function CreatorPage() {
               label: "图表概览",
               children: (
                 <div className="creator-chart-stack">
-                  <section className="creator-chart-panel creator-chart-panel-wide">
+                  <section className="creator-chart-panel creator-chart-panel-wide creator-chart-panel-sales">
                     <div className="creator-panel-title">
                       <BarChartOutlined />
-                      <span>销售额</span>
+                      <span>区间销售额</span>
                     </div>
                     <div className="creator-chart-body creator-chart-body-wide">
                       <DailyMetricBarChart
-                        data={dailyTrend}
+                        data={shopSalesDailyTrend}
                         metric="salesAmount"
-                        emptyText="当前筛选范围暂无可绘制销售额数据"
+                        showAverageLine
+                        emptyText="当前筛选范围暂无可绘制区间销售额数据"
                       />
                     </div>
                   </section>
 
                   <div className="creator-chart-grid">
-                    <section className="creator-chart-panel">
+                    <section className="creator-chart-panel creator-chart-panel-play">
                       <div className="creator-panel-title">
                         <BarChartOutlined />
                         <span>播放趋势</span>
@@ -1011,7 +1263,7 @@ export default function CreatorPage() {
                         <TrendChart data={dailyTrend} />
                       </div>
                     </section>
-                    <section className="creator-chart-panel">
+                    <section className="creator-chart-panel creator-chart-panel-rank">
                       <div className="creator-panel-title">
                         <BarChartOutlined />
                         <span>店铺播放排行</span>
@@ -1027,7 +1279,7 @@ export default function CreatorPage() {
                         />
                       </div>
                     </section>
-                    <section className="creator-chart-panel">
+                    <section className="creator-chart-panel creator-chart-panel-type">
                       <div className="creator-panel-title">
                         <BarChartOutlined />
                         <span>体裁分布</span>

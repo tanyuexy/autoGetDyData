@@ -4,39 +4,11 @@ import { getConfig } from "@/lib/configService";
 import { readBitable } from "@/lib/feishu/core/readBitable";
 import { getValidAccessToken } from "@/lib/feishu/core/oauth";
 import { listBitableFields } from "@/lib/feishu/core/bitable";
+import type { CreatorInsightItem, ShopSalesEntry } from "@/lib/creator/insights-types";
+
+export type { CreatorInsightItem, ShopSalesEntry } from "@/lib/creator/insights-types";
 
 const COLLECTION = "creator_bitable_items";
-
-export type CreatorInsightItem = {
-  id: string;
-  recordId: string;
-  title: string;
-  shopName: string;
-  publishTime: string | null;
-  publishDate: string | null;
-  workType: string;
-  reviewStatus: string;
-  playCount: number;
-  completionRate: number | null;
-  fiveSecondCompletionRate: number | null;
-  coverClickRate: number | null;
-  twoSecondBounceRate: number | null;
-  avgPlayDuration: number | null;
-  likeCount: number;
-  shareCount: number;
-  commentCount: number;
-  favoriteCount: number;
-  profileVisitCount: number;
-  followerCount: number;
-  salesAmount: number;
-  productId: string;
-  relatedProduct: string;
-  videoLink: string;
-  productionTeam: string;
-  rawFields: Record<string, unknown>;
-  importedAt: string;
-  updatedAt: string;
-};
 
 type StoredCreatorInsightItem = Omit<CreatorInsightItem, "id" | "importedAt" | "updatedAt"> & {
   createdAt: Date;
@@ -161,6 +133,48 @@ function formatDateTime(date: Date | null): string | null {
   return `${datePart} ${hh}:${mm}:${ss}`;
 }
 
+function normalizeWorkMatchText(value: string): string {
+  return value.replace(/\s+/g, "").trim();
+}
+
+/** 抖店成交与抖创作品关联键：仅按作品名（去空白），不按店铺 */
+export function buildWorkMatchKey(title: string, _shopName = ""): string {
+  return normalizeWorkMatchText(title);
+}
+
+function parseShopSalesRecord(fields: Record<string, unknown>) {
+  const title = pickString(fields, ["作品名", "作品标题", "作品名称"]);
+  const shopName = pickString(fields, ["所属店铺", "店铺"]);
+  const salesDate = formatDateOnly(parseDateValue(pickField(fields, ["日期"])));
+  const amount = pickNumber(fields, ["增加销售额"], 0);
+  if (!title || !salesDate || amount <= 0) return null;
+  return { title, shopName, salesDate, amount };
+}
+
+export function buildShopSalesIndex(records: unknown[]): Map<string, ShopSalesEntry[]> {
+  const grouped = new Map<string, Map<string, number>>();
+  for (const record of records) {
+    const fields = ((record as any)?.fields || {}) as Record<string, unknown>;
+    const parsed = parseShopSalesRecord(fields);
+    if (!parsed) continue;
+    const key = buildWorkMatchKey(parsed.title);
+    const byDate = grouped.get(key) || new Map<string, number>();
+    byDate.set(parsed.salesDate, (byDate.get(parsed.salesDate) || 0) + parsed.amount);
+    grouped.set(key, byDate);
+  }
+
+  const index = new Map<string, ShopSalesEntry[]>();
+  for (const [key, byDate] of grouped) {
+    index.set(
+      key,
+      [...byDate.entries()]
+        .map(([salesDate, amount]) => ({ salesDate, amount }))
+        .sort((a, b) => a.salesDate.localeCompare(b.salesDate))
+    );
+  }
+  return index;
+}
+
 function stableRecordId(fields: Record<string, unknown>, index: number): string {
   const key = JSON.stringify({
     title: pickString(fields, ["作品标题", "作品名", "作品名称"]),
@@ -197,7 +211,11 @@ function normalizeCreatorRecord(
   record: any,
   index: number,
   importedAt: Date,
-  optionMaps: { productionTeam?: Map<string, string> } = {}
+  optionMaps: {
+    productionTeam?: Map<string, string>;
+    creationType?: Map<string, string>;
+    shopSalesIndex?: Map<string, ShopSalesEntry[]>;
+  } = {}
 ): StoredCreatorInsightItem {
   const fields = (record?.fields || {}) as Record<string, unknown>;
   const publishDateValue = pickField(fields, ["发布时间", "发布日"]);
@@ -205,14 +223,18 @@ function normalizeCreatorRecord(
   const recordId = String(record?.record_id || record?.recordId || "").trim() || stableRecordId(fields, index);
   const title = pickString(fields, ["作品标题", "作品名", "作品名称"]);
   const productionTeamOptionMap = optionMaps.productionTeam || new Map<string, string>();
+  const creationTypeOptionMap = optionMaps.creationType || new Map<string, string>();
+  const shopName = pickString(fields, ["所属店铺"]);
+  const shopSalesEntries = optionMaps.shopSalesIndex?.get(buildWorkMatchKey(title)) || [];
 
   return {
     recordId,
     title,
-    shopName: pickString(fields, ["所属店铺"]),
+    shopName,
     publishTime: formatDateTime(publishDate),
     publishDate: formatDateOnly(publishDate),
-    workType: pickString(fields, ["体裁", "类型"]),
+    workType: pickString(fields, ["体裁"]),
+    creationType: pickOptionNameString(fields, ["类型"], creationTypeOptionMap),
     reviewStatus: pickString(fields, ["审核状态"]),
     playCount: pickNumber(fields, ["播放量"]),
     completionRate: pickNullableNumber(fields, ["完播率"]),
@@ -227,6 +249,7 @@ function normalizeCreatorRecord(
     profileVisitCount: pickNumber(fields, ["主页访量", "主页访问量"]),
     followerCount: pickNumber(fields, ["增粉", "粉丝增量"]),
     salesAmount: pickNumber(fields, ["销售额"]),
+    shopSalesEntries,
     productId: pickString(fields, ["商品ID"]),
     relatedProduct: pickString(fields, ["关联产品"]),
     videoLink: pickString(fields, ["视频链接"]),
@@ -251,13 +274,24 @@ export async function ensureCreatorInsightIndexes() {
 export async function syncCreatorInsightsFromFeishu() {
   await ensureCreatorInsightIndexes();
   process.env.PROJECT_CONFIG_JSON = JSON.stringify(await getConfig());
+
+  process.env.FEISHU_BITABLE_PROFILE = "shop";
+  const shopData = await readBitable("shop");
+  const shopRecords = Array.isArray(shopData.records) ? shopData.records : [];
+  const shopSalesIndex = buildShopSalesIndex(shopRecords);
+
   process.env.FEISHU_BITABLE_PROFILE = "creator";
   const data = await readBitable("creator");
   const importedAt = new Date();
   const records = Array.isArray(data.records) ? data.records : [];
   const productionTeamMap = await buildLookupOptionNameMap(data, "制作团队");
+  const creationTypeMap = await buildLookupOptionNameMap(data, "类型");
   const normalized = records.map((record: unknown, index: number) =>
-    normalizeCreatorRecord(record, index, importedAt, { productionTeam: productionTeamMap })
+    normalizeCreatorRecord(record, index, importedAt, {
+      productionTeam: productionTeamMap,
+      creationType: creationTypeMap,
+      shopSalesIndex,
+    })
   );
   const db = await getDb();
   let deletedCount = 0;
@@ -288,6 +322,8 @@ export async function syncCreatorInsightsFromFeishu() {
     ok: true,
     importedCount: normalized.length,
     deletedCount,
+    shopRecordCount: shopRecords.length,
+    shopMatchedCount: normalized.filter((item) => item.shopSalesEntries.length > 0).length,
     fieldCount: Array.isArray(data.fields) ? data.fields.length : 0,
     importedAt: importedAt.toISOString(),
   };
@@ -296,6 +332,8 @@ export async function syncCreatorInsightsFromFeishu() {
 function serializeItem(item: StoredCreatorInsightItem & { _id: unknown }): CreatorInsightItem {
   return {
     ...item,
+    creationType: item.creationType || "",
+    shopSalesEntries: Array.isArray(item.shopSalesEntries) ? item.shopSalesEntries : [],
     id: String(item._id),
     importedAt: item.importedAt?.toISOString?.() || String(item.importedAt || ""),
     updatedAt: item.updatedAt?.toISOString?.() || String(item.updatedAt || ""),

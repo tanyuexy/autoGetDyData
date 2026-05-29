@@ -38,7 +38,8 @@ import {
 import {
   DEFAULT_SEEDANCE_MODEL,
   FALLBACK_MODELS,
-  REFERENCE_CACHE_KEY,
+  isDisabledSeedanceModel,
+  resolveSelectableSeedanceModel,
 } from "@/lib/ai-video/constants";
 import {
   buildClipFormSnapshot,
@@ -72,7 +73,7 @@ const cachedConfig = useMemo(() => readCachedConfig(), []);
 const [models, setModels] = useState<SeedanceModelOption[]>(FALLBACK_MODELS);
 const [hasServerApiKey, setHasServerApiKey] = useState(false);
 const [showCallbackUrl, setShowCallbackUrl] = useState(false);
-const [model, setModel] = useState(cachedConfig.model || DEFAULT_SEEDANCE_MODEL);
+const [model, setModel] = useState(() => resolveSelectableSeedanceModel(cachedConfig.model));
 const [mode, setMode] = useState<GenerationMode>(
   isGenerationMode(cachedConfig.mode) ? cachedConfig.mode : "first-frame"
 );
@@ -140,9 +141,7 @@ const handleModeChange = useCallback((nextMode: GenerationMode) => {
   setLastFrameFiles([]);
   setResourcePickerOpen(false);
   setResourcePickerActiveIndex(0);
-  try {
-    window.localStorage.removeItem(REFERENCE_CACHE_KEY);
-  } catch {}
+  clearReferenceResourcesCache();
   writeStoredConfig({
     firstFrameUrl: "",
     lastFrameUrl: "",
@@ -170,7 +169,9 @@ useEffect(() => {
     ])
       .then(([seedanceData, promptData]) => {
         if (cancelled) return;
-        if (Array.isArray(seedanceData.models) && seedanceData.models.length) setModels(seedanceData.models);
+        if (Array.isArray(seedanceData.models) && seedanceData.models.length) {
+          setModels(seedanceData.models);
+        }
         setHasServerApiKey(Boolean(seedanceData.hasServerApiKey));
         setHasMiniMaxApiKey(Boolean(promptData?.hasMiniMaxApiKey));
         if (typeof promptData?.model === "string" && promptData.model.trim()) {
@@ -191,6 +192,13 @@ useEffect(() => {
     cancelled = true;
   };
 }, [cachedConfig.callbackUrl]);
+
+useEffect(() => {
+  setModel((prev) => {
+    const next = resolveSelectableSeedanceModel(prev);
+    return next === prev ? prev : next;
+  });
+}, [models]);
 
 useEffect(() => {
   if (!resourcePickerOpen) return;
@@ -232,9 +240,7 @@ useEffect(() => {
           const migrateData = (await migrateRes.json()) as { items?: ClipItem[]; error?: string };
           if (migrateRes.ok) {
             items = migrateData.items || [];
-            try {
-              window.localStorage.removeItem("ai-video:seedance-clips");
-            } catch {}
+            clearLegacyClipsCache();
           }
         }
       }
@@ -271,9 +277,7 @@ useEffect(() => {
 }, [filmsHydrated, message, pageReady]);
 
 useEffect(() => {
-  try {
-    window.localStorage.setItem(REFERENCE_CACHE_KEY, JSON.stringify(referenceResources));
-  } catch {}
+  writeReferenceResourcesCache(referenceResources);
 }, [referenceResources]);
 
 useEffect(() => {
@@ -328,6 +332,7 @@ const modelOptions = useMemo(
     models.map((item) => ({
       label: `${item.label} · ${item.note}`,
       value: item.value,
+      disabled: isDisabledSeedanceModel(item.value),
     })),
   [models]
 );
@@ -486,7 +491,8 @@ const restoreFormFromClip = useCallback(
       return;
     }
 
-    setModel(snapshot.model);
+    const restoredModel = resolveSelectableSeedanceModel(snapshot.model);
+    setModel(restoredModel);
     setMode(snapshot.mode);
     setPrompt(snapshot.prompt);
     setFirstFrameUrl(snapshot.firstFrameUrl);
@@ -496,7 +502,7 @@ const restoreFormFromClip = useCallback(
     setReferenceResources(snapshot.referenceResources.map((item) => ({ ...item })));
     setRatio(snapshot.ratio);
     setResolution(snapshot.resolution);
-    setDuration(normalizeSeedanceDuration(snapshot.model, snapshot.duration));
+    setDuration(normalizeSeedanceDuration(restoredModel, snapshot.duration));
     setGenerateAudio(snapshot.generateAudio);
     setWatermark(snapshot.watermark);
     setSeed(snapshot.seed);
@@ -504,7 +510,7 @@ const restoreFormFromClip = useCallback(
     setClipTag(record.tag || "");
 
     writeStoredConfig({
-      model: snapshot.model,
+      model: restoredModel,
       mode: snapshot.mode,
       prompt: snapshot.prompt,
       firstFrameUrl: snapshot.firstFrameUrl,
@@ -520,9 +526,7 @@ const restoreFormFromClip = useCallback(
       callbackUrl: snapshot.callbackUrl,
       clipTag: record.tag || "",
     });
-    try {
-      window.localStorage.setItem(REFERENCE_CACHE_KEY, JSON.stringify(snapshot.referenceResources));
-    } catch {}
+    writeReferenceResourcesCache(snapshot.referenceResources);
 
     message.success("已回填生成配置，可修改后重新提交");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -761,9 +765,7 @@ async function submitTask() {
       firstFrameFiles: [],
       lastFrameFiles: [],
     });
-    try {
-      window.localStorage.removeItem(REFERENCE_CACHE_KEY);
-    } catch {}
+    clearReferenceResourcesCache();
     message.success("Seedance 任务已创建");
   } catch (e: any) {
     message.error(e.message || "创建任务失败");

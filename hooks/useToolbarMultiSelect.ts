@@ -2,18 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  readLocalStorageJson,
+  writeLocalStorageJson,
+} from "@/lib/browserStorage";
+import {
   buildSelectAllOption,
   resolveSelectAllChange,
   sanitizeSelected,
 } from "@/lib/toolbarMultiSelect";
 
 function readCachedSelection(cacheKey: string): string[] {
-  try {
-    const cached = JSON.parse(window.localStorage.getItem(cacheKey) || "[]");
-    return Array.isArray(cached) ? cached.map((value) => String(value)) : [];
-  } catch {
-    return [];
-  }
+  const cached = readLocalStorageJson<unknown[]>(cacheKey, []);
+  return Array.isArray(cached) ? cached.map((value) => String(value)) : [];
 }
 
 export interface ToolbarSelectOption {
@@ -49,9 +49,7 @@ export function useToolbarMultiSelect(options: UseToolbarMultiSelectOptions) {
     (value: string[]) => {
       setSelectedState(value);
       if (isApplyingInitialSelectionRef.current || !cacheKey) return;
-      try {
-        window.localStorage.setItem(cacheKey, JSON.stringify(value));
-      } catch {}
+      writeLocalStorageJson(cacheKey, value);
     },
     [cacheKey]
   );
@@ -109,9 +107,7 @@ export function useToolbarMultiSelect(options: UseToolbarMultiSelectOptions) {
   const persistSelection = useCallback(
     (value: string[]) => {
       if (!cacheKey) return;
-      try {
-        window.localStorage.setItem(cacheKey, JSON.stringify(value));
-      } catch {}
+      writeLocalStorageJson(cacheKey, value);
     },
     [cacheKey]
   );

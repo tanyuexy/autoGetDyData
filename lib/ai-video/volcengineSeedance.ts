@@ -18,57 +18,12 @@ export interface SeedanceReferenceResource {
   url: string;
 }
 
-export interface SeedanceModelOption {
-  label: string;
-  value: string;
-  generation: string[];
-  note: string;
-}
-
-export const SEEDANCE_MODELS: SeedanceModelOption[] = [
-  {
-    label: "Seedance 2.0",
-    value: "doubao-seedance-2-0-260128",
-    generation: ["文生视频", "首帧生视频", "首尾帧生视频", "多模态参考"],
-    note: "质量优先，适合成片主镜头",
-  },
-  {
-    label: "Seedance 2.0 Fast",
-    value: "doubao-seedance-2-0-fast-260128",
-    generation: ["文生视频", "首帧生视频", "首尾帧生视频", "多模态参考"],
-    note: "速度优先，适合批量出片段",
-  },
-  {
-    label: "Seedance 1.5 Pro",
-    value: "doubao-seedance-1-5-pro-251215",
-    generation: ["文生视频", "首帧生视频"],
-    note: "上一代 Pro，适合作为备选模型",
-  },
-  {
-    label: "Seedance 1.0 Pro Fast",
-    value: "doubao-seedance-1-0-pro-fast-251015",
-    generation: ["文生视频", "首帧生视频"],
-    note: "1.0 快速版",
-  },
-  {
-    label: "Seedance 1.0 Pro",
-    value: "doubao-seedance-1-0-pro-250528",
-    generation: ["文生视频", "首帧生视频"],
-    note: "1.0 高质量版",
-  },
-  {
-    label: "Seedance 1.0 Lite T2V",
-    value: "doubao-seedance-1-0-lite-t2v-250428",
-    generation: ["文生视频"],
-    note: "轻量文生视频",
-  },
-  {
-    label: "Seedance 1.0 Lite I2V",
-    value: "doubao-seedance-1-0-lite-i2v-250428",
-    generation: ["首帧生视频"],
-    note: "轻量图生视频",
-  },
-];
+export type { SeedanceModelOption } from "./types";
+export {
+  SEEDANCE_MODELS,
+  isSelectableSeedanceModel,
+  resolveSelectableSeedanceModel,
+} from "./constants";
 
 export interface CreateSeedanceTaskInput {
   model: string;

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isSelectableSeedanceModel } from "@/lib/ai-video/constants";
 import {
   SEEDANCE_MODELS,
   createSeedanceTask,
@@ -27,10 +28,14 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const model = String(body.model || "").trim();
+    if (!isSelectableSeedanceModel(model)) {
+      return NextResponse.json({ error: "仅支持 Seedance 2.0 系列模型" }, { status: 400 });
+    }
     const apiKey = resolveSeedanceApiKey();
     const callbackConfig = getSeedanceCallbackUrlConfig();
     const input: CreateSeedanceTaskInput = {
-      model: body.model,
+      model,
       prompt: body.prompt,
       mode: body.mode,
       firstFrameUrl: toAbsoluteUrl(request, body.firstFrameUrl),

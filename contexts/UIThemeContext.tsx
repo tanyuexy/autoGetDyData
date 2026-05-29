@@ -4,6 +4,10 @@ import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useSt
 import { App, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import {
+  readLocalStorageString,
+  writeLocalStorageRaw,
+} from "@/lib/browserStorage";
+import {
   APP_UI_THEME_STORAGE_KEY,
   type AppUiTheme,
   buildIntercomAntdTheme,
@@ -19,13 +23,8 @@ interface UIThemeContextValue {
 const UIThemeContext = createContext<UIThemeContextValue | null>(null);
 
 export function readStoredTheme(): AppUiTheme {
-  if (typeof window === "undefined") return "intercom";
-  try {
-    const raw = window.localStorage.getItem(APP_UI_THEME_STORAGE_KEY);
-    if (raw === "voltagent") return "voltagent";
-  } catch {
-    /* ignore */
-  }
+  const raw = readLocalStorageString(APP_UI_THEME_STORAGE_KEY);
+  if (raw === "voltagent") return "voltagent";
   return "intercom";
 }
 
@@ -56,11 +55,7 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
 
   const setTheme = useCallback((t: AppUiTheme) => {
     setThemeState(t);
-    try {
-      window.localStorage.setItem(APP_UI_THEME_STORAGE_KEY, t);
-    } catch {
-      /* ignore */
-    }
+    writeLocalStorageRaw(APP_UI_THEME_STORAGE_KEY, t);
     document.documentElement.setAttribute("data-ui-theme", t);
   }, []);
 
