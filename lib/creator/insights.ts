@@ -380,6 +380,7 @@ const SUMMARY_PROJECTION = {
   shopName: 1,
   publishDate: 1,
   workType: 1,
+  creationType: 1,
   playCount: 1,
   completionRate: 1,
   likeCount: 1,
@@ -412,6 +413,7 @@ function toLeanRow(item: StoredCreatorInsightItem): CreatorInsightLeanRow {
     shopName: item.shopName || "",
     publishDate: item.publishDate || null,
     workType: item.workType || "",
+    creationType: item.creationType || "",
     playCount: item.playCount || 0,
     completionRate: item.completionRate ?? null,
     likeCount: item.likeCount || 0,
@@ -444,9 +446,10 @@ export async function getCreatorInsightsFacets() {
   await ensureCreatorInsightIndexes();
   const db = await getDb();
   const collection = db.collection<StoredCreatorInsightItem>(COLLECTION);
-  const [shops, workTypes, reviewStatuses, productionTeams, meta] = await Promise.all([
+  const [shops, workTypes, creationTypes, reviewStatuses, productionTeams, meta] = await Promise.all([
     collection.distinct("shopName", { shopName: { $exists: true, $ne: "" } }),
     collection.distinct("workType", { workType: { $exists: true, $ne: "" } }),
+    collection.distinct("creationType", { creationType: { $exists: true, $ne: "" } }),
     collection.distinct("reviewStatus", { reviewStatus: { $exists: true, $ne: "" } }),
     collection.distinct("productionTeam", { productionTeam: { $exists: true, $ne: "" } }),
     getCreatorInsightsMeta(),
@@ -454,6 +457,7 @@ export async function getCreatorInsightsFacets() {
   return {
     shops: shops.filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN")),
     workTypes: workTypes.filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN")),
+    creationTypes: creationTypes.filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN")),
     reviewStatuses: reviewStatuses.filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN")),
     productionTeams: productionTeams.filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN")),
     ...meta,
@@ -488,7 +492,7 @@ export async function listCreatorInsightsPage(params: CreatorInsightsQueryParams
 export async function getCreatorInsightsSummary(
   params: Pick<
     CreatorInsightsQueryParams,
-    "shop" | "workType" | "status" | "teams" | "keyword" | "dateStart" | "dateEnd"
+    "shop" | "workType" | "creationType" | "status" | "teams" | "keyword" | "dateStart" | "dateEnd"
   >
 ): Promise<CreatorInsightsSummaryResult & { dbTotal: number; lastImportedAt: string | null }> {
   await ensureCreatorInsightIndexes();

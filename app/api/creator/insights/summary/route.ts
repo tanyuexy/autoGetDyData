@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
     const result = await getCreatorInsightsSummary({
       shop: parsed.shop,
       workType: parsed.workType,
+      creationType: parsed.creationType,
       status: parsed.status,
       teams: parsed.teams,
       keyword: parsed.keyword,

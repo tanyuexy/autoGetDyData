@@ -352,7 +352,7 @@ body:has(.ant-modal-wrap) {
 
 .creator-metric-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  grid-template-columns: repeat(7, minmax(110px, 1fr));
   gap: 10px;
   flex-shrink: 0;
 }
@@ -402,6 +402,12 @@ body:has(.ant-modal-wrap) {
   --creator-metric-tint: rgba(37, 99, 235, 0.05);
 }
 
+.creator-metric-tile-avgSales {
+  --creator-metric-accent: #1d4ed8;
+  --creator-metric-border: rgba(29, 78, 216, 0.22);
+  --creator-metric-tint: rgba(29, 78, 216, 0.05);
+}
+
 .creator-metric-tile-publishSales {
   --creator-metric-accent: #0284c7;
   --creator-metric-border: rgba(2, 132, 199, 0.22);
@@ -423,6 +429,66 @@ body:has(.ant-modal-wrap) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.creator-metric-breakdown {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.creator-metric-breakdown-bar {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.creator-metric-breakdown-bar-segment {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+}
+
+.creator-metric-breakdown-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.creator-metric-breakdown-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.2;
+  color: rgba(15, 23, 42, 0.72);
+  cursor: default;
+}
+
+.creator-metric-breakdown-item i {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.creator-metric-breakdown-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 72px;
+}
+
+.creator-metric-breakdown-value {
+  color: rgba(15, 23, 42, 0.88);
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
 .creator-chart-grid {

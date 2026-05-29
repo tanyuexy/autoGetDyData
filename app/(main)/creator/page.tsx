@@ -28,6 +28,7 @@ import {
 import dayjs, { type Dayjs } from "dayjs";
 import ReactECharts from "echarts-for-react";
 import { ToolbarMultiSelect } from "@/components/ToolbarMultiSelect";
+import { SelectWithTooltip } from "@/components/SelectWithTooltip";
 import { useTaskContext } from "@/contexts/TaskContext";
 import { useToolbarMultiSelect } from "@/hooks/useToolbarMultiSelect";
 import { SELECT_ALL_CREATOR_EXPORT } from "@/lib/toolbarMultiSelect";
@@ -39,12 +40,14 @@ import {
   CREATOR_INSIGHTS_TABLE_PAGE_SIZE,
 } from "@/lib/creator/insights-query";
 import type {
+  CreatorInsightsCreationTypePoint,
   CreatorInsightsGroupPoint,
   CreatorInsightsSummaryResult,
 } from "@/lib/creator/insights-summary";
 import {
   readCreatorInsightsFiltersCache,
   writeCreatorInsightsFiltersCache,
+  CREATOR_INSIGHTS_CREATION_TYPE_FILTERS,
   type CreatorInsightsDatePreset,
   type CreatorInsightsFiltersCache,
 } from "@/lib/creator/insights-filter-cache";
@@ -75,12 +78,16 @@ type GroupPoint = CreatorInsightsGroupPoint;
 const EMPTY_SUMMARY: CreatorInsightsSummaryResult = {
   metrics: {
     count: 0,
+    worksWithSalesCount: 0,
     playCount: 0,
     interactions: 0,
     avgCompletion: 0,
     cumulativeSalesAmount: 0,
     periodSalesAmount: 0,
+    periodSalesWorkCount: 0,
+    avgPeriodSalesAmount: 0,
   },
+  creationTypeBreakdown: [],
   shopRanking: [],
   typeRanking: [],
   dailyTrend: [],
@@ -164,16 +171,167 @@ function dateRangeFromFiltersCache(cached: CreatorInsightsFiltersCache): [Dayjs,
   return dateRangeFromPreset(cached.datePreset);
 }
 
+const CREATION_TYPE_COLORS: Record<string, string> = {
+  实拍: "#0f766e",
+  AI创作: "#4f46e5",
+};
+
+function creationTypeColor(name: string) {
+  return CREATION_TYPE_COLORS[name] || "#64748b";
+}
+
+function filterDisplayCreationTypeBreakdown(
+  breakdown: CreatorInsightsCreationTypePoint[]
+): CreatorInsightsCreationTypePoint[] {
+  const allowed = new Set<string>(CREATOR_INSIGHTS_CREATION_TYPE_FILTERS);
+  const order = new Map(CREATOR_INSIGHTS_CREATION_TYPE_FILTERS.map((name, index) => [name, index]));
+  return breakdown
+    .filter((item) => allowed.has(item.name))
+    .sort((a, b) => (order.get(a.name as (typeof CREATOR_INSIGHTS_CREATION_TYPE_FILTERS)[number]) ?? 0)
+      - (order.get(b.name as (typeof CREATOR_INSIGHTS_CREATION_TYPE_FILTERS)[number]) ?? 0));
+}
+
+type MetricBreakdownKey =
+  | "itemCount"
+  | "worksWithSalesCount"
+  | "playCount"
+  | "interactionCount"
+  | "periodSalesAmount"
+  | "cumulativeSalesAmount"
+  | "avgPeriodSalesAmount"
+  | "avgCompletion";
+
+type MetricBreakdownSegment = {
+  name: string;
+  color: string;
+  percent: number;
+  displayValue: string;
+  detail: string;
+};
+
+function formatBreakdownValue(key: MetricBreakdownKey, value: number) {
+  if (
+    key === "periodSalesAmount" ||
+    key === "cumulativeSalesAmount" ||
+    key === "avgPeriodSalesAmount"
+  ) {
+    return money(value);
+  }
+  if (key === "avgCompletion") return percent(value);
+  return compactNumber(value);
+}
+
+function buildMetricBreakdownSegments(
+  breakdown: CreatorInsightsCreationTypePoint[],
+  metricKey: MetricBreakdownKey
+): MetricBreakdownSegment[] {
+  const scoped = filterDisplayCreationTypeBreakdown(breakdown);
+
+  if (metricKey === "avgCompletion" || metricKey === "avgPeriodSalesAmount") {
+    return scoped
+      .filter((item) =>
+        metricKey === "avgCompletion"
+          ? item.avgCompletion != null && item.completionCount > 0
+          : item.periodSalesWorkCount > 0
+      )
+      .map((item) => ({
+        name: item.name,
+        color: creationTypeColor(item.name),
+        percent: 0,
+        displayValue:
+          metricKey === "avgCompletion"
+            ? percent(item.avgCompletion)
+            : money(item.avgPeriodSalesAmount),
+        detail:
+          metricKey === "avgCompletion"
+            ? `${item.name} · ${percent(item.avgCompletion)} · ${item.completionCount} 条`
+            : `${item.name} · ${money(item.avgPeriodSalesAmount)} · ${item.periodSalesWorkCount} 个成交作品`,
+      }));
+  }
+
+  const total = scoped.reduce((sum, item) => sum + (item[metricKey] || 0), 0);
+  if (total <= 0) return [];
+
+  return scoped
+    .filter((item) => item[metricKey] > 0)
+    .map((item) => {
+      const value = item[metricKey];
+      const percentValue = (value / total) * 100;
+      return {
+        name: item.name,
+        color: creationTypeColor(item.name),
+        percent: percentValue,
+        displayValue: formatBreakdownValue(metricKey, value),
+        detail: `${item.name} · ${percentValue.toFixed(1)}% · ${formatBreakdownValue(metricKey, value)}`,
+      };
+    })
+    .sort((a, b) => b.percent - a.percent);
+}
+
+function MetricTypeBreakdown({
+  breakdown,
+  metricKey,
+}: {
+  breakdown: CreatorInsightsCreationTypePoint[];
+  metricKey: MetricBreakdownKey;
+}) {
+  const segments = useMemo(
+    () => buildMetricBreakdownSegments(breakdown, metricKey),
+    [breakdown, metricKey]
+  );
+
+  if (segments.length === 0) return null;
+
+  const showBar = metricKey !== "avgCompletion" && metricKey !== "avgPeriodSalesAmount";
+  const barTotal = segments.reduce((sum, segment) => sum + segment.percent, 0);
+
+  return (
+    <div className="creator-metric-breakdown">
+      {showBar ? (
+        <div className="creator-metric-breakdown-bar" aria-hidden={barTotal <= 0}>
+          {segments.map((segment) =>
+            segment.percent > 0 ? (
+              <span
+                key={segment.name}
+                className="creator-metric-breakdown-bar-segment"
+                style={{ width: `${segment.percent}%`, backgroundColor: segment.color }}
+                title={segment.detail}
+              />
+            ) : null
+          )}
+        </div>
+      ) : null}
+      <div className="creator-metric-breakdown-legend">
+        {segments.map((segment) => (
+          <Tooltip key={segment.name} title={segment.detail} placement="top">
+            <span className="creator-metric-breakdown-item">
+              <i style={{ backgroundColor: segment.color }} />
+              <span className="creator-metric-breakdown-name">{segment.name}</span>
+              <span className="creator-metric-breakdown-value">
+                {showBar ? `${segment.percent.toFixed(0)}%` : segment.displayValue}
+              </span>
+            </span>
+          </Tooltip>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MetricTile({
   label,
   value,
   sub,
   tone = "neutral",
+  breakdown,
+  breakdownMetric,
 }: {
   label: string;
   value: string;
   sub?: string;
-  tone?: "neutral" | "volume" | "engagement" | "sales" | "publishSales" | "rate";
+  tone?: "neutral" | "volume" | "engagement" | "sales" | "avgSales" | "publishSales" | "rate";
+  breakdown?: CreatorInsightsCreationTypePoint[];
+  breakdownMetric?: MetricBreakdownKey;
 }) {
   return (
     <div className={`creator-metric-tile creator-metric-tile-${tone}`}>
@@ -181,6 +339,9 @@ function MetricTile({
         {label}
       </Text>
       <div className="creator-metric-value">{value}</div>
+      {breakdown && breakdownMetric ? (
+        <MetricTypeBreakdown breakdown={breakdown} metricKey={breakdownMetric} />
+      ) : null}
       {sub ? (
         <Text type="secondary" style={{ fontSize: 12 }}>
           {sub}
@@ -477,7 +638,7 @@ function DailyMetricBarChart({
   data: GroupPoint[];
   metric: keyof Pick<GroupPoint, "playCount" | "salesAmount" | "interactionCount" | "itemCount">;
   emptyText: string;
-  /** 区间销售额等场景：展示日均水平虚线 */
+  /** 日期内总销额等场景：展示日均水平虚线 */
   showAverageLine?: boolean;
 }) {
   const option = useMemo<EChartsOption | null>(() => {
@@ -601,6 +762,7 @@ function DailyMetricBarChart({
 function insightsFilterQuery(params: {
   shopFilter: string;
   typeFilter: string;
+  creationTypeFilter: string;
   statusFilter: string;
   productionTeamFilter: string[];
   keyword: string;
@@ -610,6 +772,7 @@ function insightsFilterQuery(params: {
   return buildCreatorInsightsSearchParams({
     shop: params.shopFilter,
     workType: params.typeFilter,
+    creationType: params.creationTypeFilter,
     status: params.statusFilter,
     teams: params.productionTeamFilter,
     keyword: params.keyword,
@@ -641,6 +804,7 @@ export default function CreatorPage() {
   const [syncingData, setSyncingData] = useState(false);
   const [shopFilter, setShopFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [creationTypeFilter, setCreationTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [productionTeamFilter, setProductionTeamFilter] = useState<string[]>([]);
   const [keyword, setKeyword] = useState("");
@@ -656,6 +820,7 @@ export default function CreatorPage() {
     if (cached) {
       setShopFilter(cached.shopFilter);
       setTypeFilter(cached.typeFilter);
+      setCreationTypeFilter(cached.creationTypeFilter);
       setStatusFilter(cached.statusFilter);
       setProductionTeamFilter(cached.productionTeamFilter);
       setKeyword(cached.keyword);
@@ -670,6 +835,7 @@ export default function CreatorPage() {
     writeCreatorInsightsFiltersCache({
       shopFilter,
       typeFilter,
+      creationTypeFilter,
       statusFilter,
       productionTeamFilter,
       keyword,
@@ -686,6 +852,7 @@ export default function CreatorPage() {
     shopFilter,
     statusFilter,
     typeFilter,
+    creationTypeFilter,
   ]);
 
   const fetchAccounts = useCallback(async () => {
@@ -706,12 +873,14 @@ export default function CreatorPage() {
     () => ({
       shopFilter,
       typeFilter,
+      creationTypeFilter,
       statusFilter,
       productionTeamFilter,
       keyword: keywordDebounced,
       dateRange,
     }),
     [
+      creationTypeFilter,
       dateRange,
       keywordDebounced,
       productionTeamFilter,
@@ -751,6 +920,7 @@ export default function CreatorPage() {
       if (!res.ok) throw new Error(data.error || "加载汇总数据失败");
       setSummary({
         metrics: data.metrics || EMPTY_SUMMARY.metrics,
+        creationTypeBreakdown: data.creationTypeBreakdown || [],
         shopRanking: data.shopRanking || [],
         typeRanking: data.typeRanking || [],
         dailyTrend: data.dailyTrend || [],
@@ -893,6 +1063,14 @@ export default function CreatorPage() {
     [facets.workTypes]
   );
 
+  const creationTypeOptions = useMemo(
+    () => [
+      { label: "全部类型", value: "all" },
+      ...CREATOR_INSIGHTS_CREATION_TYPE_FILTERS.map((name) => ({ label: name, value: name })),
+    ],
+    []
+  );
+
   const statusOptions = useMemo(
     () => [
       { label: "全部状态", value: "all" },
@@ -907,6 +1085,7 @@ export default function CreatorPage() {
   );
 
   const metrics = summary.metrics;
+  const creationTypeBreakdown = summary.creationTypeBreakdown;
   const shopRanking = summary.shopRanking;
   const typeRanking = summary.typeRanking;
   const dailyTrend = summary.dailyTrend;
@@ -1012,8 +1191,8 @@ export default function CreatorPage() {
         render: (value: number) => money(value),
       },
       {
-        title: "区间销售额",
-        width: 118,
+        title: "日期内总销额",
+        width: 130,
         align: "center",
         sorter: (a, b) =>
           sumShopSalesEntries(a.shopSalesEntries, salesDateRange) -
@@ -1109,8 +1288,14 @@ export default function CreatorPage() {
           loading={loadingFacets}
           style={{ width: 190 }}
         />
-        <Select value={typeFilter} onChange={setTypeFilter} options={typeOptions} loading={loadingFacets} style={{ width: 130 }} />
-        <Select value={statusFilter} onChange={setStatusFilter} options={statusOptions} loading={loadingFacets} style={{ width: 130 }} />
+        <SelectWithTooltip value={typeFilter} onChange={setTypeFilter} options={typeOptions} loading={loadingFacets} style={{ width: 130 }} />
+        <SelectWithTooltip
+          value={creationTypeFilter}
+          onChange={setCreationTypeFilter}
+          options={creationTypeOptions}
+          style={{ width: 130 }}
+        />
+        <SelectWithTooltip value={statusFilter} onChange={setStatusFilter} options={statusOptions} loading={loadingFacets} style={{ width: 130 }} />
         <Select
           mode="multiple"
           allowClear
@@ -1153,30 +1338,69 @@ export default function CreatorPage() {
       <Spin spinning={loadingSummary}>
       <div className="creator-metric-grid">
         <MetricTile
-          label="作品数"
-          value={plainNumber(metrics.count)}
-          sub={`筛选后 / 总 ${plainNumber(dbTotal)}`}
+          label="有销量作品"
+          value={plainNumber(metrics.worksWithSalesCount)}
+          sub={
+            dateRange
+              ? `总作品 ${plainNumber(metrics.count)} · 销量按成交日期`
+              : `总作品 ${plainNumber(metrics.count)}`
+          }
           tone="neutral"
+          breakdown={creationTypeBreakdown}
+          breakdownMetric="worksWithSalesCount"
         />
-        <MetricTile label="播放量" value={compactNumber(metrics.playCount)} sub={plainNumber(metrics.playCount)} tone="volume" />
-        <MetricTile label="互动量" value={compactNumber(metrics.interactions)} sub="赞评藏转合计" tone="engagement" />
         <MetricTile
-          label="区间销售额"
+          label="播放量"
+          value={compactNumber(metrics.playCount)}
+          sub={plainNumber(metrics.playCount)}
+          tone="volume"
+          breakdown={creationTypeBreakdown}
+          breakdownMetric="playCount"
+        />
+        <MetricTile
+          label="互动量"
+          value={compactNumber(metrics.interactions)}
+          sub="赞评藏转合计"
+          tone="engagement"
+          breakdown={creationTypeBreakdown}
+          breakdownMetric="interactionCount"
+        />
+        <MetricTile
+          label="日期内总销额"
           value={money(metrics.periodSalesAmount)}
           tone="sales"
           sub={
             dateRange
-              ? `${dateRange[0].format("MM-DD")} ~ ${dateRange[1].format("MM-DD")} 销售额`
-              : "按抖店成交日期汇总（不受发布日期筛选）"
+              ? `${dateRange[0].format("MM-DD")} ~ ${dateRange[1].format("MM-DD")} · 按成交日期`
+              : "按抖店成交日期汇总（不限发布日期）"
           }
+          breakdown={creationTypeBreakdown}
+          breakdownMetric="periodSalesAmount"
+        />
+        <MetricTile
+          label="日期内总销额均值"
+          value={money(metrics.avgPeriodSalesAmount)}
+          tone="avgSales"
+          sub={`${plainNumber(metrics.periodSalesWorkCount)} 个有成交作品`}
+          breakdown={creationTypeBreakdown}
+          breakdownMetric="avgPeriodSalesAmount"
         />
         <MetricTile
           label="日期内发布作品销售额"
           value={money(metrics.cumulativeSalesAmount)}
           sub="筛选日期内发布作品的销售额"
           tone="publishSales"
+          breakdown={creationTypeBreakdown}
+          breakdownMetric="cumulativeSalesAmount"
         />
-        <MetricTile label="平均完播率" value={percent(metrics.avgCompletion)} sub="仅统计有完播率记录" tone="rate" />
+        <MetricTile
+          label="平均完播率"
+          value={percent(metrics.avgCompletion)}
+          sub="仅统计有完播率记录"
+          tone="rate"
+          breakdown={creationTypeBreakdown}
+          breakdownMetric="avgCompletion"
+        />
       </div>
       </Spin>
 
@@ -1193,14 +1417,14 @@ export default function CreatorPage() {
                   <section className="creator-chart-panel creator-chart-panel-wide creator-chart-panel-sales">
                     <div className="creator-panel-title">
                       <BarChartOutlined />
-                      <span>区间销售额</span>
+                      <span>日期内总销额</span>
                     </div>
                     <div className="creator-chart-body creator-chart-body-wide">
                       <DailyMetricBarChart
                         data={shopSalesDailyTrend}
                         metric="salesAmount"
                         showAverageLine
-                        emptyText="当前筛选范围暂无可绘制区间销售额数据"
+                        emptyText="当前筛选范围暂无日期内总销额数据"
                       />
                     </div>
                   </section>

@@ -30,9 +30,21 @@ const DATE_PRESETS = new Set<string>([
   "custom",
 ]);
 
+export const CREATOR_INSIGHTS_CREATION_TYPE_FILTERS = ["实拍", "AI创作"] as const;
+
+const CREATION_TYPE_FILTER_VALUES = new Set<string>([
+  "all",
+  ...CREATOR_INSIGHTS_CREATION_TYPE_FILTERS,
+]);
+
+function normalizeCreationTypeFilter(value: unknown): string {
+  return typeof value === "string" && CREATION_TYPE_FILTER_VALUES.has(value) ? value : "all";
+}
+
 export type CreatorInsightsFiltersCache = {
   shopFilter: string;
   typeFilter: string;
+  creationTypeFilter: string;
   statusFilter: string;
   productionTeamFilter: string[];
   keyword: string;
@@ -54,6 +66,7 @@ export function readCreatorInsightsFiltersCache(): CreatorInsightsFiltersCache |
   return {
     shopFilter: typeof parsed.shopFilter === "string" ? parsed.shopFilter : "all",
     typeFilter: typeof parsed.typeFilter === "string" ? parsed.typeFilter : "all",
+    creationTypeFilter: normalizeCreationTypeFilter(parsed.creationTypeFilter),
     statusFilter: typeof parsed.statusFilter === "string" ? parsed.statusFilter : "all",
     productionTeamFilter: Array.isArray(parsed.productionTeamFilter)
       ? parsed.productionTeamFilter.map((value) => String(value)).filter(Boolean)

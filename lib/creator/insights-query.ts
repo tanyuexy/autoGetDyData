@@ -5,6 +5,7 @@ export const CREATOR_INSIGHTS_TABLE_PAGE_SIZE = 20;
 export type CreatorInsightsQueryParams = {
   shop: string;
   workType: string;
+  creationType: string;
   status: string;
   teams: string[];
   keyword: string;
@@ -27,6 +28,7 @@ export function parseCreatorInsightsQuery(searchParams: URLSearchParams): Creato
   return {
     shop: (searchParams.get("shop") || "all").trim(),
     workType: (searchParams.get("workType") || "all").trim(),
+    creationType: (searchParams.get("creationType") || "all").trim(),
     status: (searchParams.get("status") || "all").trim(),
     teams,
     keyword: (searchParams.get("keyword") || "").trim(),
@@ -40,7 +42,7 @@ export function parseCreatorInsightsQuery(searchParams: URLSearchParams): Creato
 export function buildCreatorInsightsMongoFilter(
   params: Pick<
     CreatorInsightsQueryParams,
-    "shop" | "workType" | "status" | "teams" | "keyword" | "dateStart" | "dateEnd"
+    "shop" | "workType" | "creationType" | "status" | "teams" | "keyword" | "dateStart" | "dateEnd"
   >,
   options: { includePublishDate?: boolean } = {}
 ): Filter<Record<string, unknown>> {
@@ -51,6 +53,9 @@ export function buildCreatorInsightsMongoFilter(
   }
   if (params.workType !== "all" && params.workType) {
     filter.workType = params.workType;
+  }
+  if (params.creationType !== "all" && params.creationType) {
+    filter.creationType = params.creationType;
   }
   if (params.status !== "all" && params.status) {
     filter.reviewStatus = params.status;
@@ -81,12 +86,13 @@ export function buildCreatorInsightsMongoFilter(
 export function buildCreatorInsightsSearchParams(
   params: Pick<
     CreatorInsightsQueryParams,
-    "shop" | "workType" | "status" | "teams" | "keyword" | "dateStart" | "dateEnd"
+    "shop" | "workType" | "creationType" | "status" | "teams" | "keyword" | "dateStart" | "dateEnd"
   > & { page?: number }
 ): URLSearchParams {
   const search = new URLSearchParams();
   if (params.shop !== "all") search.set("shop", params.shop);
   if (params.workType !== "all") search.set("workType", params.workType);
+  if (params.creationType !== "all") search.set("creationType", params.creationType);
   if (params.status !== "all") search.set("status", params.status);
   if (params.teams.length) search.set("teams", params.teams.join(","));
   if (params.keyword.trim()) search.set("keyword", params.keyword.trim());
