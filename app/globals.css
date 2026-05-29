@@ -263,6 +263,43 @@ body:has(.ant-modal-wrap) {
   flex-shrink: 0;
 }
 
+.creator-filter-item {
+  flex: 1 1 128px;
+  min-width: 0;
+  max-width: 200px;
+}
+
+.creator-filter-item-shop {
+  flex: 1 1 160px;
+  max-width: 220px;
+}
+
+.creator-filter-item-team {
+  flex: 1 1 180px;
+  max-width: 240px;
+}
+
+.creator-filter-item-date {
+  flex: 0 1 150px;
+  max-width: 160px;
+}
+
+.creator-filter-item-range {
+  flex: 1 1 240px;
+  max-width: 280px;
+}
+
+.creator-filter-item-search {
+  flex: 1 1 200px;
+  max-width: 280px;
+}
+
+.creator-filter-item .ant-select,
+.creator-filter-item .ant-picker,
+.creator-filter-item .ant-input-affix-wrapper {
+  width: 100% !important;
+}
+
 .creator-page-header-actions .creator-action-button,
 .creator-page-header-bottom .creator-action-button {
   display: inline-flex;
@@ -499,6 +536,50 @@ body:has(.ant-modal-wrap) {
   flex-shrink: 0;
 }
 
+.creator-chart-grid-quad {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.creator-chart-panel-publish {
+  --creator-chart-accent: #d97706;
+  --creator-chart-border: rgba(217, 119, 6, 0.22);
+  --creator-chart-tint: rgba(217, 119, 6, 0.045);
+}
+
+.creator-chart-panel-work-play {
+  --creator-chart-accent: #0f766e;
+  --creator-chart-border: rgba(15, 118, 110, 0.24);
+  --creator-chart-tint: rgba(15, 118, 110, 0.05);
+}
+
+.creator-chart-panel-work-sales {
+  --creator-chart-accent: #2563eb;
+  --creator-chart-border: rgba(37, 99, 235, 0.22);
+  --creator-chart-tint: rgba(37, 99, 235, 0.045);
+}
+
+.creator-chart-panel-work-engagement {
+  --creator-chart-accent: #4f46e5;
+  --creator-chart-border: rgba(79, 70, 229, 0.2);
+  --creator-chart-tint: rgba(79, 70, 229, 0.045);
+}
+
+.creator-chart-body-quad {
+  min-height: 280px;
+  flex: none;
+}
+
+.creator-work-rank-chart {
+  width: 100%;
+  min-height: 280px;
+}
+
+.creator-work-rank-chart > div {
+  height: 100% !important;
+  min-height: 280px;
+}
+
 .creator-chart-stack {
   display: flex;
   flex-direction: column;
@@ -642,18 +723,130 @@ body:has(.ant-modal-wrap) {
   text-align: center;
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 1500px) {
+  .creator-page-header-single {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .creator-page-header-toolbar {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  .creator-page-header-account {
+    flex: 1 1 220px;
+    min-width: 0;
+    border-right: none;
+    padding-right: 0;
+  }
+
+  .creator-page-header-account .ant-select {
+    min-width: 0 !important;
+    max-width: 100%;
+  }
+
   .creator-metric-grid {
-    grid-template-columns: repeat(3, minmax(130px, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .creator-metric-tile {
+    padding: 9px 10px 8px;
+  }
+
+  .creator-metric-value {
+    font-size: 16px;
+  }
+
+  .creator-metric-breakdown-name {
+    max-width: 56px;
+  }
+
+  .creator-chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .creator-chart-grid-quad {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .creator-chart-panel-play {
+    grid-column: 1 / -1;
+  }
+
+  .creator-chart-body {
+    min-height: 200px;
+  }
+
+  .creator-chart-body-wide {
+    height: 240px;
+    min-height: 240px;
+  }
+
+  .creator-chart-body-quad {
+    min-height: 260px;
+  }
+
+  .creator-work-rank-chart {
+    min-height: 260px;
+  }
+
+  .creator-filter-item {
+    max-width: calc(33.333% - 6px);
+  }
+
+  .creator-filter-item-shop,
+  .creator-filter-item-team,
+  .creator-filter-item-search,
+  .creator-filter-item-range {
+    max-width: calc(33.333% - 6px);
+  }
+
+  .creator-filter-item-search {
+    max-width: calc(50% - 4px);
+  }
+}
+
+@media (max-width: 1280px) {
+  .creator-metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .creator-chart-grid {
     grid-template-columns: 1fr;
   }
 
+  .creator-chart-grid-quad {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .creator-chart-panel-play {
+    grid-column: auto;
+  }
+
   .creator-chart-body-wide {
-    height: 260px;
-    min-height: 260px;
+    height: 220px;
+    min-height: 220px;
+  }
+
+  .creator-filter-item,
+  .creator-filter-item-shop,
+  .creator-filter-item-team,
+  .creator-filter-item-date,
+  .creator-filter-item-range {
+    max-width: calc(50% - 4px);
+  }
+
+  .creator-filter-item-search {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 960px) {
+  .creator-chart-grid-quad {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -20,6 +20,7 @@ export type {
   CreatorInsightsGroupPoint,
   CreatorInsightsSummaryMetrics,
   CreatorInsightsSummaryResult,
+  CreatorInsightsWorkPoint,
 } from "@/lib/creator/insights-summary";
 export type { CreatorInsightsQueryParams } from "@/lib/creator/insights-query";
 

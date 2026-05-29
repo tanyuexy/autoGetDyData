@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   App,
   Button,
@@ -43,6 +43,7 @@ import type {
   CreatorInsightsCreationTypePoint,
   CreatorInsightsGroupPoint,
   CreatorInsightsSummaryResult,
+  CreatorInsightsWorkPoint,
 } from "@/lib/creator/insights-summary";
 import {
   readCreatorInsightsFiltersCache,
@@ -74,6 +75,8 @@ const DATE_PRESET_OPTIONS: { label: string; value: DatePreset }[] = [
 ];
 
 type GroupPoint = CreatorInsightsGroupPoint;
+type WorkPoint = CreatorInsightsWorkPoint;
+type WorkMetric = keyof Pick<WorkPoint, "playCount" | "periodSalesAmount" | "interactionCount">;
 
 const EMPTY_SUMMARY: CreatorInsightsSummaryResult = {
   metrics: {
@@ -89,9 +92,13 @@ const EMPTY_SUMMARY: CreatorInsightsSummaryResult = {
   },
   creationTypeBreakdown: [],
   shopRanking: [],
+  shopPublishRanking: [],
   typeRanking: [],
   dailyTrend: [],
   shopSalesDailyTrend: [],
+  workPlayRanking: [],
+  workSalesRanking: [],
+  workInteractionRanking: [],
 };
 
 function compactNumber(value: number) {
@@ -115,6 +122,17 @@ function formatMetricValue(
 ) {
   if (metric === "salesAmount") return money(value);
   return compactNumber(value);
+}
+
+function formatWorkMetricValue(metric: WorkMetric, value: number) {
+  if (metric === "periodSalesAmount") return money(value);
+  return compactNumber(value);
+}
+
+function truncateChartLabel(text: string, maxLen = 18) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim() || "未命名作品";
+  if (normalized.length <= maxLen) return normalized;
+  return `${normalized.slice(0, maxLen - 1)}…`;
 }
 
 function percent(value: number | null) {
@@ -435,8 +453,9 @@ function MiniBarChart({
   labelWidth?: number;
 }) {
   const option = useMemo<EChartsOption | null>(() => {
-    const max = Math.max(...data.map((item) => item[metric]), 0);
-    if (!data.length || max <= 0) return null;
+    const sorted = [...data].sort((a, b) => b[metric] - a[metric] || a.name.localeCompare(b.name, "zh-CN"));
+    const max = Math.max(...sorted.map((item) => item[metric]), 0);
+    if (!sorted.length || max <= 0) return null;
     const axisMax = max * 1.18;
     const colorFrom = metric === "itemCount" ? CREATOR_CHART_COLORS.countLight : CREATOR_CHART_COLORS.rankLight;
     const colorTo = metric === "itemCount" ? CREATOR_CHART_COLORS.count : CREATOR_CHART_COLORS.rank;
@@ -475,7 +494,7 @@ function MiniBarChart({
       yAxis: {
         type: "category",
         inverse: true,
-        data: data.map((item) => item.name || "未分组"),
+        data: sorted.map((item) => item.name || "未分组"),
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
@@ -491,7 +510,7 @@ function MiniBarChart({
               type: "inside",
               yAxisIndex: 0,
               startValue: 0,
-              endValue: Math.min(maxVisibleRows - 1, data.length - 1),
+              endValue: Math.min(maxVisibleRows - 1, sorted.length - 1),
               zoomOnMouseWheel: false,
               moveOnMouseWheel: true,
               moveOnMouseMove: true,
@@ -502,7 +521,7 @@ function MiniBarChart({
               yAxisIndex: 0,
               show: false,
               startValue: 0,
-              endValue: Math.min(maxVisibleRows - 1, data.length - 1),
+              endValue: Math.min(maxVisibleRows - 1, sorted.length - 1),
               filterMode: "empty",
             },
           ]
@@ -510,7 +529,7 @@ function MiniBarChart({
       series: [
         {
           type: "bar",
-          data: data.map((item) => item[metric]),
+          data: sorted.map((item) => item[metric]),
           barWidth: 7,
           itemStyle: {
             color: chartLinearColor(colorFrom, colorTo),
@@ -539,6 +558,156 @@ function MiniBarChart({
   }
 
   return <CreatorChart option={option} />;
+}
+
+function ShopVerticalBarChart({ data, emptyText }: { data: GroupPoint[]; emptyText: string }) {
+  const option = useMemo<EChartsOption | null>(() => {
+    if (!data.length) return null;
+    const values = data.map((item) => item.itemCount);
+    const max = Math.max(...values, 0);
+    if (max <= 0) return null;
+    const denseAxis = data.length > 6;
+    return {
+      animation: true,
+      animationDuration: 700,
+      animationEasing: 'cubicOut',
+      grid: { top: 14, right: 8, bottom: denseAxis ? 34 : 22, left: 6, containLabel: true },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter(params: unknown) {
+          const row = Array.isArray(params) ? params[0] : params;
+          if (!row || typeof row !== 'object') return emptyText;
+          const datum = row as { axisValueLabel?: string; value?: number };
+          return `${datum.axisValueLabel || '未分组'}<br/>发布 ${plainNumber(Number(datum.value || 0))} 个作品`;
+        },
+      },
+      xAxis: {
+        type: 'category',
+        data: data.map((item) => item.name || '未分组'),
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
+          color: CREATOR_CHART_COLORS.axisText,
+          fontSize: 10,
+          rotate: denseAxis ? 35 : 0,
+          hideOverlap: !denseAxis,
+          formatter: (value: string) => truncateChartLabel(value, denseAxis ? 6 : 8),
+        },
+      },
+      yAxis: {
+        type: 'value',
+        minInterval: 1,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { lineStyle: { color: CREATOR_CHART_COLORS.gridLine } },
+        axisLabel: { color: '#8a837d', fontSize: 10 },
+      },
+      series: [{
+        type: 'bar',
+        data: values,
+        barWidth: denseAxis ? '62%' : '52%',
+        itemStyle: { color: chartVerticalColor('#fcd34d', '#d97706'), borderRadius: [4, 4, 0, 0] },
+        label: {
+          show: !denseAxis,
+          position: 'top',
+          color: '#b45309',
+          fontSize: 10,
+          formatter: ((params: any) => {
+            const value = Number(params?.value || 0);
+            return value > 0 ? plainNumber(value) : '';
+          }) as any,
+        },
+      }],
+    };
+  }, [data, emptyText]);
+  if (!option) return <ChartEmpty text={emptyText} />;
+  return <CreatorChart option={option} />;
+}
+
+type WorkChartVariant = 'play' | 'sales' | 'engagement';
+
+const WORK_CHART_COLORS: Record<WorkChartVariant, { from: string; to: string; label: string; rankLight: string }> = {
+  play: { from: CREATOR_CHART_COLORS.playLight, to: CREATOR_CHART_COLORS.play, label: CREATOR_CHART_COLORS.play, rankLight: 'rgba(15,118,110,0.14)' },
+  sales: { from: CREATOR_CHART_COLORS.salesLight, to: CREATOR_CHART_COLORS.sales, label: CREATOR_CHART_COLORS.sales, rankLight: 'rgba(37,99,235,0.14)' },
+  engagement: { from: CREATOR_CHART_COLORS.rankLight, to: CREATOR_CHART_COLORS.rank, label: CREATOR_CHART_COLORS.rank, rankLight: 'rgba(79,70,229,0.14)' },
+};
+
+function WorkTitleBarChart({
+  data,
+  metric,
+  emptyText,
+  variant,
+}: {
+  data: WorkPoint[];
+  metric: WorkMetric;
+  emptyText: string;
+  variant: WorkChartVariant;
+}) {
+  const option = useMemo<EChartsOption | null>(() => {
+    const values = data.map((item) => item[metric]);
+    const max = Math.max(...values, 0);
+    if (!data.length || max <= 0) return null;
+    const palette = WORK_CHART_COLORS[variant];
+    const labelWidth = 108;
+    return {
+      animation: true,
+      animationDuration: 650,
+      animationEasing: 'cubicOut',
+      grid: { top: 4, right: 52, bottom: 2, left: labelWidth + 8, containLabel: false },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter(params: unknown) {
+          const row = Array.isArray(params) ? params[0] : params;
+          if (!row || typeof row !== 'object') return emptyText;
+          const datum = row as { dataIndex?: number; value?: number };
+          const work = data[datum.dataIndex ?? -1];
+          if (!work) return emptyText;
+          return `${work.title}<br/>店铺：${work.shopName}<br/>${formatWorkMetricValue(metric, Number(datum.value || 0))}`;
+        },
+      },
+      xAxis: { type: 'value', show: false, max: max * 1.12 },
+      yAxis: {
+        type: 'category',
+        inverse: true,
+        data: data.map((item, index) => `${index + 1}. ${truncateChartLabel(item.title, 16)}`),
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: '#2f2b28', fontSize: 10, width: labelWidth, overflow: 'truncate' },
+      },
+      series: [{
+        type: 'bar',
+        data: values.map((value, index) => ({
+          value,
+          itemStyle: {
+            color: index < 3 ? chartLinearColor(palette.from, palette.to) : chartLinearColor(palette.rankLight, palette.to),
+            borderRadius: [999, 999, 999, 999],
+          },
+        })),
+        barWidth: 7,
+        label: {
+          show: true,
+          position: 'right',
+          distance: 4,
+          color: palette.label,
+          fontSize: 10,
+          formatter: ((params: any) => formatWorkMetricValue(metric, Number(params?.value || 0))) as any,
+        },
+        showBackground: true,
+        backgroundStyle: { color: CREATOR_CHART_COLORS.track, borderRadius: [999, 999, 999, 999] },
+      }],
+    };
+  }, [data, emptyText, metric, variant]);
+
+  if (!option) return <ChartEmpty text={emptyText} />;
+
+  const chartHeight = Math.max(280, data.length * 26 + 24);
+  return (
+    <div className="creator-work-rank-chart" style={{ height: chartHeight }}>
+      <CreatorChart option={option} />
+    </div>
+  );
 }
 
 function TrendChart({ data }: { data: GroupPoint[] }) {
@@ -641,6 +810,9 @@ function DailyMetricBarChart({
   /** 日期内总销额等场景：展示日均水平虚线 */
   showAverageLine?: boolean;
 }) {
+  const chartRef = useRef<ReactECharts>(null);
+  const averageMetaRef = useRef<{ average: number; averageLabel: string } | null>(null);
+
   const option = useMemo<EChartsOption | null>(() => {
     if (!data.length) return null;
     const values = data.map((item) => item[metric]);
@@ -652,6 +824,8 @@ function DailyMetricBarChart({
     const averageLabel =
       metric === "salesAmount" ? `日均 ${money(average)}` : `日均 ${formatMetricValue(metric, average)}`;
 
+    averageMetaRef.current = showAverageLine ? { average, averageLabel } : null;
+
     return {
       animation: true,
       animationDuration: 850,
@@ -659,8 +833,8 @@ function DailyMetricBarChart({
       animationEasing: "cubicOut",
       animationDelay: (index: number) => index * 24,
       grid: {
-        top: showAverageLine ? 28 : 18,
-        right: showAverageLine ? 72 : 12,
+        top: showAverageLine ? 40 : 18,
+        right: 12,
         bottom: denseAxis ? 28 : 20,
         left: 8,
         containLabel: true,
@@ -730,19 +904,14 @@ function DailyMetricBarChart({
           markLine: showAverageLine
             ? {
                 silent: true,
-                symbol: ["none", "none"],
+                symbol: ["none", "circle"],
+                symbolSize: 5,
                 lineStyle: {
                   type: "dashed",
                   color: "rgba(37, 99, 235, 0.55)",
                   width: 1.5,
                 },
-                label: {
-                  show: true,
-                  formatter: averageLabel,
-                  color: CREATOR_CHART_COLORS.sales,
-                  fontSize: 11,
-                  position: "insideEndTop",
-                },
+                label: { show: false },
                 data: [{ yAxis: average, name: "日均" }],
               }
             : undefined,
@@ -751,11 +920,135 @@ function DailyMetricBarChart({
     };
   }, [data, emptyText, metric, showAverageLine]);
 
+  const renderAverageBadge = useCallback((echartsInstance?: unknown) => {
+    const chart = (echartsInstance ?? chartRef.current?.getEchartsInstance?.()) as
+      | {
+          isDisposed?: () => boolean;
+          getWidth: () => number;
+          convertToPixel: (finder: { gridIndex: number }, value: [number, number]) => number[];
+          setOption: (option: EChartsOption, opts?: { replaceMerge?: string[] }) => void;
+        }
+      | undefined;
+    const meta = averageMetaRef.current;
+    if (!chart || chart.isDisposed?.() || !showAverageLine || !meta) return;
+    if (chart.getWidth() <= 0) return;
+
+    const lastIdx = data.length - 1;
+    let xAnchor = 0;
+    let yAvg = 0;
+    try {
+      const pixel = chart.convertToPixel({ gridIndex: 0 }, [lastIdx, meta.average]);
+      if (!Array.isArray(pixel) || pixel.length < 2) return;
+      xAnchor = pixel[0];
+      yAvg = pixel[1];
+      if (!Number.isFinite(xAnchor) || !Number.isFinite(yAvg)) return;
+    } catch {
+      return;
+    }
+
+    const chartWidth = chart.getWidth();
+    const badgeText = meta.averageLabel;
+    const badgeWidth = Math.min(128, Math.max(84, badgeText.length * 7 + 16));
+    const badgeHeight = 22;
+    const badgeLeft = chartWidth - badgeWidth - 8;
+    const badgeTop = 6;
+
+    try {
+      chart.setOption(
+        {
+          graphic: [
+            {
+              type: "group",
+              silent: true,
+              children: [
+                {
+                  type: "line",
+                  shape: {
+                    x1: badgeLeft + badgeWidth * 0.18,
+                    y1: badgeTop + badgeHeight,
+                    x2: xAnchor,
+                    y2: yAvg,
+                  },
+                  style: {
+                    stroke: "rgba(37, 99, 235, 0.45)",
+                    lineWidth: 1,
+                    lineDash: [3, 3],
+                  },
+                  z: 1,
+                },
+                {
+                  type: "circle",
+                  shape: { cx: xAnchor, cy: yAvg, r: 3 },
+                  style: { fill: CREATOR_CHART_COLORS.sales, stroke: "#fff", lineWidth: 1 },
+                  z: 2,
+                },
+                {
+                  type: "rect",
+                  shape: { x: badgeLeft, y: badgeTop, width: badgeWidth, height: badgeHeight, r: 4 },
+                  style: {
+                    fill: "rgba(255,255,255,0.96)",
+                    stroke: "rgba(37, 99, 235, 0.35)",
+                    lineWidth: 1,
+                  },
+                  z: 3,
+                },
+                {
+                  type: "text",
+                  style: {
+                    x: badgeLeft + badgeWidth / 2,
+                    y: badgeTop + badgeHeight / 2,
+                    text: badgeText,
+                    fill: CREATOR_CHART_COLORS.sales,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    align: "center",
+                    verticalAlign: "middle",
+                  },
+                  z: 4,
+                },
+              ],
+            },
+          ],
+        } as EChartsOption,
+        { replaceMerge: ["graphic"] },
+      );
+    } catch {
+      // 图表尚未完成布局
+    }
+  }, [data.length, showAverageLine]);
+
+  const scheduleAverageBadge = useCallback(
+    (echartsInstance?: unknown) => {
+      requestAnimationFrame(() => {
+        renderAverageBadge(echartsInstance);
+      });
+    },
+    [renderAverageBadge],
+  );
+
+  useEffect(() => {
+    if (!showAverageLine) return;
+    const handleResize = () => scheduleAverageBadge();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [scheduleAverageBadge, showAverageLine]);
+
   if (!option) {
     return <ChartEmpty text={emptyText} />;
   }
 
-  return <CreatorChart option={option} />;
+  return (
+    <ReactECharts
+      ref={chartRef}
+      option={option}
+      notMerge
+      lazyUpdate
+      style={{ width: "100%", height: "100%", minHeight: 0 }}
+      opts={{ renderer: "svg" }}
+      onChartReady={(chart) => scheduleAverageBadge(chart)}
+      onEvents={{ finished: () => scheduleAverageBadge() }}
+    />
+  );
 }
 
 
@@ -922,9 +1215,13 @@ export default function CreatorPage() {
         metrics: data.metrics || EMPTY_SUMMARY.metrics,
         creationTypeBreakdown: data.creationTypeBreakdown || [],
         shopRanking: data.shopRanking || [],
+        shopPublishRanking: data.shopPublishRanking || [],
         typeRanking: data.typeRanking || [],
         dailyTrend: data.dailyTrend || [],
         shopSalesDailyTrend: data.shopSalesDailyTrend || [],
+        workPlayRanking: data.workPlayRanking || [],
+        workSalesRanking: data.workSalesRanking || [],
+        workInteractionRanking: data.workInteractionRanking || [],
       });
       setDbTotal(data.dbTotal ?? 0);
       setLastImportedAt(data.lastImportedAt || null);
@@ -1087,9 +1384,13 @@ export default function CreatorPage() {
   const metrics = summary.metrics;
   const creationTypeBreakdown = summary.creationTypeBreakdown;
   const shopRanking = summary.shopRanking;
+  const shopPublishRanking = summary.shopPublishRanking;
   const typeRanking = summary.typeRanking;
   const dailyTrend = summary.dailyTrend;
   const shopSalesDailyTrend = summary.shopSalesDailyTrend;
+  const workPlayRanking = summary.workPlayRanking;
+  const workSalesRanking = summary.workSalesRanking;
+  const workInteractionRanking = summary.workInteractionRanking;
 
   const columns = useMemo<TableProps<CreatorInsightItem>["columns"]>(
     () => [
@@ -1280,59 +1581,76 @@ export default function CreatorPage() {
       </div>
 
       <div className="creator-filter-row">
-        <Select
-          value={shopFilter}
-          onChange={setShopFilter}
-          options={shopOptions}
-          showSearch
-          loading={loadingFacets}
-          style={{ width: 190 }}
-        />
-        <SelectWithTooltip value={typeFilter} onChange={setTypeFilter} options={typeOptions} loading={loadingFacets} style={{ width: 130 }} />
-        <SelectWithTooltip
-          value={creationTypeFilter}
-          onChange={setCreationTypeFilter}
-          options={creationTypeOptions}
-          style={{ width: 130 }}
-        />
-        <SelectWithTooltip value={statusFilter} onChange={setStatusFilter} options={statusOptions} loading={loadingFacets} style={{ width: 130 }} />
-        <Select
-          mode="multiple"
-          allowClear
-          value={productionTeamFilter}
-          onChange={setProductionTeamFilter}
-          options={productionTeamOptions}
-          placeholder="制作团队"
-          maxTagCount="responsive"
-          loading={loadingFacets}
-          style={{ width: 220 }}
-        />
-        <Select
-          value={datePreset}
-          onChange={handleDatePresetChange}
-          options={DATE_PRESET_OPTIONS}
-          style={{ width: 150 }}
-        />
-        {datePreset === "custom" ? (
-          <RangePicker
-            value={dateRange ?? undefined}
-            onChange={(value) => {
-              if (!value || !value[0] || !value[1]) {
-                setDateRange(null);
-                return;
-              }
-              setDateRange([value[0].startOf("day"), value[1].startOf("day")]);
-            }}
+        <div className="creator-filter-item creator-filter-item-shop">
+          <Select
+            value={shopFilter}
+            onChange={setShopFilter}
+            options={shopOptions}
+            showSearch
+            loading={loadingFacets}
+            style={{ width: "100%" }}
           />
+        </div>
+        <div className="creator-filter-item">
+          <SelectWithTooltip value={typeFilter} onChange={setTypeFilter} options={typeOptions} loading={loadingFacets} style={{ width: "100%" }} />
+        </div>
+        <div className="creator-filter-item">
+          <SelectWithTooltip
+            value={creationTypeFilter}
+            onChange={setCreationTypeFilter}
+            options={creationTypeOptions}
+            style={{ width: "100%" }}
+          />
+        </div>
+        <div className="creator-filter-item">
+          <SelectWithTooltip value={statusFilter} onChange={setStatusFilter} options={statusOptions} loading={loadingFacets} style={{ width: "100%" }} />
+        </div>
+        <div className="creator-filter-item creator-filter-item-team">
+          <Select
+            mode="multiple"
+            allowClear
+            value={productionTeamFilter}
+            onChange={setProductionTeamFilter}
+            options={productionTeamOptions}
+            placeholder="制作团队"
+            maxTagCount="responsive"
+            loading={loadingFacets}
+            style={{ width: "100%" }}
+          />
+        </div>
+        <div className="creator-filter-item creator-filter-item-date">
+          <Select
+            value={datePreset}
+            onChange={handleDatePresetChange}
+            options={DATE_PRESET_OPTIONS}
+            style={{ width: "100%" }}
+          />
+        </div>
+        {datePreset === "custom" ? (
+          <div className="creator-filter-item creator-filter-item-range">
+            <RangePicker
+              value={dateRange ?? undefined}
+              onChange={(value) => {
+                if (!value || !value[0] || !value[1]) {
+                  setDateRange(null);
+                  return;
+                }
+                setDateRange([value[0].startOf("day"), value[1].startOf("day")]);
+              }}
+              style={{ width: "100%" }}
+            />
+          </div>
         ) : null}
-        <Input
-          allowClear
-          prefix={<SearchOutlined />}
-          placeholder="搜索作品 / 商品"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          style={{ width: 240 }}
-        />
+        <div className="creator-filter-item creator-filter-item-search">
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder="搜索作品 / 商品"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            style={{ width: "100%" }}
+          />
+        </div>
       </div>
 
       <Spin spinning={loadingSummary}>
@@ -1428,6 +1746,63 @@ export default function CreatorPage() {
                       />
                     </div>
                   </section>
+
+                  <div className="creator-chart-grid creator-chart-grid-quad">
+                    <section className="creator-chart-panel creator-chart-panel-publish">
+                      <div className="creator-panel-title">
+                        <BarChartOutlined />
+                        <span>店铺发布量</span>
+                      </div>
+                      <div className="creator-chart-body creator-chart-body-quad">
+                        <ShopVerticalBarChart
+                          data={shopPublishRanking}
+                          emptyText="暂无店铺发布数据"
+                        />
+                      </div>
+                    </section>
+                    <section className="creator-chart-panel creator-chart-panel-work-play">
+                      <div className="creator-panel-title">
+                        <BarChartOutlined />
+                        <span>作品播放 TOP10</span>
+                      </div>
+                      <div className="creator-chart-body creator-chart-body-quad">
+                        <WorkTitleBarChart
+                          data={workPlayRanking}
+                          metric="playCount"
+                          variant="play"
+                          emptyText="暂无播放排行"
+                        />
+                      </div>
+                    </section>
+                    <section className="creator-chart-panel creator-chart-panel-work-sales">
+                      <div className="creator-panel-title">
+                        <BarChartOutlined />
+                        <span>作品销额 TOP10</span>
+                      </div>
+                      <div className="creator-chart-body creator-chart-body-quad">
+                        <WorkTitleBarChart
+                          data={workSalesRanking}
+                          metric="periodSalesAmount"
+                          variant="sales"
+                          emptyText="暂无销额排行"
+                        />
+                      </div>
+                    </section>
+                    <section className="creator-chart-panel creator-chart-panel-work-engagement">
+                      <div className="creator-panel-title">
+                        <BarChartOutlined />
+                        <span>作品互动 TOP10</span>
+                      </div>
+                      <div className="creator-chart-body creator-chart-body-quad">
+                        <WorkTitleBarChart
+                          data={workInteractionRanking}
+                          metric="interactionCount"
+                          variant="engagement"
+                          emptyText="暂无互动排行"
+                        />
+                      </div>
+                    </section>
+                  </div>
 
                   <div className="creator-chart-grid">
                     <section className="creator-chart-panel creator-chart-panel-play">

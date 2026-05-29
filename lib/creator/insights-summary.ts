@@ -39,13 +39,26 @@ export type CreatorInsightsSummaryMetrics = {
   avgPeriodSalesAmount: number;
 };
 
+export type CreatorInsightsWorkPoint = {
+  title: string;
+  shopName: string;
+  playCount: number;
+  salesAmount: number;
+  periodSalesAmount: number;
+  interactionCount: number;
+};
+
 export type CreatorInsightsSummaryResult = {
   metrics: CreatorInsightsSummaryMetrics;
   creationTypeBreakdown: CreatorInsightsCreationTypePoint[];
   shopRanking: CreatorInsightsGroupPoint[];
+  shopPublishRanking: CreatorInsightsGroupPoint[];
   typeRanking: CreatorInsightsGroupPoint[];
   dailyTrend: CreatorInsightsGroupPoint[];
   shopSalesDailyTrend: CreatorInsightsGroupPoint[];
+  workPlayRanking: CreatorInsightsWorkPoint[];
+  workSalesRanking: CreatorInsightsWorkPoint[];
+  workInteractionRanking: CreatorInsightsWorkPoint[];
 };
 
 export type CreatorInsightLeanRow = {
@@ -220,6 +233,66 @@ function buildCreationTypeBreakdown(
   return points.sort((a, b) => b.itemCount - a.itemCount || a.name.localeCompare(b.name, "zh-CN"));
 }
 
+const WORK_RANKING_LIMIT = 10;
+
+function buildWorkPoints(
+  tableItems: CreatorInsightLeanRow[],
+  salesScopeItems: CreatorInsightLeanRow[],
+  salesDateRange: { start: string; end: string } | null
+): CreatorInsightsWorkPoint[] {
+  const periodSalesByTitle = new Map<string, number>();
+  const seenSalesTitle = new Set<string>();
+  for (const item of salesScopeItems) {
+    const key = normalizeWorkTitleKey(item.title);
+    if (!key || seenSalesTitle.has(key)) continue;
+    seenSalesTitle.add(key);
+    periodSalesByTitle.set(key, sumShopSalesEntries(item.shopSalesEntries, salesDateRange));
+  }
+
+  const byTitle = new Map<string, CreatorInsightsWorkPoint>();
+  for (const item of tableItems) {
+    const titleKey = normalizeWorkTitleKey(item.title);
+    const key = titleKey || `__row__:${item.title}`;
+    const periodSalesAmount = titleKey ? periodSalesByTitle.get(titleKey) || 0 : 0;
+    const point: CreatorInsightsWorkPoint = {
+      title: item.title?.trim() || "未命名作品",
+      shopName: item.shopName || "未填写",
+      playCount: item.playCount || 0,
+      salesAmount: item.salesAmount || 0,
+      periodSalesAmount,
+      interactionCount: interactionCount(item),
+    };
+    const existing = byTitle.get(key);
+    if (!existing) {
+      byTitle.set(key, point);
+      continue;
+    }
+    if (point.playCount >= existing.playCount) {
+      byTitle.set(key, {
+        ...point,
+        periodSalesAmount: Math.max(existing.periodSalesAmount, periodSalesAmount),
+      });
+    } else {
+      byTitle.set(key, {
+        ...existing,
+        periodSalesAmount: Math.max(existing.periodSalesAmount, periodSalesAmount),
+      });
+    }
+  }
+  return [...byTitle.values()];
+}
+
+function topWorksByMetric(
+  points: CreatorInsightsWorkPoint[],
+  metric: keyof Pick<CreatorInsightsWorkPoint, "playCount" | "periodSalesAmount" | "interactionCount">,
+  limit = WORK_RANKING_LIMIT
+): CreatorInsightsWorkPoint[] {
+  return [...points]
+    .filter((point) => point[metric] > 0)
+    .sort((a, b) => b[metric] - a[metric] || a.title.localeCompare(b.title, "zh-CN"))
+    .slice(0, limit);
+}
+
 export function computeCreatorInsightsSummary(input: {
   tableItems: CreatorInsightLeanRow[];
   salesScopeItems: CreatorInsightLeanRow[];
@@ -241,6 +314,9 @@ export function computeCreatorInsightsSummary(input: {
     withCompletion.reduce((sum, item) => sum + (item.completionRate || 0), 0) /
     Math.max(withCompletion.length, 1);
 
+  const shopGroups = groupBy(tableItems, (item) => item.shopName);
+  const workPoints = buildWorkPoints(tableItems, salesScopeItems, salesDateRange);
+
   return {
     metrics: {
       count,
@@ -254,9 +330,17 @@ export function computeCreatorInsightsSummary(input: {
       avgPeriodSalesAmount,
     },
     creationTypeBreakdown: buildCreationTypeBreakdown(tableItems, salesScopeItems, salesDateRange),
-    shopRanking: groupBy(tableItems, (item) => item.shopName).sort((a, b) => b.playCount - a.playCount),
+    shopRanking: [...shopGroups].sort(
+      (a, b) => b.playCount - a.playCount || a.name.localeCompare(b.name, "zh-CN")
+    ),
+    shopPublishRanking: [...shopGroups].sort(
+      (a, b) => b.itemCount - a.itemCount || a.name.localeCompare(b.name, "zh-CN")
+    ),
     typeRanking: groupBy(tableItems, (item) => item.workType).sort((a, b) => b.itemCount - a.itemCount),
     dailyTrend: buildDailySeries(tableItems, chartDateRange),
     shopSalesDailyTrend: buildShopSalesDailySeries(salesScopeItems, chartDateRange),
+    workPlayRanking: topWorksByMetric(workPoints, "playCount"),
+    workSalesRanking: topWorksByMetric(workPoints, "periodSalesAmount"),
+    workInteractionRanking: topWorksByMetric(workPoints, "interactionCount"),
   };
 }
