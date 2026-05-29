@@ -354,7 +354,7 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
       ) : null}
 
       <Space orientation="vertical" size={14} style={{ width: "100%" }}>
-        <Space wrap align="center" size={12}>
+        <Space wrap align="center" size={12} style={{ width: "100%", maxWidth: "100%" }}>
           <Segmented<GenerationMode>
             value={mode}
             onChange={setMode}
@@ -365,7 +365,7 @@ export function GenerationFormSection(props: GenerationFormSectionProps) {
               { label: "文生视频", value: "text" },
             ]}
           />
-          <Select value={model} onChange={setModel} options={modelOptions} style={{ minWidth: 300 }} />
+          <Select value={model} onChange={setModel} options={modelOptions} style={{ minWidth: 0, flex: "1 1 240px", maxWidth: "100%" }} />
           <Space>
             {selectedModel?.generation.map((item) => (
               <Tag key={item} style={antdTagPresetStyle("blue")}>

@@ -1,6 +1,32 @@
 export function AiVideoTableStyles() {
   return (
     <style jsx global>{`
+
+      .ai-video-page {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+      }
+
+      .ai-video-page .ant-space,
+      .ai-video-page section {
+        max-width: 100%;
+        min-width: 0;
+      }
+
+      .ai-video-table-wrap--fluid,
+      .ai-video-table-wrap--fluid .ant-table-wrapper,
+      .ai-video-table-wrap--fluid .ant-table,
+      .ai-video-table-wrap--fluid .ant-table-container,
+      .ai-video-table-wrap--fluid .ant-table-content {
+        max-width: 100%;
+        min-width: 0;
+      }
+
+      .ai-video-table-wrap--fluid .ant-table-content {
+        overflow-x: hidden !important;
+      }
+
       .ai-video-table-wrap {
         width: 100%;
         min-width: 0;
@@ -10,14 +36,9 @@ export function AiVideoTableStyles() {
         padding-inline-end: 0;
       }
 
-      .ai-video-table-wrap .ant-table-content {
+      .ai-video-table-wrap--scroll .ant-table-content {
         overflow-x: auto !important;
-      }
-
-      @media (max-width: 1679px) {
-        .ai-video-table-wrap .ant-table-content {
-          scrollbar-gutter: stable both-edges;
-        }
+        scrollbar-gutter: stable both-edges;
       }
 
       .ai-video-clips-table .ant-table-thead > tr > th,

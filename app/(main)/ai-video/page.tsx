@@ -14,7 +14,7 @@ export default function AiVideoPage() {
   const vm = useAiVideoPage();
 
   return (
-    <div style={pageWrapStyle}>
+    <div className="ai-video-page" style={pageWrapStyle}>
       <AiVideoTableStyles />
 
       {!vm.pageReady ? (

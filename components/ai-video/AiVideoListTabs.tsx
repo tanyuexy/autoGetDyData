@@ -20,6 +20,11 @@ import type { AiVideoComposedFilm } from "@/types";
 import { antdTagPresetStyle } from "@/lib/semanticTagStyles";
 import { sectionStyle } from "@/lib/ai-video/styles";
 import type { ClipItem } from "@/lib/ai-video/types";
+import {
+  AI_VIDEO_CLIPS_TABLE_MIN_WIDTH,
+  AI_VIDEO_FILMS_TABLE_MIN_WIDTH,
+  useAdaptiveTableScroll,
+} from "@/lib/ai-video/tableLayout";
 
 export interface AiVideoListTabsProps {
   listTab: "clips" | "films";
@@ -103,6 +108,9 @@ export function AiVideoListTabs({
   composing,
   onComposeSubmit,
 }: AiVideoListTabsProps) {
+  const clipsTableScroll = useAdaptiveTableScroll(AI_VIDEO_CLIPS_TABLE_MIN_WIDTH);
+  const filmsTableScroll = useAdaptiveTableScroll(AI_VIDEO_FILMS_TABLE_MIN_WIDTH);
+
   return (
     <>
       <section style={sectionStyle}>
@@ -197,13 +205,16 @@ export function AiVideoListTabs({
                   />
 
                   {visibleClips.length ? (
-                    <div className="ai-video-table-wrap">
+                    <div
+                      ref={clipsTableScroll.wrapRef}
+                      className={`ai-video-table-wrap${clipsTableScroll.scrollX ? " ai-video-table-wrap--scroll" : " ai-video-table-wrap--fluid"}`}
+                    >
                       <Table
                         rowKey="id"
                         size="small"
                         className="ai-video-clips-table"
-                        tableLayout="fixed"
-                        scroll={{ x: "max-content" }}
+                        tableLayout={clipsTableScroll.scrollX ? "fixed" : "auto"}
+                        scroll={clipsTableScroll.scrollX ? { x: clipsTableScroll.scrollX } : undefined}
                         pagination={{ pageSize: 8 }}
                         dataSource={visibleClips}
                         columns={clipColumns}
@@ -288,13 +299,16 @@ export function AiVideoListTabs({
                           title={`已选 ${selectedFilms.length} 个成片`}
                         />
                       ) : null}
-                      <div className="ai-video-table-wrap">
+                      <div
+                        ref={filmsTableScroll.wrapRef}
+                        className={`ai-video-table-wrap${filmsTableScroll.scrollX ? " ai-video-table-wrap--scroll" : " ai-video-table-wrap--fluid"}`}
+                      >
                         <Table
                           rowKey="id"
                           size="small"
                           className="ai-video-films-table"
-                          tableLayout="fixed"
-                          scroll={{ x: "max-content" }}
+                          tableLayout={filmsTableScroll.scrollX ? "fixed" : "auto"}
+                          scroll={filmsTableScroll.scrollX ? { x: filmsTableScroll.scrollX } : undefined}
                           pagination={{ pageSize: 8 }}
                           dataSource={composedFilms}
                           columns={filmColumns}
