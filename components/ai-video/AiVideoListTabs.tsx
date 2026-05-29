@@ -197,47 +197,51 @@ export function AiVideoListTabs({
                   />
 
                   {visibleClips.length ? (
-                    <Table
-                      rowKey="id"
-                      size="small"
-                      className="ai-video-clips-table"
-                      pagination={{ pageSize: 8 }}
-                      dataSource={visibleClips}
-                      columns={clipColumns}
-                      rowSelection={{
-                        selectedRowKeys: selectedClipIds,
-                        onChange: onClipSelectionChange,
-                        getCheckboxProps: (record) => ({ disabled: !record.videoUrl }),
-                        align: "center",
-                        columnWidth: 52,
-                        renderCell: (_checked, record, _index, originNode) => {
-                          const order = composeOrderMap.get(record.id);
-                          if (!order) return originNode;
-                          return (
-                            <div
-                              style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                alignItems: "center",
-                                gap: 2,
-                              }}
-                            >
-                              <Tag
+                    <div className="ai-video-table-wrap">
+                      <Table
+                        rowKey="id"
+                        size="small"
+                        className="ai-video-clips-table"
+                        tableLayout="fixed"
+                        scroll={{ x: "max-content" }}
+                        pagination={{ pageSize: 8 }}
+                        dataSource={visibleClips}
+                        columns={clipColumns}
+                        rowSelection={{
+                          selectedRowKeys: selectedClipIds,
+                          onChange: onClipSelectionChange,
+                          getCheckboxProps: (record) => ({ disabled: !record.videoUrl }),
+                          align: "center",
+                          columnWidth: 52,
+                          renderCell: (_checked, record, _index, originNode) => {
+                            const order = composeOrderMap.get(record.id);
+                            if (!order) return originNode;
+                            return (
+                              <div
                                 style={{
-                                  ...antdTagPresetStyle("blue"),
-                                  margin: 0,
-                                  minWidth: 22,
-                                  textAlign: "center",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  alignItems: "center",
+                                  gap: 2,
                                 }}
                               >
-                                {order}
-                              </Tag>
-                              {originNode}
-                            </div>
-                          );
-                        },
-                      }}
-                    />
+                                <Tag
+                                  style={{
+                                    ...antdTagPresetStyle("blue"),
+                                    margin: 0,
+                                    minWidth: 22,
+                                    textAlign: "center",
+                                  }}
+                                >
+                                  {order}
+                                </Tag>
+                                {originNode}
+                              </div>
+                            );
+                          },
+                        }}
+                      />
+                    </div>
                   ) : (
                     <Empty description={clipTagFilter || clipComposeGroupFilter ? "当前筛选条件下暂无片段" : "还没有片段"} />
                   )}
@@ -284,22 +288,24 @@ export function AiVideoListTabs({
                           title={`已选 ${selectedFilms.length} 个成片`}
                         />
                       ) : null}
-                      <Table
-                        rowKey="id"
-                        size="small"
-                        className="ai-video-films-table"
-                        tableLayout="fixed"
-                        scroll={{ x: 988 }}
-                        pagination={{ pageSize: 8 }}
-                        dataSource={composedFilms}
-                        columns={filmColumns}
-                        rowSelection={{
-                          selectedRowKeys: selectedFilmIds,
-                          onChange: onFilmSelectionChange,
-                          getCheckboxProps: (record) => ({ disabled: !record.videoUrl }),
-                          align: "center",
-                        }}
-                      />
+                      <div className="ai-video-table-wrap">
+                        <Table
+                          rowKey="id"
+                          size="small"
+                          className="ai-video-films-table"
+                          tableLayout="fixed"
+                          scroll={{ x: "max-content" }}
+                          pagination={{ pageSize: 8 }}
+                          dataSource={composedFilms}
+                          columns={filmColumns}
+                          rowSelection={{
+                            selectedRowKeys: selectedFilmIds,
+                            onChange: onFilmSelectionChange,
+                            getCheckboxProps: (record) => ({ disabled: !record.videoUrl }),
+                            align: "center",
+                          }}
+                        />
+                      </div>
                     </>
                   ) : filmsHydrated ? (
                     <Empty description="还没有成片，合成后会自动出现在这里" />

@@ -1,6 +1,25 @@
 export function AiVideoTableStyles() {
   return (
     <style jsx global>{`
+      .ai-video-table-wrap {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .ai-video-table-wrap .ant-table-wrapper {
+        padding-inline-end: 0;
+      }
+
+      .ai-video-table-wrap .ant-table-content {
+        overflow-x: auto !important;
+      }
+
+      @media (max-width: 1679px) {
+        .ai-video-table-wrap .ant-table-content {
+          scrollbar-gutter: stable both-edges;
+        }
+      }
+
       .ai-video-clips-table .ant-table-thead > tr > th,
       .ai-video-clips-table .ant-table-tbody > tr > td,
       .ai-video-films-table .ant-table-thead > tr > th,

@@ -115,7 +115,7 @@ export function buildClipTableColumns(
     {
       title: "素材",
       key: "materials",
-      width: 280,
+      width: 248,
       align: "center",
       render: (_, record) => (
         <ClipMaterialThumbnails clip={record} onPreviewMaterial={onPreviewMaterial} />
@@ -190,7 +190,7 @@ export function buildClipTableColumns(
     {
       title: "提示词",
       dataIndex: "prompt",
-      width: 260,
+      width: 228,
       align: "center",
       render: (value) => {
         const prompt = String(value || "").trim();

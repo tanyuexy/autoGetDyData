@@ -377,6 +377,54 @@ function ChartEmpty({ text }: { text: string }) {
   );
 }
 
+function useChartInView() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (visible) return;
+    const node = ref.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.12, rootMargin: "0px 0px -6% 0px" }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [visible]);
+
+  return { ref, visible };
+}
+
+function InViewChartMount({
+  children,
+  className,
+  style,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const { ref, visible } = useChartInView();
+
+  return (
+    <div
+      ref={ref}
+      className={className}
+      style={{ width: "100%", height: "100%", minHeight: 0, ...style }}
+    >
+      {visible ? children : <div className="creator-chart-inview-placeholder" aria-hidden />}
+    </div>
+  );
+}
+
 function formatChartDayLabel(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   return match ? `${match[2]}/${match[3]}` : value;
@@ -427,13 +475,15 @@ function chartVerticalColor(from: string, to: string) {
 
 function CreatorChart({ option }: { option: EChartsOption }) {
   return (
-    <ReactECharts
-      option={option}
-      notMerge
-      lazyUpdate
-      style={{ width: "100%", height: "100%", minHeight: 0 }}
-      opts={{ renderer: "svg" }}
-    />
+    <InViewChartMount>
+      <ReactECharts
+        option={option}
+        notMerge
+        lazyUpdate
+        style={{ width: "100%", height: "100%", minHeight: 0 }}
+        opts={{ renderer: "svg" }}
+      />
+    </InViewChartMount>
   );
 }
 
@@ -704,9 +754,15 @@ function WorkTitleBarChart({
 
   const chartHeight = Math.max(280, data.length * 26 + 24);
   return (
-    <div className="creator-work-rank-chart" style={{ height: chartHeight }}>
-      <CreatorChart option={option} />
-    </div>
+    <InViewChartMount className="creator-work-rank-chart" style={{ height: chartHeight }}>
+      <ReactECharts
+        option={option}
+        notMerge
+        lazyUpdate
+        style={{ width: "100%", height: "100%", minHeight: 0 }}
+        opts={{ renderer: "svg" }}
+      />
+    </InViewChartMount>
   );
 }
 
@@ -786,15 +842,21 @@ function TrendChart({ data }: { data: GroupPoint[] }) {
   }
 
   return (
-    <div className="creator-trend-chart">
+    <InViewChartMount className="creator-trend-chart">
       <div className="creator-trend-chart-body">
-        <CreatorChart option={option} />
+        <ReactECharts
+          option={option}
+          notMerge
+          lazyUpdate
+          style={{ width: "100%", height: "100%", minHeight: 0 }}
+          opts={{ renderer: "svg" }}
+        />
       </div>
       <div className="creator-trend-axis">
         <span>{points[0]?.name}</span>
         <span>{points[points.length - 1]?.name}</span>
       </div>
-    </div>
+    </InViewChartMount>
   );
 }
 
@@ -1038,16 +1100,18 @@ function DailyMetricBarChart({
   }
 
   return (
-    <ReactECharts
-      ref={chartRef}
-      option={option}
-      notMerge
-      lazyUpdate
-      style={{ width: "100%", height: "100%", minHeight: 0 }}
-      opts={{ renderer: "svg" }}
-      onChartReady={(chart) => scheduleAverageBadge(chart)}
-      onEvents={{ finished: () => scheduleAverageBadge() }}
-    />
+    <InViewChartMount>
+      <ReactECharts
+        ref={chartRef}
+        option={option}
+        notMerge
+        lazyUpdate
+        style={{ width: "100%", height: "100%", minHeight: 0 }}
+        opts={{ renderer: "svg" }}
+        onChartReady={(chart) => scheduleAverageBadge(chart)}
+        onEvents={{ finished: () => scheduleAverageBadge() }}
+      />
+    </InViewChartMount>
   );
 }
 
@@ -1390,7 +1454,6 @@ export default function CreatorPage() {
   const shopSalesDailyTrend = summary.shopSalesDailyTrend;
   const workPlayRanking = summary.workPlayRanking;
   const workSalesRanking = summary.workSalesRanking;
-  const workInteractionRanking = summary.workInteractionRanking;
 
   const columns = useMemo<TableProps<CreatorInsightItem>["columns"]>(
     () => [
@@ -1747,19 +1810,20 @@ export default function CreatorPage() {
                     </div>
                   </section>
 
-                  <div className="creator-chart-grid creator-chart-grid-quad">
-                    <section className="creator-chart-panel creator-chart-panel-publish">
-                      <div className="creator-panel-title">
-                        <BarChartOutlined />
-                        <span>店铺发布量</span>
-                      </div>
-                      <div className="creator-chart-body creator-chart-body-quad">
-                        <ShopVerticalBarChart
-                          data={shopPublishRanking}
-                          emptyText="暂无店铺发布数据"
-                        />
-                      </div>
-                    </section>
+                  <section className="creator-chart-panel creator-chart-panel-wide creator-chart-panel-publish">
+                    <div className="creator-panel-title">
+                      <BarChartOutlined />
+                      <span>店铺发布量</span>
+                    </div>
+                    <div className="creator-chart-body creator-chart-body-wide">
+                      <ShopVerticalBarChart
+                        data={shopPublishRanking}
+                        emptyText="暂无店铺发布数据"
+                      />
+                    </div>
+                  </section>
+
+                  <div className="creator-chart-grid creator-chart-grid-duo">
                     <section className="creator-chart-panel creator-chart-panel-work-play">
                       <div className="creator-panel-title">
                         <BarChartOutlined />
@@ -1785,20 +1849,6 @@ export default function CreatorPage() {
                           metric="periodSalesAmount"
                           variant="sales"
                           emptyText="暂无销额排行"
-                        />
-                      </div>
-                    </section>
-                    <section className="creator-chart-panel creator-chart-panel-work-engagement">
-                      <div className="creator-panel-title">
-                        <BarChartOutlined />
-                        <span>作品互动 TOP10</span>
-                      </div>
-                      <div className="creator-chart-body creator-chart-body-quad">
-                        <WorkTitleBarChart
-                          data={workInteractionRanking}
-                          metric="interactionCount"
-                          variant="engagement"
-                          emptyText="暂无互动排行"
                         />
                       </div>
                     </section>
