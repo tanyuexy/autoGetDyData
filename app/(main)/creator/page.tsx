@@ -9,6 +9,7 @@ import {
   Input,
   Select,
   Space,
+  Spin,
   Table,
   Tag,
   Tabs,
@@ -32,11 +33,15 @@ import { useToolbarMultiSelect } from "@/hooks/useToolbarMultiSelect";
 import { SELECT_ALL_CREATOR_EXPORT } from "@/lib/toolbarMultiSelect";
 import { semanticTagStyle } from "@/lib/semanticTagStyles";
 import type { CreatorInsightItem } from "@/lib/creator/insights-types";
+import { sumShopSalesEntries } from "@/lib/creator/insights-types";
 import {
-  normalizeWorkTitleKey,
-  sumShopSalesEntries,
-  sumShopSalesEntriesForItems,
-} from "@/lib/creator/insights-types";
+  buildCreatorInsightsSearchParams,
+  CREATOR_INSIGHTS_TABLE_PAGE_SIZE,
+} from "@/lib/creator/insights-query";
+import type {
+  CreatorInsightsGroupPoint,
+  CreatorInsightsSummaryResult,
+} from "@/lib/creator/insights-summary";
 import {
   readCreatorInsightsFiltersCache,
   writeCreatorInsightsFiltersCache,
@@ -65,12 +70,21 @@ const DATE_PRESET_OPTIONS: { label: string; value: DatePreset }[] = [
   { label: "自定义范围", value: "custom" },
 ];
 
-type GroupPoint = {
-  name: string;
-  playCount: number;
-  salesAmount: number;
-  interactionCount: number;
-  itemCount: number;
+type GroupPoint = CreatorInsightsGroupPoint;
+
+const EMPTY_SUMMARY: CreatorInsightsSummaryResult = {
+  metrics: {
+    count: 0,
+    playCount: 0,
+    interactions: 0,
+    avgCompletion: 0,
+    cumulativeSalesAmount: 0,
+    periodSalesAmount: 0,
+  },
+  shopRanking: [],
+  typeRanking: [],
+  dailyTrend: [],
+  shopSalesDailyTrend: [],
 };
 
 function compactNumber(value: number) {
@@ -583,144 +597,54 @@ function DailyMetricBarChart({
   return <CreatorChart option={option} />;
 }
 
-function groupBy(items: CreatorInsightItem[], key: (item: CreatorInsightItem) => string): GroupPoint[] {
-  const map = new Map<string, GroupPoint>();
-  for (const item of items) {
-    const name = key(item) || "未填写";
-    const current =
-      map.get(name) ||
-      ({
-        name,
-        playCount: 0,
-        salesAmount: 0,
-        interactionCount: 0,
-        itemCount: 0,
-      } satisfies GroupPoint);
-    current.playCount += item.playCount || 0;
-    current.salesAmount += item.salesAmount || 0;
-    current.interactionCount += interactionCount(item);
-    current.itemCount += 1;
-    map.set(name, current);
-  }
-  return [...map.values()];
-}
 
-function emptyGroupPoint(name: string): GroupPoint {
-  return {
-    name,
-    playCount: 0,
-    salesAmount: 0,
-    interactionCount: 0,
-    itemCount: 0,
-  };
-}
-
-function buildDailySeries(items: CreatorInsightItem[], range: [Dayjs, Dayjs] | null): GroupPoint[] {
-  const grouped = new Map<string, GroupPoint>();
-  for (const item of items) {
-    if (!item.publishDate) continue;
-    const name = item.publishDate;
-    const current = grouped.get(name) || emptyGroupPoint(name);
-    current.playCount += item.playCount || 0;
-    current.salesAmount += item.salesAmount || 0;
-    current.interactionCount += interactionCount(item);
-    current.itemCount += 1;
-    grouped.set(name, current);
-  }
-
-  if (!range) {
-    return [...grouped.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  const start = range[0].startOf("day");
-  const end = range[1].startOf("day");
-  const days: GroupPoint[] = [];
-  for (let current = start; !current.isAfter(end, "day"); current = current.add(1, "day")) {
-    const key = current.format("YYYY-MM-DD");
-    days.push(grouped.get(key) || emptyGroupPoint(key));
-  }
-  return days;
-}
-
-function buildShopSalesDailySeries(items: CreatorInsightItem[], range: [Dayjs, Dayjs] | null): GroupPoint[] {
-  const grouped = new Map<string, GroupPoint>();
-  const seenTitles = new Set<string>();
-  for (const item of items) {
-    const titleKey = normalizeWorkTitleKey(item.title);
-    if (!titleKey || seenTitles.has(titleKey)) continue;
-    seenTitles.add(titleKey);
-    for (const entry of item.shopSalesEntries || []) {
-      if (!entry.salesDate) continue;
-      if (range) {
-        const salesDay = dayjs(entry.salesDate);
-        if (salesDay.isBefore(range[0], "day") || salesDay.isAfter(range[1], "day")) continue;
-      }
-      const current = grouped.get(entry.salesDate) || emptyGroupPoint(entry.salesDate);
-      current.salesAmount += entry.amount || 0;
-      grouped.set(entry.salesDate, current);
-    }
-  }
-
-  if (!range) {
-    return [...grouped.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  const start = range[0].startOf("day");
-  const end = range[1].startOf("day");
-  const days: GroupPoint[] = [];
-  for (let current = start; !current.isAfter(end, "day"); current = current.add(1, "day")) {
-    const key = current.format("YYYY-MM-DD");
-    days.push(grouped.get(key) || emptyGroupPoint(key));
-  }
-  return days;
-}
-
-function filterInsightItems(
-  items: CreatorInsightItem[],
-  options: {
-    shopFilter: string;
-    typeFilter: string;
-    statusFilter: string;
-    productionTeamFilter: string[];
-    keyword: string;
-    dateRange?: [Dayjs, Dayjs] | null;
-  }
-) {
-  const q = options.keyword.trim().toLowerCase();
-  return items.filter((item) => {
-    if (options.shopFilter !== "all" && item.shopName !== options.shopFilter) return false;
-    if (options.typeFilter !== "all" && item.workType !== options.typeFilter) return false;
-    if (options.statusFilter !== "all" && item.reviewStatus !== options.statusFilter) return false;
-    if (options.productionTeamFilter.length && !options.productionTeamFilter.includes(item.productionTeam || "")) {
-      return false;
-    }
-    if (options.dateRange) {
-      if (!item.publishDate) return false;
-      const d = dayjs(item.publishDate);
-      if (d.isBefore(options.dateRange[0], "day") || d.isAfter(options.dateRange[1], "day")) return false;
-    }
-    if (q) {
-      const haystack = `${item.title} ${item.shopName} ${item.relatedProduct} ${item.productionTeam}`.toLowerCase();
-      if (!haystack.includes(q)) return false;
-    }
-    return true;
+function insightsFilterQuery(params: {
+  shopFilter: string;
+  typeFilter: string;
+  statusFilter: string;
+  productionTeamFilter: string[];
+  keyword: string;
+  dateRange: [Dayjs, Dayjs] | null;
+  page?: number;
+}) {
+  return buildCreatorInsightsSearchParams({
+    shop: params.shopFilter,
+    workType: params.typeFilter,
+    status: params.statusFilter,
+    teams: params.productionTeamFilter,
+    keyword: params.keyword,
+    dateStart: params.dateRange?.[0]?.format("YYYY-MM-DD") ?? null,
+    dateEnd: params.dateRange?.[1]?.format("YYYY-MM-DD") ?? null,
+    page: params.page,
   });
 }
 
 export default function CreatorPage() {
   const { message } = App.useApp();
   const [accounts, setAccounts] = useState<CreatorAccount[]>([]);
-  const [items, setItems] = useState<CreatorInsightItem[]>([]);
-  const [total, setTotal] = useState(0);
+  const [tableItems, setTableItems] = useState<CreatorInsightItem[]>([]);
+  const [tablePage, setTablePage] = useState(1);
+  const [tableFilteredTotal, setTableFilteredTotal] = useState(0);
+  const [dbTotal, setDbTotal] = useState(0);
   const [lastImportedAt, setLastImportedAt] = useState<string | null>(null);
+  const [summary, setSummary] = useState<CreatorInsightsSummaryResult>(EMPTY_SUMMARY);
+  const [facets, setFacets] = useState({
+    shops: [] as string[],
+    workTypes: [] as string[],
+    reviewStatuses: [] as string[],
+    productionTeams: [] as string[],
+  });
   const [loadingAccounts, setLoadingAccounts] = useState(true);
-  const [loadingData, setLoadingData] = useState(true);
+  const [loadingTable, setLoadingTable] = useState(true);
+  const [loadingSummary, setLoadingSummary] = useState(true);
+  const [loadingFacets, setLoadingFacets] = useState(true);
   const [syncingData, setSyncingData] = useState(false);
   const [shopFilter, setShopFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [productionTeamFilter, setProductionTeamFilter] = useState<string[]>([]);
   const [keyword, setKeyword] = useState("");
+  const [keywordDebounced, setKeywordDebounced] = useState("");
   const [datePreset, setDatePreset] = useState<DatePreset>("thisMonth");
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(() => dateRangeFromPreset("thisMonth"));
   const [filtersHydrated, setFiltersHydrated] = useState(false);
@@ -778,26 +702,107 @@ export default function CreatorPage() {
     }
   }, [message]);
 
-  const fetchInsights = useCallback(async () => {
-    setLoadingData(true);
+  const filterParams = useMemo(
+    () => ({
+      shopFilter,
+      typeFilter,
+      statusFilter,
+      productionTeamFilter,
+      keyword: keywordDebounced,
+      dateRange,
+    }),
+    [
+      dateRange,
+      keywordDebounced,
+      productionTeamFilter,
+      shopFilter,
+      statusFilter,
+      typeFilter,
+    ]
+  );
+
+  const fetchFacets = useCallback(async () => {
+    setLoadingFacets(true);
     try {
-      const res = await fetch("/api/creator/insights?limit=10000", { cache: "no-store" });
+      const res = await fetch("/api/creator/insights/facets", { cache: "no-store" });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "加载抖创数据失败");
-      setItems(data.items || []);
-      setTotal(data.total || 0);
+      if (!res.ok) throw new Error(data.error || "加载筛选项失败");
+      setFacets({
+        shops: data.shops || [],
+        workTypes: data.workTypes || [],
+        reviewStatuses: data.reviewStatuses || [],
+        productionTeams: data.productionTeams || [],
+      });
+      setDbTotal(data.dbTotal || 0);
       setLastImportedAt(data.lastImportedAt || null);
     } catch (e: unknown) {
-      message.error(e instanceof Error ? e.message : "加载抖创数据失败");
+      message.error(e instanceof Error ? e.message : "加载筛选项失败");
     } finally {
-      setLoadingData(false);
+      setLoadingFacets(false);
     }
   }, [message]);
 
+  const fetchSummary = useCallback(async () => {
+    setLoadingSummary(true);
+    try {
+      const query = insightsFilterQuery(filterParams).toString();
+      const res = await fetch(`/api/creator/insights/summary?${query}`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "加载汇总数据失败");
+      setSummary({
+        metrics: data.metrics || EMPTY_SUMMARY.metrics,
+        shopRanking: data.shopRanking || [],
+        typeRanking: data.typeRanking || [],
+        dailyTrend: data.dailyTrend || [],
+        shopSalesDailyTrend: data.shopSalesDailyTrend || [],
+      });
+      setDbTotal(data.dbTotal ?? 0);
+      setLastImportedAt(data.lastImportedAt || null);
+    } catch (e: unknown) {
+      message.error(e instanceof Error ? e.message : "加载汇总数据失败");
+    } finally {
+      setLoadingSummary(false);
+    }
+  }, [filterParams, message]);
+
+  const fetchTablePage = useCallback(
+    async (page: number) => {
+      setLoadingTable(true);
+      try {
+        const query = insightsFilterQuery({ ...filterParams, page }).toString();
+        const res = await fetch(`/api/creator/insights?${query}`, { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "加载表格数据失败");
+        setTableItems(data.items || []);
+        setTablePage(data.page || page);
+        setTableFilteredTotal(data.filteredTotal || 0);
+        setDbTotal(data.dbTotal ?? 0);
+        setLastImportedAt(data.lastImportedAt || null);
+      } catch (e: unknown) {
+        message.error(e instanceof Error ? e.message : "加载表格数据失败");
+      } finally {
+        setLoadingTable(false);
+      }
+    },
+    [filterParams, message]
+  );
+
   useEffect(() => {
     void fetchAccounts();
-    void fetchInsights();
-  }, [fetchAccounts, fetchInsights]);
+    void fetchFacets();
+  }, [fetchAccounts, fetchFacets]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setKeywordDebounced(keyword), 300);
+    return () => window.clearTimeout(timer);
+  }, [keyword]);
+
+  useEffect(() => {
+    if (!filtersHydrated) return;
+    setTablePage(1);
+    void fetchSummary();
+    void fetchTablePage(1);
+  }, [filterParams, filtersHydrated, fetchSummary, fetchTablePage]);
 
   const validAccounts = useMemo(
     () => accounts.filter((a) => a.hasStorageState).map((a) => a.name),
@@ -849,7 +854,7 @@ export default function CreatorPage() {
       message.success(
         `已从飞书入库 ${data.importedCount || 0} 条作品，${data.shopMatchedCount || 0} 条已关联抖店成交明细`
       );
-      await fetchInsights();
+      await Promise.all([fetchFacets(), fetchSummary(), fetchTablePage(1)]);
     } catch (e: unknown) {
       message.error(e instanceof Error ? e.message : "同步飞书数据失败");
     } finally {
@@ -864,31 +869,6 @@ export default function CreatorPage() {
     }
   }
 
-  const filteredItems = useMemo(
-    () =>
-      filterInsightItems(items, {
-        shopFilter,
-        typeFilter,
-        statusFilter,
-        productionTeamFilter,
-        keyword,
-        dateRange,
-      }),
-    [dateRange, items, keyword, productionTeamFilter, shopFilter, statusFilter, typeFilter]
-  );
-
-  const salesScopeItems = useMemo(
-    () =>
-      filterInsightItems(items, {
-        shopFilter,
-        typeFilter,
-        statusFilter,
-        productionTeamFilter,
-        keyword,
-      }),
-    [items, keyword, productionTeamFilter, shopFilter, statusFilter, typeFilter]
-  );
-
   const salesDateRange = useMemo(() => {
     if (!dateRange) return null;
     return {
@@ -900,76 +880,37 @@ export default function CreatorPage() {
   const shopOptions = useMemo(
     () => [
       { label: "全部店铺", value: "all" },
-      ...Array.from(new Set(items.map((item) => item.shopName).filter(Boolean))).map((name) => ({
-        label: name,
-        value: name,
-      })),
+      ...facets.shops.map((name) => ({ label: name, value: name })),
     ],
-    [items]
+    [facets.shops]
   );
 
   const typeOptions = useMemo(
     () => [
       { label: "全部体裁", value: "all" },
-      ...Array.from(new Set(items.map((item) => item.workType).filter(Boolean))).map((name) => ({
-        label: name,
-        value: name,
-      })),
+      ...facets.workTypes.map((name) => ({ label: name, value: name })),
     ],
-    [items]
+    [facets.workTypes]
   );
 
   const statusOptions = useMemo(
     () => [
       { label: "全部状态", value: "all" },
-      ...Array.from(new Set(items.map((item) => item.reviewStatus).filter(Boolean))).map((name) => ({
-        label: name,
-        value: name,
-      })),
+      ...facets.reviewStatuses.map((name) => ({ label: name, value: name })),
     ],
-    [items]
+    [facets.reviewStatuses]
   );
 
   const productionTeamOptions = useMemo(
-    () =>
-      Array.from(new Set(items.map((item) => item.productionTeam).filter(Boolean))).map((name) => ({
-        label: name,
-        value: name,
-      })),
-    [items]
+    () => facets.productionTeams.map((name) => ({ label: name, value: name })),
+    [facets.productionTeams]
   );
 
-  const metrics = useMemo(() => {
-    const count = filteredItems.length;
-    const playCount = filteredItems.reduce((sum, item) => sum + (item.playCount || 0), 0);
-    const cumulativeSalesAmount = sumShopSalesEntriesForItems(filteredItems, salesDateRange);
-    const periodSalesAmount = sumShopSalesEntriesForItems(salesScopeItems, salesDateRange);
-    const interactions = filteredItems.reduce((sum, item) => sum + interactionCount(item), 0);
-    const avgCompletion =
-      filteredItems.reduce((sum, item) => sum + (item.completionRate || 0), 0) /
-      Math.max(filteredItems.filter((item) => item.completionRate != null).length, 1);
-    return { count, playCount, cumulativeSalesAmount, periodSalesAmount, interactions, avgCompletion };
-  }, [filteredItems, salesDateRange, salesScopeItems]);
-
-  const shopRanking = useMemo(
-    () => groupBy(filteredItems, (item) => item.shopName).sort((a, b) => b.playCount - a.playCount),
-    [filteredItems]
-  );
-
-  const typeRanking = useMemo(
-    () => groupBy(filteredItems, (item) => item.workType).sort((a, b) => b.itemCount - a.itemCount),
-    [filteredItems]
-  );
-
-  const dailyTrend = useMemo(
-    () => buildDailySeries(filteredItems, dateRange),
-    [dateRange, filteredItems]
-  );
-
-  const shopSalesDailyTrend = useMemo(
-    () => buildShopSalesDailySeries(salesScopeItems, dateRange),
-    [dateRange, salesScopeItems]
-  );
+  const metrics = summary.metrics;
+  const shopRanking = summary.shopRanking;
+  const typeRanking = summary.typeRanking;
+  const dailyTrend = summary.dailyTrend;
+  const shopSalesDailyTrend = summary.shopSalesDailyTrend;
 
   const columns = useMemo<TableProps<CreatorInsightItem>["columns"]>(
     () => [
@@ -1098,7 +1039,7 @@ export default function CreatorPage() {
               抖创数据
             </Title>
             <Text type="secondary" className="creator-page-subtitle" style={{ fontSize: 11 }}>
-              已入库 {plainNumber(total)} 条 · 同步 {lastImportText}
+              已入库 {plainNumber(dbTotal)} 条 · 同步 {lastImportText}
             </Text>
           </div>
           <Button
@@ -1160,9 +1101,16 @@ export default function CreatorPage() {
       </div>
 
       <div className="creator-filter-row">
-        <Select value={shopFilter} onChange={setShopFilter} options={shopOptions} showSearch style={{ width: 190 }} />
-        <Select value={typeFilter} onChange={setTypeFilter} options={typeOptions} style={{ width: 130 }} />
-        <Select value={statusFilter} onChange={setStatusFilter} options={statusOptions} style={{ width: 130 }} />
+        <Select
+          value={shopFilter}
+          onChange={setShopFilter}
+          options={shopOptions}
+          showSearch
+          loading={loadingFacets}
+          style={{ width: 190 }}
+        />
+        <Select value={typeFilter} onChange={setTypeFilter} options={typeOptions} loading={loadingFacets} style={{ width: 130 }} />
+        <Select value={statusFilter} onChange={setStatusFilter} options={statusOptions} loading={loadingFacets} style={{ width: 130 }} />
         <Select
           mode="multiple"
           allowClear
@@ -1171,6 +1119,7 @@ export default function CreatorPage() {
           options={productionTeamOptions}
           placeholder="制作团队"
           maxTagCount="responsive"
+          loading={loadingFacets}
           style={{ width: 220 }}
         />
         <Select
@@ -1201,11 +1150,12 @@ export default function CreatorPage() {
         />
       </div>
 
+      <Spin spinning={loadingSummary}>
       <div className="creator-metric-grid">
         <MetricTile
           label="作品数"
           value={plainNumber(metrics.count)}
-          sub={`筛选后 / 总 ${plainNumber(total)}`}
+          sub={`筛选后 / 总 ${plainNumber(dbTotal)}`}
           tone="neutral"
         />
         <MetricTile label="播放量" value={compactNumber(metrics.playCount)} sub={plainNumber(metrics.playCount)} tone="volume" />
@@ -1228,6 +1178,7 @@ export default function CreatorPage() {
         />
         <MetricTile label="平均完播率" value={percent(metrics.avgCompletion)} sub="仅统计有完播率记录" tone="rate" />
       </div>
+      </Spin>
 
       <div className="creator-data-tabs">
         <Tabs
@@ -1237,6 +1188,7 @@ export default function CreatorPage() {
               key: "charts",
               label: "图表概览",
               children: (
+                <Spin spinning={loadingSummary}>
                 <div className="creator-chart-stack">
                   <section className="creator-chart-panel creator-chart-panel-wide creator-chart-panel-sales">
                     <div className="creator-panel-title">
@@ -1295,6 +1247,7 @@ export default function CreatorPage() {
                     </section>
                   </div>
                 </div>
+                </Spin>
               ),
             },
             {
@@ -1306,11 +1259,18 @@ export default function CreatorPage() {
                     rowKey="recordId"
                     size="small"
                     bordered={false}
-                    loading={loadingData}
-                    dataSource={filteredItems}
+                    loading={loadingTable}
+                    dataSource={tableItems}
                     columns={columns}
                     tableLayout="fixed"
-                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (count) => `共 ${count} 条` }}
+                    pagination={{
+                      current: tablePage,
+                      pageSize: CREATOR_INSIGHTS_TABLE_PAGE_SIZE,
+                      total: tableFilteredTotal,
+                      showSizeChanger: false,
+                      showTotal: (count) => `共 ${count} 条`,
+                      onChange: (page) => void fetchTablePage(page),
+                    }}
                     scroll={{ x: "max-content" }}
                     sticky
                     locale={{ emptyText: "暂无抖创数据，请点击「从飞书入库」" }}

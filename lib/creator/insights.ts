@@ -5,8 +5,23 @@ import { readBitable } from "@/lib/feishu/core/readBitable";
 import { getValidAccessToken } from "@/lib/feishu/core/oauth";
 import { listBitableFields } from "@/lib/feishu/core/bitable";
 import type { CreatorInsightItem, ShopSalesEntry } from "@/lib/creator/insights-types";
+import {
+  buildCreatorInsightsMongoFilter,
+  type CreatorInsightsQueryParams,
+} from "@/lib/creator/insights-query";
+import {
+  computeCreatorInsightsSummary,
+  type CreatorInsightLeanRow,
+  type CreatorInsightsSummaryResult,
+} from "@/lib/creator/insights-summary";
 
 export type { CreatorInsightItem, ShopSalesEntry } from "@/lib/creator/insights-types";
+export type {
+  CreatorInsightsGroupPoint,
+  CreatorInsightsSummaryMetrics,
+  CreatorInsightsSummaryResult,
+} from "@/lib/creator/insights-summary";
+export type { CreatorInsightsQueryParams } from "@/lib/creator/insights-query";
 
 const COLLECTION = "creator_bitable_items";
 
@@ -329,6 +344,52 @@ export async function syncCreatorInsightsFromFeishu() {
   };
 }
 
+const LIST_PROJECTION = {
+  recordId: 1,
+  title: 1,
+  shopName: 1,
+  publishTime: 1,
+  publishDate: 1,
+  workType: 1,
+  creationType: 1,
+  reviewStatus: 1,
+  playCount: 1,
+  completionRate: 1,
+  fiveSecondCompletionRate: 1,
+  coverClickRate: 1,
+  twoSecondBounceRate: 1,
+  avgPlayDuration: 1,
+  likeCount: 1,
+  shareCount: 1,
+  commentCount: 1,
+  favoriteCount: 1,
+  profileVisitCount: 1,
+  followerCount: 1,
+  salesAmount: 1,
+  shopSalesEntries: 1,
+  productId: 1,
+  relatedProduct: 1,
+  videoLink: 1,
+  productionTeam: 1,
+  importedAt: 1,
+  updatedAt: 1,
+} as const;
+
+const SUMMARY_PROJECTION = {
+  title: 1,
+  shopName: 1,
+  publishDate: 1,
+  workType: 1,
+  playCount: 1,
+  completionRate: 1,
+  likeCount: 1,
+  shareCount: 1,
+  commentCount: 1,
+  favoriteCount: 1,
+  salesAmount: 1,
+  shopSalesEntries: 1,
+} as const;
+
 function serializeItem(item: StoredCreatorInsightItem & { _id: unknown }): CreatorInsightItem {
   return {
     ...item,
@@ -340,26 +401,120 @@ function serializeItem(item: StoredCreatorInsightItem & { _id: unknown }): Creat
   };
 }
 
-export async function listCreatorInsights(options: { limit?: number } = {}) {
+function serializeListItem(item: StoredCreatorInsightItem & { _id: unknown }): Omit<CreatorInsightItem, "rawFields"> {
+  const { rawFields: _raw, ...rest } = serializeItem(item);
+  return rest;
+}
+
+function toLeanRow(item: StoredCreatorInsightItem): CreatorInsightLeanRow {
+  return {
+    title: item.title || "",
+    shopName: item.shopName || "",
+    publishDate: item.publishDate || null,
+    workType: item.workType || "",
+    playCount: item.playCount || 0,
+    completionRate: item.completionRate ?? null,
+    likeCount: item.likeCount || 0,
+    shareCount: item.shareCount || 0,
+    commentCount: item.commentCount || 0,
+    favoriteCount: item.favoriteCount || 0,
+    salesAmount: item.salesAmount || 0,
+    shopSalesEntries: Array.isArray(item.shopSalesEntries) ? item.shopSalesEntries : [],
+  };
+}
+
+async function getCreatorInsightsMeta() {
+  const db = await getDb();
+  const [dbTotal, lastImport] = await Promise.all([
+    db.collection(COLLECTION).countDocuments(),
+    db
+      .collection<StoredCreatorInsightItem>(COLLECTION)
+      .find({})
+      .sort({ importedAt: -1 })
+      .limit(1)
+      .next(),
+  ]);
+  return {
+    dbTotal,
+    lastImportedAt: lastImport?.importedAt?.toISOString?.() || null,
+  };
+}
+
+export async function getCreatorInsightsFacets() {
   await ensureCreatorInsightIndexes();
   const db = await getDb();
-  const limit = Math.min(Math.max(Number(options.limit || 500), 1), 10000);
-  const items = await db
-    .collection<StoredCreatorInsightItem>(COLLECTION)
-    .find({})
-    .sort({ publishDate: -1, playCount: -1, updatedAt: -1 })
-    .limit(limit)
-    .toArray();
-  const total = await db.collection(COLLECTION).countDocuments();
-  const lastImport = await db
-    .collection<StoredCreatorInsightItem>(COLLECTION)
-    .find({})
-    .sort({ importedAt: -1 })
-    .limit(1)
-    .next();
+  const collection = db.collection<StoredCreatorInsightItem>(COLLECTION);
+  const [shops, workTypes, reviewStatuses, productionTeams, meta] = await Promise.all([
+    collection.distinct("shopName", { shopName: { $exists: true, $ne: "" } }),
+    collection.distinct("workType", { workType: { $exists: true, $ne: "" } }),
+    collection.distinct("reviewStatus", { reviewStatus: { $exists: true, $ne: "" } }),
+    collection.distinct("productionTeam", { productionTeam: { $exists: true, $ne: "" } }),
+    getCreatorInsightsMeta(),
+  ]);
   return {
-    items: items.map(serializeItem),
-    total,
-    lastImportedAt: lastImport?.importedAt?.toISOString?.() || null,
+    shops: shops.filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN")),
+    workTypes: workTypes.filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN")),
+    reviewStatuses: reviewStatuses.filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN")),
+    productionTeams: productionTeams.filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN")),
+    ...meta,
+  };
+}
+
+export async function listCreatorInsightsPage(params: CreatorInsightsQueryParams) {
+  await ensureCreatorInsightIndexes();
+  const db = await getDb();
+  const filter = buildCreatorInsightsMongoFilter(params, { includePublishDate: true });
+  const collection = db.collection<StoredCreatorInsightItem>(COLLECTION);
+  const skip = (params.page - 1) * params.pageSize;
+  const [items, filteredTotal, meta] = await Promise.all([
+    collection
+      .find(filter, { projection: LIST_PROJECTION })
+      .sort({ publishDate: -1, playCount: -1, updatedAt: -1 })
+      .skip(skip)
+      .limit(params.pageSize)
+      .toArray(),
+    collection.countDocuments(filter),
+    getCreatorInsightsMeta(),
+  ]);
+  return {
+    items: items.map(serializeListItem),
+    page: params.page,
+    pageSize: params.pageSize,
+    filteredTotal,
+    ...meta,
+  };
+}
+
+export async function getCreatorInsightsSummary(
+  params: Pick<
+    CreatorInsightsQueryParams,
+    "shop" | "workType" | "status" | "teams" | "keyword" | "dateStart" | "dateEnd"
+  >
+): Promise<CreatorInsightsSummaryResult & { dbTotal: number; lastImportedAt: string | null }> {
+  await ensureCreatorInsightIndexes();
+  const db = await getDb();
+  const tableFilter = buildCreatorInsightsMongoFilter(params, { includePublishDate: true });
+  const salesScopeFilter = buildCreatorInsightsMongoFilter(params, { includePublishDate: false });
+  const collection = db.collection<StoredCreatorInsightItem>(COLLECTION);
+  const salesDateRange =
+    params.dateStart && params.dateEnd ? { start: params.dateStart, end: params.dateEnd } : null;
+  const chartDateRange = salesDateRange;
+
+  const [tableDocs, salesScopeDocs, meta] = await Promise.all([
+    collection.find(tableFilter, { projection: SUMMARY_PROJECTION }).toArray(),
+    collection.find(salesScopeFilter, { projection: SUMMARY_PROJECTION }).toArray(),
+    getCreatorInsightsMeta(),
+  ]);
+
+  const summary = computeCreatorInsightsSummary({
+    tableItems: tableDocs.map(toLeanRow),
+    salesScopeItems: salesScopeDocs.map(toLeanRow),
+    salesDateRange,
+    chartDateRange,
+  });
+
+  return {
+    ...summary,
+    ...meta,
   };
 }
