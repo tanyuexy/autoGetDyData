@@ -7,6 +7,7 @@ import {
   TASK_STATUS_SELECT_OPTIONS,
   TASK_TYPE_OPTIONS,
 } from "@/lib/creator-publish/constants";
+import { normalizePublishTaskTableSorter, type PublishTaskTableSorter } from "@/lib/creator-publish/scheduleUtils";
 import type { PublishTask, TaskStatus, TaskType } from "@/lib/creator-publish/types";
 import { FEISHU_AI_PROVIDER_OPTIONS } from "@/lib/feishu/aiProvider";
 import type { FeishuAiProvider } from "@/types";
@@ -37,7 +38,7 @@ type PublishTaskListSectionProps = {
   loadingTasks: boolean;
   filteredTasks: PublishTask[];
   columns: ColumnsType<PublishTask>;
-  setScheduleColumnSortOrder: (v: "ascend" | "descend" | null) => void;
+  setTableSorter: (v: PublishTaskTableSorter | null) => void;
   rowSelection: { selectedRowKeys: React.Key[]; onChange: (keys: React.Key[]) => void };
 };
 
@@ -65,7 +66,7 @@ export function PublishTaskListSection({
   loadingTasks,
   filteredTasks,
   columns,
-  setScheduleColumnSortOrder,
+  setTableSorter,
   rowSelection,
 }: PublishTaskListSectionProps) {
   const handleRow = () => ({ style: ON_ROW_STYLE });
@@ -212,8 +213,7 @@ export function PublishTaskListSection({
           scroll={{ x: 1388, y: scrollY }}
           onChange={(_pagination, _filters, sorter, extra) => {
             if (extra.action !== "sort") return;
-            const s = Array.isArray(sorter) ? sorter[0] : sorter;
-            setScheduleColumnSortOrder((s?.order ?? null) as "ascend" | "descend" | null);
+            setTableSorter(normalizePublishTaskTableSorter(sorter));
           }}
           rowSelection={rowSelection}
           style={{ width: "100%" }}

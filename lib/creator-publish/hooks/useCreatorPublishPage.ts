@@ -7,6 +7,7 @@ import { isTerminableTask } from "@/lib/creator-publish/constants";
 import {
   buildScheduleTimeOptionsForDay,
   scheduleQuickPresets,
+  type PublishTaskTableSorter,
 } from "@/lib/creator-publish/scheduleUtils";
 import type {
   EditTaskState,
@@ -72,9 +73,7 @@ export function useCreatorPublishPage() {
   const [materialPreviewTask, setMaterialPreviewTask] = useState<PublishTask | null>(null);
   const [editState, setEditState] = useState<EditTaskState>(null);
   const [savingEdit, setSavingEdit] = useState(false);
-  const [scheduleColumnSortOrder, setScheduleColumnSortOrder] = useState<"ascend" | "descend" | null>(
-    null
-  );
+  const [tableSorter, setTableSorter] = useState<PublishTaskTableSorter | null>(null);
   const [taskStatusFilters, setTaskStatusFilters] = useState<TaskStatus[]>([]);
   const [taskShopFilters, setTaskShopFilters] = useState<string[]>([]);
   const [taskTypeFilters, setTaskTypeFilters] = useState<TaskType[]>([]);
@@ -645,7 +644,7 @@ export function useCreatorPublishPage() {
   const columns = useMemo(
     () =>
       buildPublishTaskColumns({
-        scheduleColumnSortOrder,
+        tableSorter,
         runningTasks,
         isNamespaceBusy,
         selectTaskLog,
@@ -657,13 +656,7 @@ export function useCreatorPublishPage() {
         handleDeleteTask,
         copyTaskId,
       }),
-    [
-      scheduleColumnSortOrder,
-      runningTasks,
-      isNamespaceBusy,
-      selectTaskLog,
-      copyTaskId,
-    ]
+    [tableSorter, runningTasks, isNamespaceBusy, selectTaskLog, copyTaskId]
   );
 
   const runningCount = tasks.filter((t) => t.status === "running").length;
@@ -722,8 +715,8 @@ export function useCreatorPublishPage() {
     loadingTasks,
     filteredTasks,
     columns,
-    scheduleColumnSortOrder,
-    setScheduleColumnSortOrder,
+    tableSorter,
+    setTableSorter,
     rowSelection,
     runningCount,
     fetchTasks,

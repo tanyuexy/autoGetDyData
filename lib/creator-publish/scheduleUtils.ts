@@ -1,5 +1,6 @@
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
+import type { SorterResult } from "antd/es/table/interface";
 import type { PublishTask } from "@/lib/creator-publish/types";
 
 /** 「立即」（无定时）排在升序最前；有 scheduleAt 的按时间戳排序 */
@@ -8,6 +9,33 @@ export function getPublishTaskScheduleSortValue(task: PublishTask): number {
   if (raw == null || !String(raw).trim()) return Number.NEGATIVE_INFINITY;
   const ms = dayjs(raw).valueOf();
   return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
+}
+
+/** 表格「更新时间」列排序值；旧任务无 displayUpdatedAt 时回落 updatedAt / createdAt */
+export function getPublishTaskUpdatedAtSortValue(task: PublishTask): number {
+  const raw = task.displayUpdatedAt ?? task.updatedAt ?? task.createdAt;
+  const ms = dayjs(raw).valueOf();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+export type PublishTaskTableSorter = SorterResult<PublishTask>;
+
+export function normalizePublishTaskTableSorter(
+  sorter: PublishTaskTableSorter | PublishTaskTableSorter[] | undefined
+): PublishTaskTableSorter | null {
+  const active = Array.isArray(sorter) ? sorter[0] : sorter;
+  if (!active?.order) return null;
+  return active;
+}
+
+export function getPublishTaskColumnSortOrder(
+  columnKey: string,
+  sorter: PublishTaskTableSorter | null
+): "ascend" | "descend" | undefined {
+  if (!sorter?.order) return undefined;
+  const key = sorter.column?.key ?? sorter.columnKey;
+  if (key == null || String(key) !== columnKey) return undefined;
+  return sorter.order;
 }
 
 export const SCHEDULE_SHOW_TIME = { format: "HH:mm" as const, minuteStep: 5 as const };

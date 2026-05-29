@@ -6,7 +6,12 @@ import {
   STATUS_MAP,
   TASK_TABLE_OP_LINK_STYLE,
 } from "@/lib/creator-publish/constants";
-import { getPublishTaskScheduleSortValue } from "@/lib/creator-publish/scheduleUtils";
+import {
+  getPublishTaskColumnSortOrder,
+  getPublishTaskScheduleSortValue,
+  getPublishTaskUpdatedAtSortValue,
+  type PublishTaskTableSorter,
+} from "@/lib/creator-publish/scheduleUtils";
 import type { PublishTask, TaskStatus } from "@/lib/creator-publish/types";
 import { antdTagPresetStyle } from "@/lib/semanticTagStyles";
 
@@ -64,7 +69,7 @@ function renderHoverPreview(value?: string, placeholder = "-") {
 }
 
 export type PublishTaskColumnsDeps = {
-  scheduleColumnSortOrder: "ascend" | "descend" | null;
+  tableSorter: PublishTaskTableSorter | null;
   runningTasks: { taskId: string }[];
   isNamespaceBusy: (namespace: string) => boolean;
   selectTaskLog: (taskId: string, isDone: boolean) => void | Promise<void>;
@@ -101,7 +106,7 @@ function renderCopyableTaskId(id: string | undefined, copyTaskId: (id: string) =
 
 export function buildPublishTaskColumns(deps: PublishTaskColumnsDeps): ColumnsType<PublishTask> {
   const {
-    scheduleColumnSortOrder,
+    tableSorter,
     runningTasks,
     isNamespaceBusy,
     selectTaskLog,
@@ -176,7 +181,7 @@ export function buildPublishTaskColumns(deps: PublishTaskColumnsDeps): ColumnsTy
       width: 112,
       sorter: (a: PublishTask, b: PublishTask) =>
         getPublishTaskScheduleSortValue(a) - getPublishTaskScheduleSortValue(b),
-      sortOrder: scheduleColumnSortOrder === null ? undefined : scheduleColumnSortOrder,
+      sortOrder: getPublishTaskColumnSortOrder("scheduleAt", tableSorter),
       showSorterTooltip: { title: "按定时排序：升序为时间从早到晚，「立即」在最前" },
       render: (_: unknown, r: PublishTask) =>
         r.payload.scheduleAt ? dayjs(r.payload.scheduleAt).format("MM-DD HH:mm") : "立即",
@@ -311,9 +316,14 @@ export function buildPublishTaskColumns(deps: PublishTaskColumnsDeps): ColumnsTy
     },
     {
       title: "更新时间",
-      key: "taskDisplayTime",
+      key: "displayUpdatedAt",
       width: 120,
       align: "center" as const,
+      sorter: (a: PublishTask, b: PublishTask) =>
+        getPublishTaskUpdatedAtSortValue(a) - getPublishTaskUpdatedAtSortValue(b),
+      sortOrder: getPublishTaskColumnSortOrder("displayUpdatedAt", tableSorter),
+      sortDirections: ["descend", "ascend"],
+      showSorterTooltip: false,
       render: (_: unknown, r: PublishTask) =>
         dayjs(r.displayUpdatedAt ?? r.updatedAt ?? r.createdAt).format("MM-DD HH:mm"),
     },

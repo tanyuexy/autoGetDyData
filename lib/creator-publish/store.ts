@@ -97,7 +97,7 @@ export async function readCreatorPublishTasks(): Promise<CreatorPublishTask[]> {
   const docs = await db
     .collection("creator_publish_tasks")
     .find({})
-    .sort({ createdAt: -1 })
+    .sort({ displayUpdatedAt: -1, updatedAt: -1, createdAt: -1 })
     .toArray();
   return docs.map(normalizeTask).filter(Boolean) as CreatorPublishTask[];
 }

@@ -79,7 +79,7 @@ export function PublishPageTabs({ vm }: PublishPageTabsProps) {
           loadingTasks={vm.loadingTasks}
           filteredTasks={vm.filteredTasks}
           columns={vm.columns}
-          setScheduleColumnSortOrder={vm.setScheduleColumnSortOrder}
+          setTableSorter={vm.setTableSorter}
           rowSelection={vm.rowSelection}
         />
       ),
