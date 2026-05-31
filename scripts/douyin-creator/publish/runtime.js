@@ -441,6 +441,17 @@ function isPublishSuccessText(text) {
   );
 }
 
+function isPublishPostPageUrl(url) {
+  return /\/content\/post\/(video|image)\b/.test(String(url || ""));
+}
+
+function shouldAcceptPageSuccessText(text, url) {
+  if (!isPublishSuccessText(text)) return false;
+  // The publish page can contain hidden/static success copy in its app shell.
+  // Only trust page-wide success text after the form has actually left.
+  return !isPublishPostPageUrl(url);
+}
+
 function isPublishFailureText(text) {
   return /发布失败|发布错误|提交失败|提交错误|操作失败|内容违规|审核不通过|不可发布|请完善|不能为空|待完善配置|作品未完成配置|参数错误|系统异常|网络异常/i.test(
     normalizePublishText(text)
@@ -765,11 +776,16 @@ async function waitForPublishOutcomeAfterClick(
       }
     }
 
+    const url = page.url();
+    if (/\/content\/manage\b/.test(url)) {
+      return publishOutcome("success", "已进入作品管理页", "page", { url });
+    }
+
     const bodyText = await page
       .locator("body")
       .innerText({ timeout: scaledMs(1000) })
       .catch(() => "");
-    if (isPublishSuccessText(bodyText)) {
+    if (shouldAcceptPageSuccessText(bodyText, url)) {
       return publishOutcome("success", "页面检测到发布成功提示", "page");
     }
     const bodyFailure = bodyText.match(
@@ -789,13 +805,12 @@ async function waitForPublishOutcomeAfterClick(
 
     const stillVisible = await publishBtn.isVisible().catch(() => false);
     if (!stillVisible) {
-      const url = page.url();
       const formVisible = await page
         .locator("text=作品描述")
         .first()
         .isVisible({ timeout: 500 })
         .catch(() => false);
-      if (!/\/content\/post\/(video|image)\b/.test(url) || !formVisible) {
+      if (!isPublishPostPageUrl(url) || !formVisible) {
         return publishOutcome("success", "发布已提交（发布表单已离开或按钮已隐藏）", "page");
       }
     }
@@ -872,6 +887,11 @@ async function clickPublishButton(page, accountName, options = {}) {
   const maxAttempts = 3;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (/\/content\/manage\b/.test(page.url())) {
+      console.log("  ✓ 已进入作品管理页，发布已提交");
+      return true;
+    }
+
     let networkMonitor = null;
 
     try {
@@ -964,6 +984,10 @@ async function clickPublishButton(page, accountName, options = {}) {
           );
           await page.waitForTimeout(scaledMs(waitMs));
         }
+        if (/\/content\/manage\b/.test(page.url())) {
+          console.log("  ✓ 重试前已进入作品管理页，发布已提交");
+          return true;
+        }
         continue;
       }
 
@@ -998,6 +1022,7 @@ async function checkPublishSubmitted(page) {
       checkOk("发布提交校验通过 (已进入作品管理页)");
       return;
     }
+    const onPostPage = isPublishPostPageUrl(url);
 
     const bodyText = await page
       .locator("body")
@@ -1012,9 +1037,12 @@ async function checkPublishSubmitted(page) {
       throw new Error(`发布提交校验失败：${failureMatch[0]}`);
     }
 
-    if (isPublishSuccessText(compactText)) {
+    if (shouldAcceptPageSuccessText(compactText, url)) {
       checkOk("发布提交校验通过 (检测到成功提示)");
       return;
+    }
+    if (isPublishSuccessText(compactText) && onPostPage) {
+      lastReason = "检测到成功文案但仍停留在发布表单";
     }
 
     const smsVisible = await page
@@ -1032,7 +1060,6 @@ async function checkPublishSubmitted(page) {
     const buttonDisabled = buttonVisible
       ? await publishBtn.isDisabled().catch(() => false)
       : false;
-    const onPostPage = /\/content\/post\/(video|image)\b/.test(url);
     const formVisible = await page
       .locator("text=作品描述")
       .first()
@@ -1059,7 +1086,7 @@ async function checkPublishSubmitted(page) {
     await page.waitForTimeout(scaledMs(1000));
   }
 
-  checkOk(`发布提交校验完成 (${lastReason})`);
+  throw new Error(`发布提交校验失败：${lastReason}`);
 }
 
 // ===== 单步校验函数：每个填写步骤完成后立即调用，失败则抛错 =====
@@ -1584,5 +1611,7 @@ module.exports = {
   checkProductLinkSet,
   checkProductLinkAbsent,
   checkSelfDeclarationSet,
-  checkMusicSelected
+  checkMusicSelected,
+  isPublishSuccessText,
+  shouldAcceptPageSuccessText
 };
