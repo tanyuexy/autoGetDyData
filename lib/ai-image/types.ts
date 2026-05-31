@@ -12,7 +12,8 @@ export type AiImageAspectRatio =
 
 export type AiImageResolutionTier = "1k" | "2k" | "4k";
 
-export type AiImageQuality = "auto" | "standard" | "hd";
+/** gpt-image-2 官方 quality：auto / low / medium / high */
+export type AiImageQuality = "auto" | "low" | "medium" | "high";
 
 export interface AiGeneratedImage {
   id: string;
@@ -27,8 +28,20 @@ export interface AiGeneratedImage {
 
 export type AiImageViewMode = "gallery" | "list";
 
+export interface AiImageReference {
+  id: string;
+  url: string;
+  name: string;
+  size?: number;
+}
+
+export const AI_IMAGE_SETTINGS_CACHE_VERSION = 2;
+
 export interface AiImageCachedSettings {
+  /** 递增后用于迁移本地默认值（如 quality 默认 auto） */
+  settingsVersion?: number;
   prompt?: string;
+  referenceImages?: AiImageReference[];
   /** @deprecated 旧版尺寸字段，读取时会迁移到 aspectRatio + resolution */
   size?: AiImageSize;
   aspectRatio?: AiImageAspectRatio;

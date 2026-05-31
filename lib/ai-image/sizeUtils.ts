@@ -1,4 +1,8 @@
-import { RESOLUTION_LONG_EDGE } from "./constants";
+import {
+  DEFAULT_ASPECT_RATIO,
+  DEFAULT_RESOLUTION_TIER,
+  RESOLUTION_LONG_EDGE,
+} from "./constants";
 import type { AiImageAspectRatio, AiImageResolutionTier, AiImageSize } from "./types";
 
 const MIN_TOTAL_PIXELS = 655_360;
@@ -92,8 +96,9 @@ export function migrateLegacySize(size: unknown): {
     case "auto":
       return { aspectRatio: "auto", resolution: "1k" };
     case "1024x1024":
-    default:
       return { aspectRatio: "1:1", resolution: "1k" };
+    default:
+      return { aspectRatio: DEFAULT_ASPECT_RATIO, resolution: DEFAULT_RESOLUTION_TIER };
   }
 }
 
@@ -109,7 +114,7 @@ export function normalizeAspectRatio(value: unknown): AiImageAspectRatio {
     "4:3",
     "3:4",
   ]);
-  return allowed.has(aspectRatio) ? aspectRatio : "1:1";
+  return allowed.has(aspectRatio) ? aspectRatio : DEFAULT_ASPECT_RATIO;
 }
 
 export function normalizeResolutionTier(value: unknown): AiImageResolutionTier {

@@ -2,7 +2,25 @@ import {
   readLocalStorageJson,
   writeLocalStorageJson,
 } from "@/lib/browserStorage";
-import type { AiGeneratedImage, AiImageCachedSettings } from "./types";
+import { DEFAULT_AI_IMAGE_QUALITY, normalizeAiImageQuality } from "./constants";
+import type { AiGeneratedImage, AiImageCachedSettings, AiImageReference } from "./types";
+import { AI_IMAGE_SETTINGS_CACHE_VERSION } from "./types";
+import type { AiImageQuality } from "./types";
+
+export function normalizeAiImageReferences(value: unknown): AiImageReference[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is AiImageReference =>
+      Boolean(
+        item &&
+          typeof item === "object" &&
+          typeof (item as AiImageReference).id === "string" &&
+          typeof (item as AiImageReference).url === "string" &&
+          typeof (item as AiImageReference).name === "string" &&
+          !(item as AiImageReference).url.startsWith("blob:")
+      )
+  );
+}
 
 const HISTORY_CACHE_KEY = "ai-image:gpt-image2-history";
 const SETTINGS_CACHE_KEY = "ai-image:gpt-image2-settings";
@@ -47,5 +65,20 @@ export function readAiImageSettings(): AiImageCachedSettings {
 }
 
 export function writeAiImageSettings(settings: AiImageCachedSettings) {
-  writeLocalStorageJson(SETTINGS_CACHE_KEY, settings);
+  writeLocalStorageJson(SETTINGS_CACHE_KEY, {
+    ...settings,
+    settingsVersion: AI_IMAGE_SETTINGS_CACHE_VERSION,
+  });
+}
+
+/** 读取质量：v2 迁移时仅将旧 high/hd/standard/空值 回落为 auto，保留 low/medium */
+export function resolveCachedAiImageQuality(settings: AiImageCachedSettings): AiImageQuality {
+  if ((settings.settingsVersion ?? 0) >= AI_IMAGE_SETTINGS_CACHE_VERSION) {
+    return normalizeAiImageQuality(settings.quality);
+  }
+  const raw = String(settings.quality ?? "").trim().toLowerCase();
+  if (!raw || raw === "hd" || raw === "high" || raw === "standard") {
+    return DEFAULT_AI_IMAGE_QUALITY;
+  }
+  return normalizeAiImageQuality(settings.quality);
 }

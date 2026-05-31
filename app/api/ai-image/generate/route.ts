@@ -12,17 +12,11 @@ import {
   normalizeResolutionTier,
   resolveImageDimensions,
 } from "@/lib/ai-image/sizeUtils";
-import type { AiImageQuality, AiImageSize } from "@/lib/ai-image/types";
+import { MAX_REFERENCE_IMAGES, normalizeAiImageQuality, QUALITY_OPTIONS } from "@/lib/ai-image/constants";
+import type { AiImageSize } from "@/lib/ai-image/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
-
-const ALLOWED_QUALITIES = new Set<AiImageQuality>(["auto", "standard", "hd"]);
-
-function normalizeQuality(value: unknown): AiImageQuality {
-  const quality = String(value || "").trim() as AiImageQuality;
-  return ALLOWED_QUALITIES.has(quality) ? quality : "auto";
-}
 
 function normalizeCount(value: unknown) {
   const count = Number(value);
@@ -44,7 +38,7 @@ export async function GET() {
     model: getAiImageModel(),
     hasServerApiKey: Boolean(getAiImageApiKey()),
     baseUrl: getAiImageApiBaseUrl(),
-    qualities: Array.from(ALLOWED_QUALITIES),
+    qualities: QUALITY_OPTIONS.map((item) => item.value),
   });
 }
 
@@ -62,11 +56,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "图片提示词不能超过 4000 字" }, { status: 400 });
     }
 
+    const rawRefs = (body as Record<string, unknown>).referenceImageUrls;
+    const referenceImageUrls = Array.isArray(rawRefs)
+      ? rawRefs
+          .map((item) => String(item || "").trim())
+          .filter(Boolean)
+          .slice(0, MAX_REFERENCE_IMAGES)
+      : [];
+
     const result = await generateAiImages({
       prompt,
       size: resolveRequestSize(body as Record<string, unknown>),
-      quality: normalizeQuality(body.quality),
+      quality: normalizeAiImageQuality(body.quality),
       count: normalizeCount(body.count),
+      referenceImageUrls,
     });
     return NextResponse.json(result);
   } catch (error: unknown) {

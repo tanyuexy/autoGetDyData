@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { getTosConfig } from "@/lib/tos/config";
 import { buildTosObjectKey, uploadBufferToTos } from "@/lib/tos/uploadMedia";
+import { resolveReferenceUrlsForApi } from "./resolveReferenceUrls";
 import type { AiGeneratedImage, AiImageQuality, AiImageSize } from "./types";
 
 const DEFAULT_MODEL = "gpt-image-2";
@@ -140,6 +141,7 @@ export async function generateAiImages(input: {
   size: AiImageSize;
   quality: AiImageQuality;
   count: number;
+  referenceImageUrls?: string[];
 }) {
   const apiKey = getAiImageApiKey();
   if (!apiKey) {
@@ -147,19 +149,26 @@ export async function generateAiImages(input: {
   }
 
   const model = getAiImageModel();
+  const payload: Record<string, unknown> = {
+    model,
+    prompt: input.prompt,
+    n: input.count,
+    size: input.size,
+    quality: input.quality,
+  };
+
+  const referenceUrls = (input.referenceImageUrls || []).map((url) => String(url || "").trim()).filter(Boolean);
+  if (referenceUrls.length) {
+    payload.image_urls = await resolveReferenceUrlsForApi(referenceUrls);
+  }
+
   const response = await fetch(getEndpointUrl(), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model,
-      prompt: input.prompt,
-      n: input.count,
-      size: input.size,
-      quality: input.quality,
-    }),
+    body: JSON.stringify(payload),
   });
 
   const text = await response.text();

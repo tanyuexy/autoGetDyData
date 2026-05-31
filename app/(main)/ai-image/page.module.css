@@ -5,6 +5,15 @@
   --ai-stage: #0f0f12;
   --ai-stage-muted: #1c1c22;
   --ai-card-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 12px 32px rgba(17, 17, 17, 0.04);
+  --ai-text-xs: 11px;
+  --ai-text-sm: 12px;
+  --ai-text-base: 13px;
+  --ai-text-md: 14px;
+  --ai-text-lg: 16px;
+  --ai-text-xl: 20px;
+  --ai-leading-tight: 1.3;
+  --ai-leading-normal: 1.5;
+  --ai-leading-relaxed: 1.65;
 
   display: flex;
   flex-direction: column;
@@ -15,6 +24,10 @@
   padding: 0;
   box-sizing: border-box;
   color: var(--vol-ink);
+  font-size: var(--ai-text-base);
+  line-height: var(--ai-leading-normal);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
 
 .hero {
@@ -59,19 +72,20 @@
 }
 
 .title {
-  margin: 0 !important;
-  font-size: 20px !important;
-  line-height: 1.2 !important;
-  font-weight: 700 !important;
-  letter-spacing: -0.02em;
+  margin: 0;
+  font-size: var(--ai-text-xl);
+  line-height: var(--ai-leading-tight);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--vol-ink);
 }
 
 .subtitle {
-  display: block;
-  margin-top: 5px;
+  margin: 6px 0 0;
   color: var(--vol-mute);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--ai-text-sm);
+  line-height: var(--ai-leading-normal);
+  font-weight: 400;
 }
 
 .heroMeta {
@@ -88,9 +102,10 @@
   border: 1px solid var(--vol-hairline);
   background: rgba(255, 255, 255, 0.72);
   color: var(--vol-body);
-  font-size: 12px;
+  font-size: var(--ai-text-sm);
   font-weight: 500;
-  letter-spacing: 0.01em;
+  line-height: 1.2;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .statusPill {
@@ -99,9 +114,9 @@
   gap: 6px;
   padding: 5px 12px;
   border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
+  font-size: var(--ai-text-sm);
+  font-weight: 500;
+  line-height: 1.2;
 }
 
 .statusDot {
@@ -137,12 +152,12 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+  grid-template-columns: minmax(460px, 500px) minmax(0, 1fr);
   gap: 14px;
   align-items: stretch;
+  overflow: hidden;
 }
 
-.controlPanel,
 .galleryPanel {
   border: 1px solid var(--vol-hairline);
   background: var(--vol-canvas-soft);
@@ -152,12 +167,36 @@
 }
 
 .controlPanel {
+  border: 1px solid var(--vol-hairline);
+  background: var(--vol-canvas-soft);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--ai-card-shadow);
   height: 100%;
   min-height: 0;
-  padding: 16px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+}
+
+.controlPanelBody {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  scrollbar-gutter: stable;
+}
+
+.controlPanel .submitRow {
+  flex-shrink: 0;
+  padding: 0 16px 14px;
+  margin-top: auto;
+  border-top: 1px solid var(--ic-hairline-soft, var(--vol-hairline));
+  padding-top: 12px;
 }
 
 .galleryPanel {
@@ -196,22 +235,224 @@
   margin: 0;
 }
 
+.sectionHeadRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 10px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.sectionHeadRow .sectionLabel {
+  margin-bottom: 0;
+}
+
+.outputMeta {
+  font-size: var(--ai-text-sm);
+  line-height: var(--ai-leading-normal);
+  color: var(--vol-mute);
+  text-align: right;
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .sectionLabel {
   display: block;
   margin-bottom: 8px;
   color: var(--vol-ink);
-  font-size: 13px;
+  font-size: var(--ai-text-base);
   font-weight: 600;
-  letter-spacing: 0.01em;
+  line-height: var(--ai-leading-tight);
+  letter-spacing: 0;
+}
+
+
+.referenceSection {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.referenceDropOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
+  background: rgba(22, 119, 255, 0.08);
+  border: 2px dashed #1677ff;
+  pointer-events: auto;
+}
+
+.referenceDropIcon {
+  font-size: 28px;
+  color: #1677ff;
+}
+
+.referenceDropText {
+  margin: 0;
+  color: #1677ff;
+  font-size: var(--ai-text-md);
+  font-weight: 600;
+  line-height: var(--ai-leading-tight);
+}
+
+.referenceHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.referenceHeader .sectionLabel {
+  margin-bottom: 0;
+}
+
+.referenceHint {
+  font-size: var(--ai-text-sm);
+  line-height: var(--ai-leading-normal);
+  color: var(--vol-mute);
+  white-space: nowrap;
+}
+
+.referenceStrip {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 72px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.referenceStripEmpty {
+  flex-wrap: wrap;
+  overflow: visible;
+  min-height: 0;
+}
+
+.referenceStrip :global(.ant-upload-wrapper),
+.referenceStrip :global(.ant-upload) {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.referenceStripEmpty :global(.ant-upload-wrapper),
+.referenceStripEmpty :global(.ant-upload) {
+  flex: 1;
+  width: 100%;
+  display: flex;
+}
+
+.referenceStripEmpty .referenceAdd {
+  width: 100%;
+  height: 52px;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.referenceThumb {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--vol-hairline);
+  background: var(--vol-canvas);
+  flex-shrink: 0;
+}
+
+.referenceThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.referenceRemove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #fff;
+  background: rgba(17, 17, 17, 0.55);
+  font-size: 11px;
+  transition: background 0.15s ease;
+}
+
+.referenceRemove:hover {
+  background: rgba(220, 38, 38, 0.88);
+}
+
+.referenceAdd {
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  border: 1px dashed var(--vol-hairline);
+  background: var(--vol-canvas);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--vol-mute);
+  font-size: var(--ai-text-sm);
+  font-weight: 500;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease,
+    background 0.2s ease;
+}
+
+.referenceAdd:hover:not(:disabled) {
+  border-color: var(--ai-accent-border);
+  color: var(--ai-accent);
+  background: var(--ai-accent-soft);
+}
+
+.referenceAdd:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.referenceAddLoading {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--vol-mute);
 }
 
 .promptSection {
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 132px;
+  max-height: min(38vh, 280px);
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-bottom: 2px;
 }
 
 .promptFill {
@@ -234,6 +475,8 @@
   min-height: 120px !important;
   height: auto !important;
   resize: none;
+  font-size: var(--ai-text-md) !important;
+  line-height: var(--ai-leading-relaxed) !important;
 }
 
 .promptHeader {
@@ -249,11 +492,12 @@
 }
 
 .promptCount {
-  font-size: 12px;
+  font-size: var(--ai-text-sm);
   font-variant-numeric: tabular-nums;
   color: var(--vol-mute);
   white-space: nowrap;
-  line-height: 1;
+  line-height: var(--ai-leading-tight);
+  font-weight: 500;
 }
 
 .promptInput {
@@ -277,17 +521,24 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .compactSettings {
+  --ai-seg-track: rgba(17, 17, 17, 0.07);
+  --ai-seg-thumb: #ffffff;
+  --ai-seg-thumb-shadow: 0 1px 2px rgba(17, 17, 17, 0.1), 0 0 0 1px rgba(17, 17, 17, 0.08);
+  --ai-seg-muted: rgba(17, 17, 17, 0.42);
+  --ai-seg-active: var(--vol-ink);
+
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 12px;
+  gap: 14px 16px;
   padding: 12px;
   border-radius: 10px;
   border: 1px solid var(--vol-hairline);
   background: var(--vol-canvas);
+  overflow: visible;
 }
 
 .settingItem {
@@ -295,27 +546,53 @@
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+  overflow: visible;
+}
+
+/* 控件行统一高度，与 Segmented / 比例按钮对齐 */
+.settingItem > :not(.settingLabel) {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
 }
 
 .settingLabel {
+  display: flex;
+  align-items: center;
+  min-height: 16px;
   color: var(--vol-mute);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--ai-text-sm);
+  font-weight: 600;
   line-height: 1;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
 }
 
 .ratioTrigger {
   display: inline-flex !important;
-  align-items: center;
+  align-items: center !important;
+  justify-content: flex-start;
   gap: 6px;
   width: 100%;
-  height: 30px !important;
+  min-height: 36px !important;
+  height: 36px !important;
   padding: 0 10px !important;
-  font-size: 12px;
+  font-size: var(--ai-text-base) !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
   border-radius: 8px !important;
+  background: var(--vol-canvas-soft) !important;
+  border: 1px solid var(--vol-hairline) !important;
+  color: var(--vol-ink) !important;
   cursor: pointer;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+}
+
+.ratioTrigger > span:not(.ratioPreviewInline):not(.ratioTriggerIcon) {
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .ratioTriggerIcon {
@@ -333,6 +610,31 @@
 
 .compactCount {
   width: 100%;
+}
+
+.compactSettings :global(.ant-input-number) {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  background: var(--vol-canvas-soft);
+  border: 1px solid var(--vol-hairline);
+}
+
+.compactSettings :global(.ant-input-number-input-wrap) {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.compactSettings :global(.ant-input-number-input) {
+  height: 34px !important;
+  line-height: 34px !important;
+  padding: 0 10px;
+  font-size: var(--ai-text-base);
+  font-weight: 600;
+  text-align: center;
 }
 
 .ratioPopoverGrid {
@@ -381,21 +683,6 @@
   line-height: 1;
 }
 
-.sizePreview {
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px dashed var(--ai-accent-border);
-  background: var(--ai-accent-soft);
-  color: var(--vol-mute);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.sizePreview strong {
-  color: var(--vol-ink);
-  font-weight: 650;
-}
-
 .submitRow {
   flex-shrink: 0;
   margin-top: auto;
@@ -407,8 +694,9 @@
   flex: 1;
   height: 44px !important;
   border-radius: 10px !important;
-  font-weight: 650 !important;
-  letter-spacing: 0.02em;
+  font-size: var(--ai-text-base) !important;
+  font-weight: 600 !important;
+  letter-spacing: 0;
   border: none !important;
   background: linear-gradient(180deg, #1a1a1a 0%, #111111 100%) !important;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset !important;
@@ -450,10 +738,12 @@
 }
 
 .galleryTitle {
-  margin: 0 !important;
-  font-size: 15px !important;
-  font-weight: 700 !important;
-  letter-spacing: -0.01em;
+  margin: 0;
+  font-size: var(--ai-text-lg);
+  font-weight: 600;
+  line-height: var(--ai-leading-tight);
+  letter-spacing: 0;
+  color: var(--vol-ink);
 }
 
 .countBadge {
@@ -465,8 +755,9 @@
   border: 1px solid var(--vol-hairline);
   background: var(--vol-canvas-soft);
   color: var(--vol-body);
-  font-size: 12px;
+  font-size: var(--ai-text-sm);
   font-weight: 500;
+  line-height: 1.2;
 }
 
 .galleryBody {
@@ -557,9 +848,9 @@
 }
 
 .previewPrompt {
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 13px;
-  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: var(--ai-text-base);
+  line-height: var(--ai-leading-relaxed);
   max-height: 140px;
   overflow: auto;
   padding: 10px 12px;
@@ -573,6 +864,9 @@
   border-color: rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.88);
+  font-size: var(--ai-text-xs);
+  font-weight: 500;
+  line-height: 18px;
 }
 
 .previewMeta .imageActions {
@@ -782,15 +1076,16 @@
 }
 
 .emptyTitle {
-  font-size: 15px;
-  font-weight: 650;
+  font-size: var(--ai-text-lg);
+  font-weight: 600;
   color: var(--vol-ink);
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
+  line-height: var(--ai-leading-tight);
 }
 
 .emptyDesc {
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: var(--ai-text-base);
+  line-height: var(--ai-leading-relaxed);
   color: var(--vol-mute);
 }
 
@@ -862,15 +1157,16 @@
 }
 
 .generatingTitle {
-  font-size: 15px;
-  font-weight: 650;
+  font-size: var(--ai-text-lg);
+  font-weight: 600;
   color: var(--vol-ink);
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
+  line-height: var(--ai-leading-tight);
 }
 
 .generatingDesc {
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--ai-text-sm);
+  line-height: var(--ai-leading-normal);
   color: var(--vol-mute);
 }
 
@@ -920,6 +1216,127 @@ html[data-ui-theme="voltagent"] .generatingProgressBar {
 
 html[data-ui-theme="voltagent"] .generatingProgressTrack {
   background: rgba(255, 255, 255, 0.1);
+}
+
+/* 输出设置：Segmented 轨道 / 滑块 / 选中态 */
+.compactSettings :global(.ant-segmented) {
+  width: 100%;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 3px;
+  background: var(--ai-seg-track);
+  border: 1px solid var(--vol-hairline);
+  border-radius: 8px;
+}
+
+.compactSettings :global(.ant-segmented-group) {
+  display: flex;
+  width: 100%;
+  min-height: 30px;
+  align-items: stretch;
+}
+
+.compactSettings :global(.ant-segmented .ant-segmented-item) {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.compactSettings :global(.ant-segmented .ant-segmented-thumb) {
+  background: var(--ai-seg-thumb) !important;
+  border-radius: 6px !important;
+  box-shadow: var(--ai-seg-thumb-shadow) !important;
+}
+
+.compactSettings :global(.ant-segmented .ant-segmented-item-label) {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100%;
+  min-height: 30px !important;
+  height: 100% !important;
+  padding: 0 6px !important;
+  line-height: 1 !important;
+  font-size: var(--ai-text-base);
+  font-weight: 500;
+  color: var(--ai-seg-muted);
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  transition: color 0.15s ease, font-weight 0.15s ease;
+}
+
+.compactSettings :global(.ant-segmented .ant-segmented-item-selected .ant-segmented-item-label) {
+  color: var(--ai-seg-active);
+  font-weight: 600;
+}
+
+.compactSettings :global(.ant-segmented .ant-segmented-item:hover:not(.ant-segmented-item-selected) .ant-segmented-item-label) {
+  color: rgba(17, 17, 17, 0.62);
+}
+
+/* 左栏其它 Segmented（非输出设置） */
+.controlPanel :global(.ant-segmented) {
+  width: 100%;
+  max-width: 100%;
+  padding: 2px;
+  background: var(--vol-canvas-soft);
+  border: 1px solid var(--vol-hairline);
+  border-radius: 8px;
+}
+
+.controlPanel :global(.ant-segmented-group) {
+  display: flex;
+  width: 100%;
+}
+
+.controlPanel :global(.ant-segmented .ant-segmented-item) {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.controlPanel :global(.ant-segmented .ant-segmented-item-label) {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 28px !important;
+  padding: 0 10px !important;
+  line-height: 1 !important;
+  font-size: var(--ai-text-sm);
+  font-weight: 500;
+}
+
+.controlPanel :global(.ant-segmented .ant-segmented-item-selected .ant-segmented-item-label) {
+  font-weight: 600;
+}
+
+html[data-ui-theme="voltagent"] .compactSettings {
+  --ai-seg-track: rgba(255, 255, 255, 0.08);
+  --ai-seg-thumb: rgba(255, 255, 255, 0.14);
+  --ai-seg-thumb-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --ai-seg-muted: rgba(255, 255, 255, 0.42);
+  --ai-seg-active: #f5f5f5;
+}
+
+html[data-ui-theme="voltagent"] .compactSettings :global(.ant-segmented .ant-segmented-item:hover:not(.ant-segmented-item-selected) .ant-segmented-item-label) {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.controlPanel :global(.ant-input-number-input) {
+  height: 32px;
+  font-size: var(--ai-text-lg);
+  font-weight: 500;
+}
+
+.controlPanel :global(.ant-btn-sm) {
+  font-size: var(--ai-text-sm);
+  font-weight: 500;
+}
+
+.galleryPanel :global(.ant-segmented .ant-segmented-item-label) {
+  font-size: var(--ai-text-sm);
+  font-weight: 500;
 }
 
 html[data-ui-theme="voltagent"] .page {
@@ -982,6 +1399,11 @@ html[data-ui-theme="voltagent"] .generateButton:hover:not(:disabled) {
     max-height: none;
   }
 
+  .controlPanelBody {
+    overflow: visible;
+    max-height: none;
+  }
+
   .promptSection {
     flex: none;
   }
@@ -1014,9 +1436,6 @@ html[data-ui-theme="voltagent"] .generateButton:hover:not(:disabled) {
     align-items: stretch;
   }
 
-  .compactSettings {
-    grid-template-columns: 1fr;
-  }
 
   .listRow {
     grid-template-columns: auto minmax(0, 1fr);

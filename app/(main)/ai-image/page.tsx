@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   App,
@@ -13,8 +13,10 @@ import {
   Space,
   Tag,
   Tooltip,
-  Typography,
+  Spin,
+  Upload,
 } from "antd";
+import type { UploadProps } from "antd";
 import {
   AppstoreOutlined,
   CopyOutlined,
@@ -26,6 +28,7 @@ import {
   PlusOutlined,
   ThunderboltOutlined,
   UnorderedListOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import type { UploadFile } from "antd/es/upload/interface";
 import {
@@ -33,13 +36,20 @@ import {
   DEFAULT_ASPECT_RATIO,
   DEFAULT_RESOLUTION_TIER,
   getResolutionTierLabel,
+  getAiImageQualityLabel,
+  MAX_REFERENCE_IMAGES,
+  normalizeAiImageQuality,
+  DEFAULT_AI_IMAGE_QUALITY,
+  QUALITY_OPTIONS,
   RESOLUTION_TIER_OPTIONS,
 } from "@/lib/ai-image/constants";
 import {
   mutateAiImageHistory,
+  normalizeAiImageReferences,
   prependAiImageHistory,
   readAiImageHistory,
   readAiImageSettings,
+  resolveCachedAiImageQuality,
   writeAiImageSettings,
 } from "@/lib/ai-image/cache";
 import {
@@ -53,9 +63,11 @@ import type {
   AiGeneratedImage,
   AiImageAspectRatio,
   AiImageQuality,
+  AiImageReference,
   AiImageResolutionTier,
   AiImageViewMode,
 } from "@/lib/ai-image/types";
+import { resolveMediaUrl } from "@/lib/ai-video/media";
 import {
   readCachedReferenceResources,
   writeReferenceResourcesCache,
@@ -69,11 +81,6 @@ type ApiConfig = {
   hasServerApiKey?: boolean;
   baseUrl?: string;
 };
-
-function normalizeQuality(value: unknown): AiImageQuality {
-  if (value === "standard" || value === "hd") return value;
-  return "auto";
-}
 
 function normalizeViewMode(value: unknown): AiImageViewMode {
   return value === "list" ? "list" : "gallery";
@@ -107,6 +114,10 @@ function buildFrameUploadFile(image: AiGeneratedImage): UploadFile {
     url: image.url,
     thumbUrl: image.url,
   };
+}
+
+function createReferenceId() {
+  return `ai-ref-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
 function getRatioPreviewStyle(ratio: AiImageAspectRatio, max = 22) {
@@ -172,13 +183,18 @@ export default function AiImagePage() {
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState<AiImageAspectRatio>(DEFAULT_ASPECT_RATIO);
   const [resolution, setResolution] = useState<AiImageResolutionTier>(DEFAULT_RESOLUTION_TIER);
-  const [quality, setQuality] = useState<AiImageQuality>("auto");
+  const [quality, setQuality] = useState<AiImageQuality>(DEFAULT_AI_IMAGE_QUALITY);
   const [count, setCount] = useState(1);
   const [viewMode, setViewMode] = useState<AiImageViewMode>("gallery");
   const [images, setImages] = useState<AiGeneratedImage[]>([]);
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [ratioPopoverOpen, setRatioPopoverOpen] = useState(false);
+  const [referenceImages, setReferenceImages] = useState<AiImageReference[]>([]);
+  const referenceUploadBusyRef = useRef(0);
+  const referenceDragCounterRef = useRef(0);
+  const [uploadingReference, setUploadingReference] = useState(false);
+  const [referenceDragActive, setReferenceDragActive] = useState(false);
 
   const syncHistoryFromStorage = useCallback(() => {
     const history = readAiImageHistory();
@@ -204,9 +220,10 @@ export default function AiImagePage() {
     setPrompt(cachedSettings.prompt || "");
     setAspectRatio(migrated.aspectRatio);
     setResolution(migrated.resolution);
-    setQuality(normalizeQuality(cachedSettings.quality));
+    setQuality(resolveCachedAiImageQuality(cachedSettings));
     setCount(Math.min(4, Math.max(1, Number(cachedSettings.count) || 1)));
     setViewMode(normalizeViewMode(cachedSettings.viewMode));
+    setReferenceImages(normalizeAiImageReferences(cachedSettings.referenceImages).slice(0, MAX_REFERENCE_IMAGES));
     setHydrated(true);
   }, [syncHistoryFromStorage]);
 
@@ -247,8 +264,16 @@ export default function AiImagePage() {
 
   useEffect(() => {
     if (!hydrated) return;
-    writeAiImageSettings({ prompt, aspectRatio, resolution, quality, count, viewMode });
-  }, [aspectRatio, count, hydrated, prompt, quality, resolution, viewMode]);
+    writeAiImageSettings({
+      prompt,
+      aspectRatio,
+      resolution,
+      quality,
+      count,
+      viewMode,
+      referenceImages: referenceImages.filter((item) => !item.url.startsWith("blob:")),
+    });
+  }, [aspectRatio, count, hydrated, prompt, quality, referenceImages, resolution, viewMode]);
 
   useEffect(() => {
     if (!images.length) {
@@ -304,6 +329,136 @@ export default function AiImagePage() {
     const next = mutateAiImageHistory(updater);
     setImages(next);
   }, []);
+
+  const setReferenceUploadBusy = useCallback((delta: number) => {
+    referenceUploadBusyRef.current = Math.max(0, referenceUploadBusyRef.current + delta);
+    setUploadingReference(referenceUploadBusyRef.current > 0);
+  }, []);
+
+  const uploadReferenceImage = useCallback(
+    async (file: File) => {
+      if (referenceImages.length >= MAX_REFERENCE_IMAGES) {
+        message.warning(`最多上传 ${MAX_REFERENCE_IMAGES} 张参考图`);
+        return;
+      }
+      const allowed = ["image/jpeg", "image/png", "image/webp"];
+      const ext = file.name.toLowerCase();
+      if (!allowed.includes(file.type) && !/\.(jpe?g|png|webp)$/i.test(ext)) {
+        message.error("参考图仅支持 JPG、PNG、WebP");
+        return;
+      }
+      if (file.size > 12 * 1024 * 1024) {
+        message.error("参考图不能超过 12MB");
+        return;
+      }
+
+      const previewUrl = URL.createObjectURL(file);
+      const pendingId = createReferenceId();
+      setReferenceImages((prev) => [
+        ...prev,
+        { id: pendingId, name: file.name, url: previewUrl, size: file.size },
+      ]);
+      setReferenceUploadBusy(1);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch("/api/ai-image/upload", { method: "POST", body: formData });
+        const raw = await res.text();
+        let data: { url?: string; name?: string; size?: number; error?: string } = {};
+        try {
+          data = raw ? (JSON.parse(raw) as typeof data) : {};
+        } catch {
+          throw new Error("上传接口返回异常，请稍后重试");
+        }
+        const uploadedUrl = data.url;
+        if (!res.ok || !uploadedUrl) throw new Error(data.error || "上传参考图失败");
+        setReferenceImages((prev) =>
+          prev.map((item) =>
+            item.id === pendingId
+              ? {
+                  id: item.id,
+                  name: data.name || file.name,
+                  url: uploadedUrl,
+                  size: data.size || file.size,
+                }
+              : item
+          )
+        );
+        message.success("参考图已上传");
+      } catch (error: unknown) {
+        setReferenceImages((prev) => prev.filter((item) => item.id !== pendingId));
+        message.error(error instanceof Error ? error.message : "上传参考图失败");
+      } finally {
+        URL.revokeObjectURL(previewUrl);
+        setReferenceUploadBusy(-1);
+      }
+    },
+    [message, referenceImages.length, setReferenceUploadBusy]
+  );
+
+  const handleReferenceDragEnter = useCallback((event: React.DragEvent) => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    referenceDragCounterRef.current += 1;
+    setReferenceDragActive(true);
+  }, []);
+
+  const handleReferenceDragLeave = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    referenceDragCounterRef.current = Math.max(0, referenceDragCounterRef.current - 1);
+    if (referenceDragCounterRef.current === 0) setReferenceDragActive(false);
+  }, []);
+
+  const handleReferenceDragOver = useCallback((event: React.DragEvent) => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const handleReferenceDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      referenceDragCounterRef.current = 0;
+      setReferenceDragActive(false);
+
+      const files = Array.from(event.dataTransfer.files || []).filter((file) => {
+        const ext = file.name.toLowerCase();
+        return (
+          file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(ext)
+        );
+      });
+      if (!files.length) {
+        message.error("请拖入 JPG、PNG 或 WebP 图片");
+        return;
+      }
+      void (async () => {
+        for (const file of files) {
+          await uploadReferenceImage(file);
+        }
+      })();
+    },
+    [message, uploadReferenceImage]
+  );
+
+  const referenceUploadProps: UploadProps = {
+    accept: "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp",
+    multiple: true,
+    showUploadList: false,
+    disabled: referenceImages.length >= MAX_REFERENCE_IMAGES,
+    customRequest: async ({ file, onSuccess, onError }) => {
+      try {
+        await uploadReferenceImage(file as File);
+        onSuccess?.({});
+      } catch (error: unknown) {
+        onError?.(error instanceof Error ? error : new Error("上传参考图失败"));
+      }
+    },
+  };
 
   const actionHandlers = useMemo<ImageActionHandlers>(
     () => ({
@@ -367,6 +522,7 @@ export default function AiImagePage() {
           size: resolvedSize,
           quality,
           count,
+          referenceImageUrls: referenceImages.map((item) => item.url),
         }),
       });
       const data = (await res.json()) as { images?: AiGeneratedImage[]; error?: string };
@@ -412,7 +568,7 @@ export default function AiImagePage() {
             <Space size={6} wrap>
               <Tag>{formatImageSizeLabel(selectedImage.size)}</Tag>
               {selectedImage.quality !== "auto" ? (
-                <Tag>{selectedImage.quality.toUpperCase()}</Tag>
+                <Tag>{getAiImageQualityLabel(selectedImage.quality)}</Tag>
               ) : null}
               <Tag>{formatCreatedAt(selectedImage.createdAt)}</Tag>
             </Space>
@@ -471,7 +627,9 @@ export default function AiImagePage() {
               <div className={styles.listPrompt}>{image.revisedPrompt || image.prompt}</div>
               <Space size={6} wrap className={styles.listTags}>
                 <Tag>{formatImageSizeLabel(image.size)}</Tag>
-                {image.quality !== "auto" ? <Tag>{image.quality.toUpperCase()}</Tag> : null}
+                {image.quality !== "auto" ? (
+                  <Tag>{getAiImageQualityLabel(image.quality)}</Tag>
+                ) : null}
                 <Tag>{formatCreatedAt(image.createdAt)}</Tag>
               </Space>
             </div>
@@ -495,12 +653,8 @@ export default function AiImagePage() {
             <PictureOutlined />
           </span>
           <div className={styles.heroMain}>
-            <Typography.Title level={3} className={styles.title}>
-              AI 图片生成
-            </Typography.Title>
-            <Typography.Text type="secondary" className={styles.subtitle}>
-              gpt-image-2 · 历史本地保存 · 可一键转入 AI 视频
-            </Typography.Text>
+            <h1 className={styles.title}>AI 图片生成</h1>
+            <p className={styles.subtitle}>gpt-image-2 · 历史本地保存 · 可一键转入 AI 视频</p>
           </div>
         </div>
         <div className={styles.heroMeta}>
@@ -518,10 +672,73 @@ export default function AiImagePage() {
 
       <div className={styles.workspace}>
         <section className={styles.controlPanel}>
-          <div className={styles.panelHead}>
-            <span className={styles.panelHeadTitle}>创作参数</span>
-            <span className={styles.panelHeadHint}>左侧填写，右侧预览</span>
+          <div className={styles.controlPanelBody}>
+          <div
+            className={styles.referenceSection}
+            onDragEnter={handleReferenceDragEnter}
+            onDragLeave={handleReferenceDragLeave}
+            onDragOver={handleReferenceDragOver}
+            onDrop={handleReferenceDrop}
+          >
+            {referenceDragActive ? (
+              <div
+                className={styles.referenceDropOverlay}
+                onDragOver={handleReferenceDragOver}
+                onDrop={handleReferenceDrop}
+              >
+                <UploadOutlined className={styles.referenceDropIcon} />
+                <span className={styles.referenceDropText}>松开上传参考图</span>
+              </div>
+            ) : null}
+            <div className={styles.referenceHeader}>
+              <span className={styles.sectionLabel}>参考图</span>
+              <span className={styles.referenceHint}>可选 · 点击或拖拽 · 最多 {MAX_REFERENCE_IMAGES} 张</span>
+            </div>
+            <div
+              className={`${styles.referenceStrip} ${
+                referenceImages.length === 0 ? styles.referenceStripEmpty : ""
+              }`}
+            >
+              {referenceImages.map((item) => (
+                <div key={item.id} className={styles.referenceThumb}>
+                  <img src={resolveMediaUrl(item.url)} alt={item.name} />
+                  <button
+                    type="button"
+                    className={styles.referenceRemove}
+                    aria-label={`移除参考图 ${item.name}`}
+                    onClick={() =>
+                      setReferenceImages((prev) => prev.filter((ref) => ref.id !== item.id))
+                    }
+                  >
+                    <DeleteOutlined />
+                  </button>
+                </div>
+              ))}
+              {referenceImages.length < MAX_REFERENCE_IMAGES ? (
+                <Upload {...referenceUploadProps}>
+                  <button
+                    type="button"
+                    className={styles.referenceAdd}
+                    disabled={uploadingReference || referenceImages.length >= MAX_REFERENCE_IMAGES}
+                  >
+                    {uploadingReference ? (
+                      <span className={styles.referenceAddLoading}>
+                        <Spin size="small" />
+                        <span>上传中</span>
+                      </span>
+                    ) : (
+                      <>
+                        <UploadOutlined />
+                        <span>上传</span>
+                      </>
+                    )}
+                  </button>
+                </Upload>
+              ) : null}
+            </div>
           </div>
+
+          <div className={styles.sectionDivider} role="separator" />
 
           <div className={styles.promptSection}>
             <div className={styles.promptHeader}>
@@ -557,7 +774,14 @@ export default function AiImagePage() {
           <div className={styles.sectionDivider} role="separator" />
 
           <div className={styles.outputSection}>
-            <span className={styles.sectionLabel}>输出设置</span>
+            <div className={styles.sectionHeadRow}>
+              <span className={styles.sectionLabel}>输出设置</span>
+              <span className={styles.outputMeta}>
+                {formatImageSizeLabel(resolvedSize)}
+                {aspectRatio !== "auto" ? ` · ${aspectRatio} · ${getResolutionTierLabel(resolution)}` : " · 尺寸自动"}
+                {referenceImages.length ? ` · 参考 ${referenceImages.length} 张` : ""}
+              </span>
+            </div>
             <div className={styles.compactSettings}>
               <div className={styles.settingItem}>
                 <span className={styles.settingLabel}>比例</span>
@@ -584,6 +808,7 @@ export default function AiImagePage() {
               <div className={styles.settingItem}>
                 <span className={styles.settingLabel}>分辨率</span>
                 <Segmented
+                  block
                   size="small"
                   value={resolution}
                   onChange={setResolution}
@@ -597,14 +822,14 @@ export default function AiImagePage() {
               <div className={styles.settingItem}>
                 <span className={styles.settingLabel}>质量</span>
                 <Segmented
+                  block
                   size="small"
                   value={quality}
-                  onChange={(value) => setQuality(normalizeQuality(value))}
-                  options={[
-                    { label: "Auto", value: "auto" },
-                    { label: "标准", value: "standard" },
-                    { label: "HD", value: "hd" },
-                  ]}
+                  onChange={(value) => setQuality(normalizeAiImageQuality(value))}
+                  options={QUALITY_OPTIONS.map((item) => ({
+                    label: item.label,
+                    value: item.value,
+                  }))}
                 />
               </div>
 
@@ -620,21 +845,8 @@ export default function AiImagePage() {
                 />
               </div>
             </div>
-
-            <div className={styles.sizePreview}>
-              输出 <strong>{formatImageSizeLabel(resolvedSize)}</strong>
-              {aspectRatio !== "auto" ? (
-                <span>
-                  {" "}
-                  · {aspectRatio} · {getResolutionTierLabel(resolution)}
-                </span>
-              ) : (
-                <span> · 尺寸自动</span>
-              )}
-            </div>
           </div>
-
-          <div className={styles.sectionDivider} role="separator" />
+          </div>
 
           <div className={styles.submitRow}>
             <Button
@@ -653,9 +865,7 @@ export default function AiImagePage() {
         <section className={styles.galleryPanel}>
           <div className={styles.galleryToolbar}>
             <div className={styles.galleryToolbarMain}>
-              <Typography.Title level={4} className={styles.galleryTitle}>
-                历史记录
-              </Typography.Title>
+              <h2 className={styles.galleryTitle}>历史记录</h2>
               <span className={styles.countBadge}>
                 <PictureOutlined />
                 {images.length} 张
