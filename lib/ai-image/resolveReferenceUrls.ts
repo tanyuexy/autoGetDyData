@@ -1,5 +1,6 @@
-import { readFile } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import path from "path";
+import { REFERENCE_IMAGE_API_MAX_BYTES } from "./constants";
 
 const UPLOAD_PREFIXES = [
   { urlPrefix: "/uploads/ai-image/", dir: "ai-image" },
@@ -52,6 +53,12 @@ async function readLocalUploadAsDataUrl(url: string) {
     const filename = pathname.slice(urlPrefix.length);
     if (!filename || filename.includes("/") || filename.includes("..")) return null;
     const filePath = path.join(process.cwd(), "public", "uploads", dir, filename);
+    const fileStat = await stat(filePath);
+    if (fileStat.size > REFERENCE_IMAGE_API_MAX_BYTES) {
+      throw new Error(
+        `参考图 ${filename} 过大（${formatMb(fileStat.size)}），请压缩到 ${formatMb(REFERENCE_IMAGE_API_MAX_BYTES)} 以内后重试`
+      );
+    }
     const buffer = await readFile(filePath);
     const mime = mimeFromExtension(path.extname(filename).slice(1));
     return `data:image/${mime};base64,${buffer.toString("base64")}`;
@@ -60,43 +67,68 @@ async function readLocalUploadAsDataUrl(url: string) {
   return null;
 }
 
+async function resolveOneReferenceUrl(raw: string) {
+  const cleaned = cleanUrl(raw);
+  if (!cleaned) return null;
+
+  if (cleaned.startsWith("blob:")) {
+    throw new Error("参考图仍在上传中，请等待上传完成后再生成");
+  }
+
+  if (cleaned.startsWith("data:image/")) {
+    return cleaned;
+  }
+
+  if (cleaned.startsWith("/") || isProbablyLocalUrl(cleaned)) {
+    let pathname = cleaned;
+    try {
+      pathname = new URL(cleaned).pathname;
+    } catch {
+      pathname = cleaned.startsWith("/") ? cleaned : `/${cleaned}`;
+    }
+
+    if (pathname.startsWith("/uploads/ai-image/")) {
+      const dataUrl = await readLocalUploadAsDataUrl(cleaned);
+      if (dataUrl) return dataUrl;
+      throw new Error("参考图文件不存在，请重新上传");
+    }
+
+    const dataUrl = await readLocalUploadAsDataUrl(cleaned);
+    if (dataUrl) return dataUrl;
+
+    const absolute = toPublicAbsoluteUrl(cleaned.startsWith("/") ? cleaned : cleaned);
+    if (absolute && !isProbablyLocalUrl(absolute)) {
+      return absolute;
+    }
+
+    throw new Error(
+      "参考图 URL 无法被中转站访问。请通过页面上传，或配置可访问本应用 /uploads 的 PUBLIC_BASE_URL。"
+    );
+  }
+
+  return cleaned;
+}
+
+function getPublicBaseUrl() {
+  return String(process.env.PUBLIC_BASE_URL || process.env.TOS_PUBLIC_BASE_URL || "")
+    .trim()
+    .replace(/\/+$/, "");
+}
+
 function toPublicAbsoluteUrl(url: string) {
-  const publicBase = String(process.env.PUBLIC_BASE_URL || "").trim().replace(/\/+$/, "");
+  const publicBase = getPublicBaseUrl();
   if (!publicBase) return null;
   if (url.startsWith("/")) return `${publicBase}${url}`;
   return url;
 }
 
+function formatMb(bytes: number) {
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
 export async function resolveReferenceUrlsForApi(urls: string[]) {
-  const resolved: string[] = [];
-
-  for (const raw of urls) {
-    const cleaned = cleanUrl(raw);
-    if (!cleaned) continue;
-
-    if (cleaned.startsWith("data:image/")) {
-      resolved.push(cleaned);
-      continue;
-    }
-
-    if (cleaned.startsWith("/") || isProbablyLocalUrl(cleaned)) {
-      const dataUrl = await readLocalUploadAsDataUrl(cleaned);
-      if (dataUrl) {
-        resolved.push(dataUrl);
-        continue;
-      }
-      const absolute = toPublicAbsoluteUrl(cleaned.startsWith("/") ? cleaned : cleaned);
-      if (absolute && !isProbablyLocalUrl(absolute)) {
-        resolved.push(absolute);
-        continue;
-      }
-      throw new Error(
-        "参考图 URL 无法被中转站访问。请通过页面上传，或配置 PUBLIC_BASE_URL 为公网可访问地址。"
-      );
-    }
-
-    resolved.push(cleaned);
-  }
-
-  return resolved;
+  const resolved = await Promise.all(
+    urls.map((raw) => resolveOneReferenceUrl(raw))
+  );
+  return resolved.filter((item): item is string => Boolean(item));
 }

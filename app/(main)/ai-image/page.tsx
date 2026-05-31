@@ -38,11 +38,14 @@ import {
   getResolutionTierLabel,
   getAiImageQualityLabel,
   MAX_REFERENCE_IMAGES,
+  MAX_CONCURRENT_IMAGE_JOBS,
+  REFERENCE_IMAGE_UPLOAD_MAX_BYTES,
   normalizeAiImageQuality,
   DEFAULT_AI_IMAGE_QUALITY,
   QUALITY_OPTIONS,
   RESOLUTION_TIER_OPTIONS,
 } from "@/lib/ai-image/constants";
+import { compressReferenceImageFile } from "@/lib/ai-image/compressReferenceImage";
 import {
   mutateAiImageHistory,
   normalizeAiImageReferences,
@@ -52,6 +55,12 @@ import {
   resolveCachedAiImageQuality,
   writeAiImageSettings,
 } from "@/lib/ai-image/cache";
+import { isAiImageJobTerminal } from "@/lib/ai-image/jobUtils";
+import {
+  addPendingAiImageJobId,
+  readPendingAiImageJobIds,
+  removePendingAiImageJobId,
+} from "@/lib/ai-image/pendingJobsCache";
 import {
   formatImageSizeLabel,
   migrateLegacySize,
@@ -62,11 +71,14 @@ import {
 import type {
   AiGeneratedImage,
   AiImageAspectRatio,
+  AiImageJob,
   AiImageQuality,
   AiImageReference,
   AiImageResolutionTier,
   AiImageViewMode,
 } from "@/lib/ai-image/types";
+
+const AI_IMAGE_JOB_POLL_MS = 2000;
 import { resolveMediaUrl } from "@/lib/ai-video/media";
 import {
   readCachedReferenceResources,
@@ -188,7 +200,10 @@ export default function AiImagePage() {
   const [viewMode, setViewMode] = useState<AiImageViewMode>("gallery");
   const [images, setImages] = useState<AiGeneratedImage[]>([]);
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
+  const [activeJobCount, setActiveJobCount] = useState(0);
+  const [pollingJobIds, setPollingJobIds] = useState<Set<string>>(() => new Set());
+  const hasRestoredPollingRef = useRef(false);
+  const completedJobIdsRef = useRef<Set<string>>(new Set());
   const [ratioPopoverOpen, setRatioPopoverOpen] = useState(false);
   const [referenceImages, setReferenceImages] = useState<AiImageReference[]>([]);
   const referenceUploadBusyRef = useRef(0);
@@ -227,10 +242,87 @@ export default function AiImagePage() {
     setHydrated(true);
   }, [syncHistoryFromStorage]);
 
+  const applyCompletedJob = useCallback(
+    (job: AiImageJob) => {
+      if (job.status === "succeeded" && job.images?.length) {
+        const next = prependAiImageHistory(job.images);
+        setImages(next);
+        setSelectedImageId(job.images[0]?.id ?? null);
+        message.success(`已生成 ${job.images.length} 张图片`);
+        return;
+      }
+      if (job.status === "failed") {
+        message.error(job.error || "图片生成失败");
+      }
+    },
+    [message]
+  );
+
+  const pollAiImageJob = useCallback(
+    async (jobId: string) => {
+      try {
+        const res = await fetch(`/api/ai-image/jobs/${encodeURIComponent(jobId)}`, {
+          cache: "no-store",
+        });
+        const data = (await res.json()) as { job?: AiImageJob; error?: string };
+        if (!res.ok || !data.job) {
+          throw new Error(data.error || "查询任务失败");
+        }
+        const { job } = data;
+        if (!isAiImageJobTerminal(job.status)) return;
+        if (completedJobIdsRef.current.has(jobId)) return;
+        completedJobIdsRef.current.add(jobId);
+
+        removePendingAiImageJobId(jobId);
+        setPollingJobIds((prev) => {
+          const next = new Set(prev);
+          next.delete(jobId);
+          return next;
+        });
+        setActiveJobCount((count) => Math.max(0, count - 1));
+        applyCompletedJob(job);
+      } catch {
+        // 轮询偶发失败时不打断任务，下次间隔会重试
+      }
+    },
+    [applyCompletedJob]
+  );
+
+  const trackPollingJob = useCallback((jobId: string) => {
+    addPendingAiImageJobId(jobId);
+    setPollingJobIds((prev) => new Set(prev).add(jobId));
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated || hasRestoredPollingRef.current) return;
+    hasRestoredPollingRef.current = true;
+    const pending = readPendingAiImageJobIds();
+    if (!pending.length) return;
+    setPollingJobIds(new Set(pending));
+    setActiveJobCount((count) => count + pending.length);
+    pending.forEach((jobId) => {
+      void pollAiImageJob(jobId);
+    });
+  }, [hydrated, pollAiImageJob]);
+
+  useEffect(() => {
+    if (!pollingJobIds.size) return;
+    const ids = [...pollingJobIds];
+    const timer = window.setInterval(() => {
+      ids.forEach((jobId) => {
+        void pollAiImageJob(jobId);
+      });
+    }, AI_IMAGE_JOB_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [pollAiImageJob, pollingJobIds]);
+
   useEffect(() => {
     function onVisible() {
       if (document.visibilityState === "visible") {
         syncHistoryFromStorage();
+        readPendingAiImageJobIds().forEach((jobId) => {
+          void pollAiImageJob(jobId);
+        });
       }
     }
     window.addEventListener("focus", syncHistoryFromStorage);
@@ -239,7 +331,7 @@ export default function AiImagePage() {
       window.removeEventListener("focus", syncHistoryFromStorage);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [syncHistoryFromStorage]);
+  }, [pollAiImageJob, syncHistoryFromStorage]);
 
   useEffect(() => {
     if (pathname === "/ai-image") {
@@ -347,22 +439,30 @@ export default function AiImagePage() {
         message.error("参考图仅支持 JPG、PNG、WebP");
         return;
       }
-      if (file.size > 12 * 1024 * 1024) {
+      if (file.size > REFERENCE_IMAGE_UPLOAD_MAX_BYTES) {
         message.error("参考图不能超过 12MB");
         return;
       }
 
-      const previewUrl = URL.createObjectURL(file);
+      let uploadFile = file;
+      try {
+        uploadFile = await compressReferenceImageFile(file);
+      } catch (error: unknown) {
+        message.error(error instanceof Error ? error.message : "参考图处理失败");
+        return;
+      }
+
+      const previewUrl = URL.createObjectURL(uploadFile);
       const pendingId = createReferenceId();
       setReferenceImages((prev) => [
         ...prev,
-        { id: pendingId, name: file.name, url: previewUrl, size: file.size },
+        { id: pendingId, name: uploadFile.name, url: previewUrl, size: uploadFile.size },
       ]);
       setReferenceUploadBusy(1);
 
       try {
         const formData = new FormData();
-        formData.append("file", file);
+        formData.append("file", uploadFile);
         const res = await fetch("/api/ai-image/upload", { method: "POST", body: formData });
         const raw = await res.text();
         let data: { url?: string; name?: string; size?: number; error?: string } = {};
@@ -509,8 +609,22 @@ export default function AiImagePage() {
       message.warning("请先配置 AI_IMAGE_API_KEY");
       return;
     }
+    if (uploadingReference) {
+      message.warning("参考图仍在上传中，请稍候");
+      return;
+    }
+    const pendingBlobRefs = referenceImages.filter((item) => item.url.startsWith("blob:"));
+    if (pendingBlobRefs.length) {
+      message.warning("参考图仍在上传中，请等待上传完成后再生成");
+      return;
+    }
+    if (activeJobCount >= MAX_CONCURRENT_IMAGE_JOBS) {
+      message.warning(`最多同时进行 ${MAX_CONCURRENT_IMAGE_JOBS} 个生成任务`);
+      return;
+    }
 
-    setGenerating(true);
+    setActiveJobCount((count) => count + 1);
+
     try {
       const res = await fetch("/api/ai-image/generate", {
         method: "POST",
@@ -525,18 +639,16 @@ export default function AiImagePage() {
           referenceImageUrls: referenceImages.map((item) => item.url),
         }),
       });
-      const data = (await res.json()) as { images?: AiGeneratedImage[]; error?: string };
-      if (!res.ok || !Array.isArray(data.images)) {
-        throw new Error(data.error || "图片生成失败");
+      const data = (await res.json()) as { jobId?: string; error?: string };
+      if (!res.ok || !data.jobId) {
+        throw new Error(data.error || "创建生成任务失败");
       }
-      const next = prependAiImageHistory(data.images);
-      setImages(next);
-      setSelectedImageId(data.images[0]?.id ?? null);
-      message.success(`已生成 ${data.images.length} 张图片`);
+      trackPollingJob(data.jobId);
+      void pollAiImageJob(data.jobId);
+      message.success("任务已提交，可离开本页；完成后会自动写入历史记录");
     } catch (error: unknown) {
-      message.error(error instanceof Error ? error.message : "图片生成失败");
-    } finally {
-      setGenerating(false);
+      setActiveJobCount((count) => Math.max(0, count - 1));
+      message.error(error instanceof Error ? error.message : "创建生成任务失败");
     }
   }
 
@@ -852,12 +964,11 @@ export default function AiImagePage() {
             <Button
               type="primary"
               size="large"
-              icon={generating ? undefined : <ThunderboltOutlined />}
-              loading={generating}
+              icon={<ThunderboltOutlined />}
               onClick={() => void handleGenerate()}
               className={styles.generateButton}
             >
-              {generating ? "生成中…" : "生成图片"}
+              {activeJobCount > 0 ? `生成中 (${activeJobCount})` : "生成图片"}
             </Button>
           </div>
         </section>
@@ -870,6 +981,12 @@ export default function AiImagePage() {
                 <PictureOutlined />
                 {images.length} 张
               </span>
+              {activeJobCount > 0 ? (
+                <span className={styles.activeJobsBadge}>
+                  <Spin size="small" />
+                  {activeJobCount} 个任务进行中
+                </span>
+              ) : null}
             </div>
             <Space size={8} wrap>
               <Segmented<AiImageViewMode>
@@ -896,7 +1013,7 @@ export default function AiImagePage() {
           </div>
 
           <div className={styles.galleryBody}>
-            {generating && !images.length ? (
+            {activeJobCount > 0 && !images.length ? (
               <div className={styles.generatingOverlay}>
                 <div className={styles.generatingCard}>
                   <div className={styles.generatingCanvas} aria-hidden>
@@ -906,7 +1023,7 @@ export default function AiImagePage() {
                   <div className={styles.generatingMeta}>
                     <span className={styles.generatingTitle}>正在绘制画面</span>
                     <span className={styles.generatingDesc}>
-                      {apiConfig.model || "gpt-image-2"} · 通常需要 10–30 秒
+                      {apiConfig.model || "gpt-image-2"} · 后台生成中，可切换页面 · 返回本页会自动拉取结果
                     </span>
                     <div className={styles.generatingProgressTrack} aria-hidden>
                       <div className={styles.generatingProgressBar} />

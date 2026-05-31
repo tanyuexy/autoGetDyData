@@ -30,6 +30,12 @@ export const DEFAULT_ASPECT_RATIO: AiImageAspectRatio = "9:16";
 export const DEFAULT_RESOLUTION_TIER: AiImageResolutionTier = "1k";
 /** gpt-image-2 图生图 API 上限：image_urls 最多 16 张 */
 export const MAX_REFERENCE_IMAGES = 16;
+/** 上传接口单张上限 */
+export const REFERENCE_IMAGE_UPLOAD_MAX_BYTES = 12 * 1024 * 1024;
+/** 服务端转 data URL 时单张上限（过大易导致生成请求卡住） */
+export const REFERENCE_IMAGE_API_MAX_BYTES = 3 * 1024 * 1024;
+/** 页面可同时发起的生成请求数 */
+export const MAX_CONCURRENT_IMAGE_JOBS = 6;
 
 /** OpenAI gpt-image-2 官方 quality 档位 */
 export const DEFAULT_AI_IMAGE_QUALITY: AiImageQuality = "auto";

@@ -760,6 +760,20 @@
   line-height: 1.2;
 }
 
+.activeJobsBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ai-accent-border);
+  background: var(--ai-accent-soft);
+  color: var(--vol-ink);
+  font-size: var(--ai-text-sm);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
 .galleryBody {
   flex: 1;
   min-height: 0;

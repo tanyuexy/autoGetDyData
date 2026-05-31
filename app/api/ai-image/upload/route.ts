@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
+import { getTosConfig } from "@/lib/tos/config";
+import { buildTosObjectKey, uploadBufferToTos } from "@/lib/tos/uploadMedia";
 import { requireAppSession } from "@/lib/auth/requireSession";
 import {
   buildUploadFilename,
@@ -12,7 +14,7 @@ import {
 
 export const runtime = "nodejs";
 
-/** 参考图仅落盘到 public/uploads/ai-image，生成时由服务端转 data URL，无需走 TOS */
+/** 参考图落盘本地；若已配置 TOS 则同步上传，生成时用真实可访问的公网 URL */
 export async function POST(request: NextRequest) {
   const session = await requireAppSession(request);
   if (session instanceof NextResponse) return session;
@@ -43,14 +45,31 @@ export async function POST(request: NextRequest) {
     await mkdir(uploadDir, { recursive: true });
     await writeFile(path.join(uploadDir, filename), body);
 
+    const contentType = getUploadContentType(file, kind);
+    let url = `/uploads/ai-image/${filename}`;
+    let storage: "local" | "tos" = "local";
+
+    const tosConfig = getTosConfig();
+    if (tosConfig) {
+      const objectKey = buildTosObjectKey(tosConfig.uploadPrefix, `ai-image/${filename}`);
+      const uploaded = await uploadBufferToTos({
+        body,
+        objectKey,
+        contentType,
+      });
+      url = uploaded.url;
+      storage = "tos";
+    }
+
     return NextResponse.json({
       ok: true,
       kind,
-      storage: "local",
-      url: `/uploads/ai-image/${filename}`,
+      storage,
+      url,
+      localPath: `/uploads/ai-image/${filename}`,
       name: file.name,
       size: file.size,
-      contentType: getUploadContentType(file, kind),
+      contentType,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "上传失败";

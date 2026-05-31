@@ -37,6 +37,30 @@ export interface AiImageReference {
 
 export const AI_IMAGE_SETTINGS_CACHE_VERSION = 2;
 
+export type AiImageJobStatus = "queued" | "running" | "succeeded" | "failed";
+
+export interface AiImageJobRequest {
+  prompt: string;
+  size: AiImageSize;
+  quality: AiImageQuality;
+  count: number;
+  aspectRatio?: AiImageAspectRatio;
+  resolution?: AiImageResolutionTier;
+  referenceImageUrls?: string[];
+}
+
+export interface AiImageJob {
+  id: string;
+  status: AiImageJobStatus;
+  request: AiImageJobRequest;
+  images?: AiGeneratedImage[];
+  model?: string;
+  error?: string | null;
+  ownerUsername?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AiImageCachedSettings {
   /** 递增后用于迁移本地默认值（如 quality 默认 auto） */
   settingsVersion?: number;

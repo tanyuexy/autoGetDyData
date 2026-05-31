@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { getTosConfig } from "@/lib/tos/config";
 import { buildTosObjectKey, uploadBufferToTos } from "@/lib/tos/uploadMedia";
+import { isLocalAiImageUploadUrl, loadLocalReferenceFiles } from "./referenceFiles";
 import { resolveReferenceUrlsForApi } from "./resolveReferenceUrls";
 import type { AiGeneratedImage, AiImageQuality, AiImageSize } from "./types";
 
@@ -40,8 +41,19 @@ export function getAiImageApiKey() {
   return String(process.env.AI_IMAGE_API_KEY || process.env.NEWAPI_IMAGE_API_KEY || "").trim();
 }
 
-function getEndpointUrl() {
+function getGenerationsEndpointUrl() {
   return `${getAiImageApiBaseUrl()}/v1/images/generations`;
+}
+
+function getEditsEndpointUrl() {
+  return `${getAiImageApiBaseUrl()}/v1/images/edits`;
+}
+
+function getUpstreamTimeoutMs(hasReferenceImages: boolean) {
+  const configured = Number(process.env.AI_IMAGE_UPSTREAM_TIMEOUT_MS);
+  const fallback = hasReferenceImages ? 240_000 : 120_000;
+  const base = Number.isFinite(configured) && configured > 0 ? configured : fallback;
+  return Math.min(300_000, Math.max(30_000, base));
 }
 
 function inferExtension(contentType: string | null | undefined) {
@@ -136,6 +148,115 @@ async function archiveImageItem(item: NewApiImageItem, index: number, request: {
   } satisfies AiGeneratedImage;
 }
 
+async function postUpstreamJson(
+  apiKey: string,
+  url: string,
+  payload: Record<string, unknown>,
+  upstreamTimeoutMs: number
+) {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(upstreamTimeoutMs),
+    });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error(
+        `图片生成超时（${Math.round(upstreamTimeoutMs / 1000)}s），参考图任务通常更慢，可在 .env 调大 AI_IMAGE_UPSTREAM_TIMEOUT_MS`
+      );
+    }
+    throw error;
+  }
+
+  const text = await response.text();
+  let data: NewApiImageResponse;
+  try {
+    data = JSON.parse(text) as NewApiImageResponse;
+  } catch {
+    throw new Error(text.slice(0, 400) || `图片生成接口返回异常：HTTP ${response.status}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(data.error?.message || `图片生成失败：HTTP ${response.status}`);
+  }
+
+  const items = Array.isArray(data.data) ? data.data : [];
+  if (!items.length) {
+    throw new Error(
+      data.error?.message || "图片生成接口未返回结果（参考图请确认已上传成功且可被中转站访问）"
+    );
+  }
+
+  return { data, items };
+}
+
+async function postUpstreamEdits(
+  apiKey: string,
+  input: {
+    model: string;
+    prompt: string;
+    size: AiImageSize;
+    quality: AiImageQuality;
+    files: Awaited<ReturnType<typeof loadLocalReferenceFiles>>;
+  },
+  upstreamTimeoutMs: number
+) {
+  const form = new FormData();
+  form.append("model", input.model);
+  form.append("prompt", input.prompt);
+  if (input.size !== "auto") {
+    form.append("size", input.size);
+  }
+  form.append("quality", input.quality);
+  for (const file of input.files) {
+    form.append(
+      "image[]",
+      new Blob([Uint8Array.from(file.buffer)], { type: file.contentType }),
+      file.filename
+    );
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(getEditsEndpointUrl(), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(upstreamTimeoutMs),
+    });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error(`参考图编辑超时（${Math.round(upstreamTimeoutMs / 1000)}s）`);
+    }
+    throw error;
+  }
+
+  const text = await response.text();
+  let data: NewApiImageResponse;
+  try {
+    data = JSON.parse(text) as NewApiImageResponse;
+  } catch {
+    throw new Error(text.slice(0, 400) || `图片编辑接口返回异常：HTTP ${response.status}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(data.error?.message || `参考图生成失败：HTTP ${response.status}`);
+  }
+
+  const items = Array.isArray(data.data) ? data.data : [];
+  if (!items.length) {
+    throw new Error(data.error?.message || "图片编辑接口未返回结果");
+  }
+
+  return { data, items };
+}
+
 export async function generateAiImages(input: {
   prompt: string;
   size: AiImageSize;
@@ -149,43 +270,51 @@ export async function generateAiImages(input: {
   }
 
   const model = getAiImageModel();
-  const payload: Record<string, unknown> = {
-    model,
-    prompt: input.prompt,
-    n: input.count,
-    size: input.size,
-    quality: input.quality,
-  };
-
   const referenceUrls = (input.referenceImageUrls || []).map((url) => String(url || "").trim()).filter(Boolean);
-  if (referenceUrls.length) {
-    payload.image_urls = await resolveReferenceUrlsForApi(referenceUrls);
-  }
+  const hasRefs = referenceUrls.length > 0;
+  const upstreamTimeoutMs = getUpstreamTimeoutMs(hasRefs);
 
-  const response = await fetch(getEndpointUrl(), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  let items: NewApiImageItem[];
 
-  const text = await response.text();
-  let data: NewApiImageResponse;
-  try {
-    data = JSON.parse(text) as NewApiImageResponse;
-  } catch {
-    throw new Error(text.slice(0, 240) || `图片生成接口返回异常：HTTP ${response.status}`);
-  }
-
-  if (!response.ok) {
-    throw new Error(data.error?.message || `图片生成失败：HTTP ${response.status}`);
-  }
-
-  const items = Array.isArray(data.data) ? data.data : [];
-  if (!items.length) {
-    throw new Error("图片生成接口未返回结果");
+  if (hasRefs && referenceUrls.every(isLocalAiImageUploadUrl)) {
+    const localFiles = await loadLocalReferenceFiles(referenceUrls);
+    if (localFiles.length !== referenceUrls.length) {
+      throw new Error("部分参考图文件缺失，请重新上传");
+    }
+    const result = await postUpstreamEdits(
+      apiKey,
+      {
+        model,
+        prompt: input.prompt,
+        size: input.size,
+        quality: input.quality,
+        files: localFiles,
+      },
+      upstreamTimeoutMs
+    );
+    items = result.items;
+  } else {
+    const payload: Record<string, unknown> = {
+      model,
+      prompt: input.prompt,
+      n: input.count,
+      size: input.size,
+      quality: input.quality,
+    };
+    if (hasRefs) {
+      const imageUrls = await resolveReferenceUrlsForApi(referenceUrls);
+      if (!imageUrls.length) {
+        throw new Error("参考图无效，请重新上传后再试");
+      }
+      payload.image_urls = imageUrls;
+    }
+    const result = await postUpstreamJson(
+      apiKey,
+      getGenerationsEndpointUrl(),
+      payload,
+      upstreamTimeoutMs
+    );
+    items = result.items;
   }
 
   const images = await Promise.all(
