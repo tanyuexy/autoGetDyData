@@ -118,7 +118,7 @@ function getLocalPublicPath(url: string): string | null {
     pathname = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
   }
 
-  const allowedPrefixes = ["/uploads/ai-video/", "/generated-videos/", "/composed-films/"];
+  const allowedPrefixes = ["/uploads/ai-video/", "/uploads/ai-image/", "/generated-videos/", "/composed-films/"];
   if (!allowedPrefixes.some((prefix) => pathname.startsWith(prefix))) return null;
 
   const relative = pathname.replace(/^\/+/, "");

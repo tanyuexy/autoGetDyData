@@ -19,6 +19,7 @@ import {
   PlayCircleOutlined,
   LogoutOutlined,
   UserOutlined,
+  PictureOutlined,
 } from "@ant-design/icons";
 import { useRouter, usePathname } from "next/navigation";
 import TaskPanel from "@/components/TaskPanel";
@@ -48,6 +49,11 @@ const menuItems = [
     key: "/ai-video",
     icon: <PlayCircleOutlined />,
     label: "AI视频生成",
+  },
+  {
+    key: "/ai-image",
+    icon: <PictureOutlined />,
+    label: "AI图片生成",
   },
   {
     key: "/review",
