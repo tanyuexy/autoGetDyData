@@ -2,7 +2,6 @@ import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { getTosConfig } from "@/lib/tos/config";
 import { buildTosObjectKey, uploadBufferToTos } from "@/lib/tos/uploadMedia";
-import { isLocalAiImageUploadUrl, loadLocalReferenceFiles } from "./referenceFiles";
 import { resolveReferenceUrlsForApi } from "./resolveReferenceUrls";
 import type { AiGeneratedImage, AiImageQuality, AiImageSize } from "./types";
 
@@ -203,7 +202,12 @@ async function postUpstreamEdits(
     prompt: string;
     size: AiImageSize;
     quality: AiImageQuality;
-    files: Awaited<ReturnType<typeof loadLocalReferenceFiles>>;
+    count: number;
+    files: Array<{
+      buffer: Buffer;
+      contentType: string;
+      filename: string;
+    }>;
   },
   upstreamTimeoutMs: number
 ) {
@@ -214,6 +218,7 @@ async function postUpstreamEdits(
     form.append("size", input.size);
   }
   form.append("quality", input.quality);
+  form.append("n", String(input.count));
   for (const file of input.files) {
     form.append(
       "image[]",
@@ -257,6 +262,28 @@ async function postUpstreamEdits(
   return { data, items };
 }
 
+async function collectImageItems(input: {
+  count: number;
+  requestOne: () => Promise<NewApiImageItem[]>;
+}) {
+  const targetCount = Math.min(10, Math.max(1, Math.floor(input.count) || 1));
+  const batches = await Promise.all(Array.from({ length: targetCount }, () => input.requestOne()));
+  return batches.flat().slice(0, targetCount);
+}
+
+async function loadReferenceFilesForEdit(urls: string[]) {
+  const files: Array<{ buffer: Buffer; contentType: string; filename: string }> = [];
+  for (const [index, url] of urls.entries()) {
+    const fetched = await fetchImageBuffer(url);
+    files.push({
+      buffer: fetched.buffer,
+      contentType: fetched.contentType,
+      filename: `reference-${index + 1}${inferExtension(fetched.contentType)}`,
+    });
+  }
+  return files;
+}
+
 export async function generateAiImages(input: {
   prompt: string;
   size: AiImageSize;
@@ -276,45 +303,50 @@ export async function generateAiImages(input: {
 
   let items: NewApiImageItem[];
 
-  if (hasRefs && referenceUrls.every(isLocalAiImageUploadUrl)) {
-    const localFiles = await loadLocalReferenceFiles(referenceUrls);
-    if (localFiles.length !== referenceUrls.length) {
-      throw new Error("部分参考图文件缺失，请重新上传");
+  if (hasRefs) {
+    const imageUrls = await resolveReferenceUrlsForApi(referenceUrls);
+    if (imageUrls.length !== referenceUrls.length) {
+      throw new Error("部分参考图无效，请重新上传后再试");
     }
-    const result = await postUpstreamEdits(
-      apiKey,
-      {
-        model,
-        prompt: input.prompt,
-        size: input.size,
-        quality: input.quality,
-        files: localFiles,
+    const editFiles = await loadReferenceFilesForEdit(imageUrls);
+    items = await collectImageItems({
+      count: input.count,
+      requestOne: async () => {
+        const result = await postUpstreamEdits(
+          apiKey,
+          {
+            model,
+            prompt: input.prompt,
+            size: input.size,
+            quality: input.quality,
+            count: 1,
+            files: editFiles,
+          },
+          upstreamTimeoutMs
+        );
+        return result.items;
       },
-      upstreamTimeoutMs
-    );
-    items = result.items;
+    });
   } else {
     const payload: Record<string, unknown> = {
       model,
       prompt: input.prompt,
-      n: input.count,
+      n: 1,
       size: input.size,
       quality: input.quality,
     };
-    if (hasRefs) {
-      const imageUrls = await resolveReferenceUrlsForApi(referenceUrls);
-      if (!imageUrls.length) {
-        throw new Error("参考图无效，请重新上传后再试");
-      }
-      payload.image_urls = imageUrls;
-    }
-    const result = await postUpstreamJson(
-      apiKey,
-      getGenerationsEndpointUrl(),
-      payload,
-      upstreamTimeoutMs
-    );
-    items = result.items;
+    items = await collectImageItems({
+      count: input.count,
+      requestOne: async () => {
+        const result = await postUpstreamJson(
+          apiKey,
+          getGenerationsEndpointUrl(),
+          payload,
+          upstreamTimeoutMs
+        );
+        return result.items;
+      },
+    });
   }
 
   const images = await Promise.all(
