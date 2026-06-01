@@ -984,8 +984,30 @@ async function clickPublishButton(page, accountName, options = {}) {
           );
           await page.waitForTimeout(scaledMs(waitMs));
         }
+        const lateTerminalSignal = networkMonitor.latestTerminal();
+        if (lateTerminalSignal?.success) {
+          console.log(
+            `  ✓ 重试前发布接口已确认成功: ${
+              lateTerminalSignal.reason || lateTerminalSignal.status
+            }`
+          );
+          return true;
+        }
         if (/\/content\/manage\b/.test(page.url())) {
           console.log("  ✓ 重试前已进入作品管理页，发布已提交");
+          return true;
+        }
+        const stillOnPostPage = isPublishPostPageUrl(page.url());
+        const publishBtnStillVisible = await publishBtn
+          .isVisible({ timeout: scaledMs(500) })
+          .catch(() => false);
+        const formStillVisible = await page
+          .locator("text=作品描述")
+          .first()
+          .isVisible({ timeout: scaledMs(500) })
+          .catch(() => false);
+        if (!publishBtnStillVisible && (!stillOnPostPage || !formStillVisible)) {
+          console.log("  ✓ 重试前发布表单已离开或按钮已隐藏，发布已提交");
           return true;
         }
         continue;
