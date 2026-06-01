@@ -109,6 +109,10 @@ function formatCreatedAt(value: string) {
   });
 }
 
+function getImageDisplayPrompt(image: AiGeneratedImage) {
+  return (image.revisedPrompt || image.prompt).trim();
+}
+
 function createVideoResource(image: AiGeneratedImage): ReferenceResource {
   return {
     id: `ai-image-${image.id}-${Date.now()}`,
@@ -659,6 +663,18 @@ export default function AiImagePage() {
       .catch(() => message.error("复制失败"));
   }
 
+  function copyImagePrompt(image: AiGeneratedImage) {
+    const text = getImageDisplayPrompt(image);
+    if (!text) {
+      message.warning("暂无提示词可复制");
+      return;
+    }
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => message.success("提示词已复制"))
+      .catch(() => message.error("复制失败"));
+  }
+
   function renderGalleryView() {
     if (!selectedImage) return null;
 
@@ -674,16 +690,39 @@ export default function AiImagePage() {
             />
           </div>
           <div className={styles.previewMeta}>
-            <div className={styles.previewPrompt}>
-              {selectedImage.revisedPrompt || selectedImage.prompt}
+            <div className={styles.previewPromptCard}>
+              <div className={styles.previewPromptHead}>
+                <span className={styles.previewPromptLabel}>提示词</span>
+                {selectedImage.revisedPrompt ? (
+                  <Tag className={styles.previewPromptBadge} variant="filled">
+                    模型改写
+                  </Tag>
+                ) : null}
+                <Tooltip title="复制提示词">
+                  <button
+                    type="button"
+                    className={styles.previewPromptCopy}
+                    onClick={() => copyImagePrompt(selectedImage)}
+                    aria-label="复制提示词"
+                  >
+                    <CopyOutlined />
+                  </button>
+                </Tooltip>
+              </div>
+              <div className={styles.previewPromptBody}>
+                {getImageDisplayPrompt(selectedImage)}
+              </div>
             </div>
-            <Space size={6} wrap>
-              <Tag>{formatImageSizeLabel(selectedImage.size)}</Tag>
+            <div className={styles.previewMetaTags}>
+              <Tag className={styles.previewMetaTag}>{formatImageSizeLabel(selectedImage.size)}</Tag>
               {selectedImage.quality !== "auto" ? (
-                <Tag>{getAiImageQualityLabel(selectedImage.quality)}</Tag>
+                <Tag className={styles.previewMetaTag}>
+                  {getAiImageQualityLabel(selectedImage.quality)}
+                </Tag>
               ) : null}
-              <Tag>{formatCreatedAt(selectedImage.createdAt)}</Tag>
-            </Space>
+              <Tag className={styles.previewMetaTag}>{formatCreatedAt(selectedImage.createdAt)}</Tag>
+            </div>
+            <div className={styles.previewMetaDivider} aria-hidden />
             <ImageActionButtons image={selectedImage} handlers={actionHandlers} />
           </div>
         </div>
@@ -736,7 +775,15 @@ export default function AiImagePage() {
               />
             </button>
             <div className={styles.listBody}>
-              <div className={styles.listPrompt}>{image.revisedPrompt || image.prompt}</div>
+              <div className={styles.listPromptHead}>
+                <span className={styles.listPromptLabel}>提示词</span>
+                {image.revisedPrompt ? (
+                  <Tag className={styles.listPromptBadge} variant="filled">
+                    模型改写
+                  </Tag>
+                ) : null}
+              </div>
+              <div className={styles.listPrompt}>{getImageDisplayPrompt(image)}</div>
               <Space size={6} wrap className={styles.listTags}>
                 <Tag>{formatImageSizeLabel(image.size)}</Tag>
                 {image.quality !== "auto" ? (
