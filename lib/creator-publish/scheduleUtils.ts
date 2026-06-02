@@ -12,10 +12,35 @@ export function getPublishTaskScheduleSortValue(task: PublishTask): number {
 }
 
 /** 表格「更新时间」列排序值；旧任务无 displayUpdatedAt 时回落 updatedAt / createdAt */
-export function getPublishTaskUpdatedAtSortValue(task: PublishTask): number {
+function resolvePublishTaskUpdatedAtMs(task: {
+  displayUpdatedAt?: string;
+  updatedAt?: string;
+  createdAt?: string;
+}): number {
   const raw = task.displayUpdatedAt ?? task.updatedAt ?? task.createdAt;
   const ms = dayjs(raw).valueOf();
   return Number.isFinite(ms) ? ms : 0;
+}
+
+export function getPublishTaskUpdatedAtSortValue(task: PublishTask): number {
+  return resolvePublishTaskUpdatedAtMs(task);
+}
+
+/** 发布任务表格默认按更新时间降序 */
+export const DEFAULT_PUBLISH_TASK_TABLE_SORTER: PublishTaskTableSorter = {
+  columnKey: "displayUpdatedAt",
+  order: "descend",
+};
+
+export function sortPublishTasksByUpdatedAt<
+  T extends { displayUpdatedAt?: string; updatedAt?: string; createdAt?: string },
+>(tasks: T[], order: "ascend" | "descend" = "descend"): T[] {
+  const dir = order === "ascend" ? 1 : -1;
+  return [...tasks].sort((a, b) => {
+    const av = resolvePublishTaskUpdatedAtMs(a);
+    const bv = resolvePublishTaskUpdatedAtMs(b);
+    return dir * (av - bv);
+  });
 }
 
 export type PublishTaskTableSorter = SorterResult<PublishTask>;

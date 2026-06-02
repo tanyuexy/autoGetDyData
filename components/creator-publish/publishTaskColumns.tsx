@@ -321,6 +321,7 @@ export function buildPublishTaskColumns(deps: PublishTaskColumnsDeps): ColumnsTy
       align: "center" as const,
       sorter: (a: PublishTask, b: PublishTask) =>
         getPublishTaskUpdatedAtSortValue(a) - getPublishTaskUpdatedAtSortValue(b),
+      defaultSortOrder: "descend",
       sortOrder: getPublishTaskColumnSortOrder("displayUpdatedAt", tableSorter),
       sortDirections: ["descend", "ascend"],
       showSorterTooltip: false,

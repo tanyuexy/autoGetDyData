@@ -1,5 +1,6 @@
 import { getTaskList } from "@/lib/tasks/taskManager";
 import { getDb } from "@/lib/db/mongo";
+import { sortPublishTasksByUpdatedAt } from "@/lib/creator-publish/scheduleUtils";
 import { loadTaskSnapshot, readLastTaskError } from "@/lib/tasks/taskLogStore";
 import { loadFeishuBitableConfigForProfile } from "@/lib/feishu/core/config";
 import { getValidAccessToken } from "@/lib/feishu/core/oauth";
@@ -94,12 +95,9 @@ function normalizeTask(item: any): CreatorPublishTask | null {
 
 export async function readCreatorPublishTasks(): Promise<CreatorPublishTask[]> {
   const db = await getDb();
-  const docs = await db
-    .collection("creator_publish_tasks")
-    .find({})
-    .sort({ displayUpdatedAt: -1, updatedAt: -1, createdAt: -1 })
-    .toArray();
-  return docs.map(normalizeTask).filter(Boolean) as CreatorPublishTask[];
+  const docs = await db.collection("creator_publish_tasks").find({}).toArray();
+  const tasks = docs.map(normalizeTask).filter(Boolean) as CreatorPublishTask[];
+  return sortPublishTasksByUpdatedAt(tasks, "descend");
 }
 
 export async function writeCreatorPublishTasks(tasks: CreatorPublishTask[]): Promise<void> {

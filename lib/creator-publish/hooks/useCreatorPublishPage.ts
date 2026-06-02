@@ -6,6 +6,7 @@ import { useTaskContext } from "@/contexts/TaskContext";
 import { isTerminableTask } from "@/lib/creator-publish/constants";
 import {
   buildScheduleTimeOptionsForDay,
+  DEFAULT_PUBLISH_TASK_TABLE_SORTER,
   scheduleQuickPresets,
   type PublishTaskTableSorter,
 } from "@/lib/creator-publish/scheduleUtils";
@@ -73,7 +74,9 @@ export function useCreatorPublishPage() {
   const [materialPreviewTask, setMaterialPreviewTask] = useState<PublishTask | null>(null);
   const [editState, setEditState] = useState<EditTaskState>(null);
   const [savingEdit, setSavingEdit] = useState(false);
-  const [tableSorter, setTableSorter] = useState<PublishTaskTableSorter | null>(null);
+  const [tableSorter, setTableSorter] = useState<PublishTaskTableSorter | null>(
+    DEFAULT_PUBLISH_TASK_TABLE_SORTER
+  );
   const [taskStatusFilters, setTaskStatusFilters] = useState<TaskStatus[]>([]);
   const [taskShopFilters, setTaskShopFilters] = useState<string[]>([]);
   const [taskTypeFilters, setTaskTypeFilters] = useState<TaskType[]>([]);
