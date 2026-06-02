@@ -15,6 +15,38 @@ export type ValidateFeishuAiContentResult =
 export const FEISHU_AI_CONTENT_FORMAT_HINT =
   "输出格式：先写完整正文（正文内不要出现 # 话题），空一行，最后一行仅写 #标签1 #标签2 …（空格分隔，标签行不要再写正文句子）。必须同时包含正文和话题标签。";
 
+/** 药品/健康类品名常见剂型或标识，用于 AI 正文生成走推广向规则 */
+const MEDICINE_PRODUCT_NAME_PATTERN =
+  /(?:滴丸|软胶囊|胶囊|片剂|片|颗粒|口服液|合剂|散|膏|贴膏|贴|药|OTC|otc|中成药|处方药)/u;
+
+/** 药品话题标签中禁止使用的症状/疾病类词（须与正文合规表述区分） */
+const MEDICINE_SYMPTOM_HASHTAGS = [
+  "头晕",
+  "头痛",
+  "偏头痛",
+  "失眠",
+  "健忘",
+  "抑郁",
+  "焦虑",
+  "咳嗽",
+  "感冒",
+  "发烧",
+  "发热",
+  "胃痛",
+  "胃疼",
+  "腹泻",
+  "便秘",
+  "过敏",
+  "疣",
+  "高血压",
+  "糖尿病",
+  "贫血",
+  "风湿",
+  "关节痛",
+  "嗓子疼",
+  "咽喉痛",
+];
+
 const LLM_REFUSAL_PATTERNS = [
   /不太适合帮助/i,
   /无法帮助(?:您|你)?(?:生成|撰写|编写)/i,
@@ -197,6 +229,57 @@ export function validateFeishuAiGeneratedContent(raw: string): ValidateFeishuAiC
   }
   if (parts.hashtags.length === 0) {
     return { ok: false, reason: "缺少话题标签" };
+  }
+
+  return { ok: true, parts };
+}
+
+export function isMedicineLikeProduct(productName: string): boolean {
+  const name = String(productName || "").trim();
+  if (!name) return false;
+  return MEDICINE_PRODUCT_NAME_PATTERN.test(name);
+}
+
+function stripMedicineDosageFormSuffix(productName: string): string {
+  return String(productName || "")
+    .trim()
+    .replace(/(?:软胶囊|滴丸|胶囊|片剂|片|颗粒|口服液|合剂|散|膏|贴膏|贴)$/u, "")
+    .trim();
+}
+
+function bodyMentionsMedicineProduct(body: string, productName: string): boolean {
+  const name = String(productName || "").trim();
+  if (!name) return true;
+
+  if (body.includes(name)) return true;
+
+  const coreName = stripMedicineDosageFormSuffix(name);
+  if (coreName.length >= 2 && body.includes(coreName)) return true;
+
+  if (coreName.length >= 3 && body.includes(coreName.slice(0, 3))) return true;
+
+  return false;
+}
+
+export function validateMedicinePromotionContent(
+  parts: PublishDescriptionParts,
+  productName: string
+): ValidateFeishuAiContentResult {
+  if (!bodyMentionsMedicineProduct(parts.body, productName)) {
+    return {
+      ok: false,
+      reason: "药品正文须明确提及品名或品牌，不能整段只写氛围/颜值/仪式感",
+    };
+  }
+
+  const blockedTags = parts.hashtags.filter((tag) =>
+    MEDICINE_SYMPTOM_HASHTAGS.some((symptom) => tag === symptom || tag.includes(symptom))
+  );
+  if (blockedTags.length > 0) {
+    return {
+      ok: false,
+      reason: `药品话题标签勿使用症状/疾病词：${blockedTags.join("、")}`,
+    };
   }
 
   return { ok: true, parts };

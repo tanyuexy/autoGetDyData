@@ -255,7 +255,7 @@ function buildMetricBreakdownSegments(
       .filter((item) =>
         metricKey === "avgCompletion"
           ? item.avgCompletion != null && item.completionCount > 0
-          : item.periodSalesWorkCount > 0
+          : item.itemCount > 0
       )
       .map((item) => ({
         name: item.name,
@@ -268,7 +268,7 @@ function buildMetricBreakdownSegments(
         detail:
           metricKey === "avgCompletion"
             ? `${item.name} · ${percent(item.avgCompletion)} · ${item.completionCount} 条`
-            : `${item.name} · ${money(item.avgPeriodSalesAmount)} · ${item.periodSalesWorkCount} 个成交作品`,
+            : `${item.name} · ${money(item.avgPeriodSalesAmount)} · ${item.itemCount} 个发布作品`,
       }));
   }
 
@@ -1934,7 +1934,7 @@ export default function CreatorPage() {
           label="日期内总销额均值"
           value={money(metrics.avgPeriodSalesAmount)}
           tone="avgSales"
-          sub={`${plainNumber(metrics.periodSalesWorkCount)} 个有成交作品`}
+          sub={`${plainNumber(metrics.count)} 个发布作品`}
           breakdown={creationTypeBreakdown}
           breakdownMetric="avgPeriodSalesAmount"
         />

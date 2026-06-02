@@ -125,7 +125,24 @@ async function writeFeishuScheduleImportFailure(feishuCfg, accessToken, record, 
   }
 }
 
-async function markExistingTaskScheduleFailed(db, existingTask, errorText, log) {
+async function writeFeishuImportFailure(feishuCfg, accessToken, record, errorText, log) {
+  const f = record.fields || {};
+  if (String(f["已创建任务"] || "").trim() === "是") {
+    log("    ↺ 跳过飞书回写：已创建任务已为「是」");
+    return;
+  }
+  try {
+    await updateBitableRecord(feishuCfg, accessToken, record.record_id, {
+      已创建任务: formatImportErrorStatus(errorText),
+      审批: "异常待修改",
+    });
+    log("    ↺ 已回写飞书已创建任务列为失败原因（审批=异常待修改）");
+  } catch (writebackError) {
+    log(`    ⚠️ 回写飞书失败: ${writebackError.message}`);
+  }
+}
+
+async function markExistingTaskImportFailed(db, existingTask, errorText, log) {
   if (!existingTask?.id) return;
   const nowIso = new Date().toISOString();
   await db.collection("creator_publish_tasks").updateOne(
@@ -152,6 +169,10 @@ async function markExistingTaskScheduleFailed(db, existingTask, errorText, log) 
     updatedAt: nowIso,
     displayUpdatedAt: nowIso,
   };
+}
+
+async function markExistingTaskScheduleFailed(db, existingTask, errorText, log) {
+  return markExistingTaskImportFailed(db, existingTask, errorText, log);
 }
 
 function normalizeAttachmentSignature(attachments) {
@@ -199,6 +220,22 @@ function buildRecordSnapshot(record) {
     type,
     remoteCreatedStatus,
   };
+}
+
+function validateSnapshotDescription(snapshot) {
+  const sourceText = snapshot.rawDescription || snapshot.description;
+  const { body } = normalizeDescriptionForPublish(sourceText);
+  const nonHashtagText = String(sourceText || "")
+    .replace(/#[^\s#]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!body.trim() || !nonHashtagText) {
+    return {
+      ok: false,
+      error: "正文为空：请先填写正文或生成 AI 正文后再导入发布任务",
+    };
+  }
+  return { ok: true };
 }
 
 function buildFeishuContentHash(snapshot) {
@@ -415,7 +452,7 @@ function isExcludedAutoRetryFailure(task) {
     task?.failedStepTitle,
     task?.failedStepTag,
   ].filter(Boolean).join(" ");
-  return /购物车限额|购物车限购|定时时间不满足平台要求/.test(text);
+  return /购物车限额|购物车限购|定时时间不满足平台要求|正文为空|正文不能为空|缺少正文|不能只有话题标签/.test(text);
 }
 
 function shouldQueueExistingTaskOnAutoStart(task) {
@@ -695,6 +732,30 @@ async function syncPublishTasks(options = {}) {
           skippedScheduleInvalidCount++;
           continue;
         }
+      }
+
+      const descriptionValidation = validateSnapshotDescription(snapshot);
+      if (!descriptionValidation.ok) {
+        log(`  ⚠️ 跳过导入（正文为空）: ${label}`);
+        log(`    ${descriptionValidation.error}`);
+        await writeFeishuImportFailure(
+          feishuCfg,
+          accessToken,
+          record,
+          descriptionValidation.error,
+          log
+        );
+        const failedTask = await markExistingTaskImportFailed(
+          db,
+          existingTask,
+          descriptionValidation.error,
+          log
+        );
+        if (failedTask && record.record_id) {
+          existingTasksByRecordId.set(String(record.record_id), failedTask);
+        }
+        failedCount++;
+        continue;
       }
 
       const contentHash = buildFeishuContentHash(snapshot);

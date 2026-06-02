@@ -288,7 +288,7 @@ function buildCreationTypeBreakdown(
       cumulativeSalesAmount: sumShopSalesEntriesForItems(tableSubset, salesDateRange),
       periodSalesAmount,
       periodSalesWorkCount,
-      avgPeriodSalesAmount: periodSalesAmount / Math.max(periodSalesWorkCount, 1),
+      avgPeriodSalesAmount: periodSalesAmount / Math.max(tableSubset.length, 1),
       avgCompletion:
         withCompletion.length > 0
           ? withCompletion.reduce((sum, item) => sum + (item.completionRate || 0), 0) /
@@ -375,7 +375,7 @@ export function computeCreatorInsightsSummary(input: {
   const cumulativeSalesAmount = sumShopSalesEntriesForItems(tableItems, salesDateRange);
   const periodSalesAmount = sumShopSalesEntriesForItems(salesScopeItems, salesDateRange);
   const periodSalesWorkCount = countPeriodSalesWorks(salesScopeItems, salesDateRange);
-  const avgPeriodSalesAmount = periodSalesAmount / Math.max(periodSalesWorkCount, 1);
+  const avgPeriodSalesAmount = periodSalesAmount / Math.max(count, 1);
   const interactions = tableItems.reduce((sum, item) => sum + interactionCount(item), 0);
   const withCompletion = tableItems.filter((item) => item.completionRate != null);
   const avgCompletion =

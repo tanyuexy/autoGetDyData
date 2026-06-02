@@ -62,6 +62,24 @@ function normalizeDescriptionForPublish(text) {
   return { body, hashtags, plainHashtags, normalizedText };
 }
 
+function hasNonHashtagBodyText(text, parts) {
+  if (!parts.body.trim()) return false;
+  const nonHashtagText = String(text || "")
+    .replace(/#[^\s#]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return Boolean(nonHashtagText);
+}
+
+function requirePublishBody(description) {
+  const rawText = String(description || "");
+  const parts = normalizeDescriptionForPublish(rawText);
+  if (!hasNonHashtagBodyText(rawText, parts)) {
+    throw new Error("正文不能为空：请先填写正文或生成 AI 正文后再发布");
+  }
+  return parts;
+}
+
 async function getEditor(page) {
   const editor = page.locator('.editor-kit-container[contenteditable="true"]').first();
   if (await editor.isVisible({ timeout: 2000 }).catch(() => false)) return editor;
@@ -221,7 +239,7 @@ async function fillTitleAndDescription(page, title, description) {
   await setTextLikeInput(titleInput, title || "");
 
   const descText = description || "";
-  const { body, hashtags, plainHashtags, normalizedText } = normalizeDescriptionForPublish(descText);
+  const { body, hashtags, plainHashtags, normalizedText } = requirePublishBody(descText);
   step(`正文拆分: 长度 ${body.length}，话题标签 ${hashtags.length} 个`);
   if (normalizedText !== descText.trim()) {
     info(`正文已归一化: ${normalizedText.replace(/\n+/g, " / ")}`);
@@ -261,6 +279,7 @@ async function fillTitleAndDescription(page, title, description) {
 module.exports = {
   fillTitleAndDescription,
   normalizeDescriptionForPublish,
+  requirePublishBody,
   normalizeTopicText,
   splitDescription,
   topicTextMatches,

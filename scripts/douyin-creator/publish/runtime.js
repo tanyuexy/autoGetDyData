@@ -1301,7 +1301,9 @@ async function checkTitleFilled(page, expectedTitle) {
 }
 
 async function checkBodyFilled(page, expectedBody) {
-  if (!expectedBody) return;
+  if (!String(expectedBody || "").trim()) {
+    throw new Error("正文校验失败：期望正文为空，请先生成或填写正文");
+  }
   const editor = page.locator('[contenteditable="true"]').first();
   const text = (await editor.textContent().catch(() => "")).trim();
   // 编辑器内通过 Enter 换行会插入零宽空格，替换为空格后再比较（与 \n 行为一致）

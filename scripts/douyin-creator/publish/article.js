@@ -5,7 +5,7 @@ const { getAccountPaths } = require("../core/accounts");
 const { PUBLISH_BROWSER_VIEWPORT, HEADLESS } = require("../core/env");
 const { attachQrDataUrlSniffer } = require("../core/qr");
 const { saveDebugArtifacts, saveRunFailedArtifacts } = require("./debug");
-const { fillTitleAndDescription, normalizeDescriptionForPublish } = require("./editor");
+const { fillTitleAndDescription, requirePublishBody } = require("./editor");
 const { selectSelfDeclaration, setScheduleIfNeeded } = require("./publish-form");
 const {
   ensureLoggedIn,
@@ -252,7 +252,7 @@ async function runPublishArticle(options) {
       await ensureLoggedIn(page, accountName, paths);
     });
 
-    const { body: expectedBody, hashtags: expectedHashtags } = normalizeDescriptionForPublish(String(options.desc || ""));
+    const { body: expectedBody, hashtags: expectedHashtags } = requirePublishBody(String(options.desc || ""));
     const limitedHashtags = expectedHashtags.slice(0, MAX_HASHTAGS);
 
     await runStep(2, "进入图文发布页", "02-open-post-page", async () => {

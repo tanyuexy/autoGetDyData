@@ -9,7 +9,9 @@ import { updateBitableRecord } from "@/lib/feishu/core/bitable";
 import { downloadFeishuAttachmentCached } from "@/lib/feishu/attachment-download-cache";
 import {
   FEISHU_AI_CONTENT_FORMAT_HINT,
+  isMedicineLikeProduct,
   validateFeishuAiGeneratedContent,
+  validateMedicinePromotionContent,
 } from "@/lib/creator-publish/publishDescription";
 import path from "node:path";
 import fse from "fs-extra";
@@ -61,7 +63,11 @@ const AI_CONTENT_MAX_RETRIES = (() => {
 })();
 
 const IMAGE_MATERIAL_ANALYSIS_PROMPT =
-  "请详细描述这张抖音图文素材图片，供撰写发布正文参考：可见的产品/包装、文字信息、场景、人物动作、色调氛围、卖点线索。只描述能看清的内容，不要编造。";
+  "你是抖音电商素材分析助手。按以下结构输出（看不清的项写「未可见」）：\n" +
+  "【包装与产品信息】品名、品牌、剂型、包装/标签上可见的说明原文（适应症等逐字摘录，不要改写）、OTC等标识\n" +
+  "【可合规推广的卖点】仅从上述信息归纳的品牌、剂型、便携、规格等，不要编造功效\n" +
+  "【画面场景】场景、道具、光线、人物动作（简短；摆拍装饰不等于产品卖点）\n" +
+  "只描述能看清的内容，不要编造。";
 
 type ProductIndexes = {
   byRecordId: Map<string, ProductInfo>;
@@ -320,13 +326,36 @@ async function buildImageMaterialContext(options: {
   return `\n素材图片理解（共${sections.length}张）：\n${sections.join("\n\n")}`;
 }
 
-function buildAiContentSystemPrompt(hasImageMaterial: boolean): string {
-  const base = hasImageMaterial
-    ? "你是抖音电商内容文案助手。请结合商品信息、文案提示词和素材图片理解结果，生成可直接发布的中文内容。正文应与图片内容一致；"
+function buildAiContentSystemPrompt(options: {
+  productName: string;
+  hasImageMaterial: boolean;
+}): string {
+  const isMedicine = isMedicineLikeProduct(options.productName);
+
+  if (isMedicine) {
+    const contextHint = options.hasImageMaterial
+      ? "请结合商品信息、文案提示词和素材图片理解结果。"
+      : "请根据商品信息和文案提示词。";
+    const imageRule = options.hasImageMaterial
+      ? "画面氛围/道具描写不得超过全文约三成，不得整段只写颜值、仪式感、出片或氛围；素材若为氛围摆拍，仍须从【包装与产品信息】【可合规推广的卖点】提取合规卖点并写入正文。"
+      : "";
+
+    return (
+      `你是抖音电商药品/健康类产品文案助手。${contextHint}生成可直接发布、以促进购买为目的的中文内容。` +
+      `正文须推广产品本身（品牌、品名、剂型、适用人群/场景、使用便利等），引导用户了解并购买；${imageRule}` +
+      `功效与适用表述只能依据商品名、文案提示词或素材中包装可见原文，不得夸大、不得编造；禁止「治愈」「根治」「包好」等绝对化用语；不要拒答。` +
+      `话题标签优先品名、品牌、剂型或健康生活方式类词。` +
+      `正文不要出现店铺名称、店名或账号名。` +
+      `${FEISHU_AI_CONTENT_FORMAT_HINT}按文案提示词要求的风格撰写正文，不要输出解释。`
+    );
+  }
+
+  const base = options.hasImageMaterial
+    ? "你是抖音电商内容文案助手。请结合商品信息、文案提示词和素材图片理解结果，生成可直接发布的中文内容。正文以推广商品、促进购买为主，画面场景为辅；"
     : "你是抖音电商内容文案助手。请根据商品信息和文案提示词生成可直接发布的中文内容。";
 
   return (
-    `${base}文案自然、有种草感；不要夸大功效，不要编造未提供的信息；若遇药品/保健品，只写合规种草表述，不要拒答。` +
+    `${base}文案自然、有带货感；不要夸大功效，不要编造未提供的信息。` +
     `正文不要出现店铺名称、店名或账号名。` +
     `${FEISHU_AI_CONTENT_FORMAT_HINT}按文案提示词要求的风格撰写正文，不要输出解释。`
   );
@@ -357,6 +386,7 @@ async function requestAiContentOnce(
     imageMaterialContext: string;
     systemPrompt: string;
     userContent: string;
+    isMedicine: boolean;
   }
 ): Promise<{ content: string; usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number } }> {
   const result = await callStructuredLlm<GeneratedContent>(provider, {
@@ -367,8 +397,9 @@ async function requestAiContentOnce(
       properties: {
         content: {
           type: "string",
-          description:
-            "抖音发布描述：正文段落 + 空行 + 末行 #话题标签（空格分隔）；正文与标签都必须存在",
+          description: options.isMedicine
+            ? "抖音药品推广描述：正文以品名/品牌/剂型/合规卖点为主，空行后末行 #话题（勿用症状词）"
+            : "抖音发布描述：正文段落 + 空行 + 末行 #话题标签（空格分隔）；正文与标签都必须存在",
           minLength: 1,
         },
       },
@@ -407,7 +438,15 @@ async function generateContent(
   }
   log(`    [AI] 提示词: ${product.copyPrompt.slice(0, 120)}${product.copyPrompt.length > 120 ? "..." : ""}`);
 
-  const systemPrompt = buildAiContentSystemPrompt(Boolean(imageMaterialContext));
+  const isMedicine = isMedicineLikeProduct(product.productName);
+  if (isMedicine) {
+    log(`    [AI] 已识别为药品/健康类商品，使用推广向正文规则`);
+  }
+
+  const systemPrompt = buildAiContentSystemPrompt({
+    productName: product.productName,
+    hasImageMaterial: Boolean(imageMaterialContext),
+  });
   let formatRetryHint = "";
   let lastReason = "未知错误";
 
@@ -422,6 +461,7 @@ async function generateContent(
         product,
         imageMaterialContext,
         systemPrompt,
+        isMedicine,
         userContent: buildAiContentUserMessage({
           task,
           product,
@@ -439,6 +479,20 @@ async function generateContent(
 
       const validation = validateFeishuAiGeneratedContent(content);
       if (validation.ok) {
+        if (isMedicine) {
+          const medicineValidation = validateMedicinePromotionContent(
+            validation.parts,
+            product.productName
+          );
+          if (!medicineValidation.ok) {
+            lastReason = medicineValidation.reason;
+            log(`    [AI] 药品内容校验失败(${attempt}/${AI_CONTENT_MAX_RETRIES}): ${lastReason}`);
+            formatRetryHint =
+              `【内容修正】上次输出未通过校验：${lastReason}。请重新生成：正文须推广品名/品牌/剂型等合规卖点，勿整段只写氛围；话题勿用症状词。${FEISHU_AI_CONTENT_FORMAT_HINT}`;
+            continue;
+          }
+        }
+
         if (validation.parts.normalizedText !== content) {
           log(`    [AI] 已规范化正文格式（正文 + 末行话题标签）`);
         }
@@ -528,12 +582,12 @@ export async function peekFeishuAiContentCandidates(options: {
 
   log(
     `  任务表 ${taskRecords.length} 条，正文为空 ${candidates.length} 条，可生成 ${classified.generatableCount} 条` +
-      (classified.skippedNoProductCount
-        ? `（无商品匹配 ${classified.skippedNoProductCount}）`
-        : "") +
-      (classified.skippedNoPromptCount
-        ? `（文案提示词为空 ${classified.skippedNoPromptCount}）`
-        : "")
+    (classified.skippedNoProductCount
+      ? `（无商品匹配 ${classified.skippedNoProductCount}）`
+      : "") +
+    (classified.skippedNoPromptCount
+      ? `（文案提示词为空 ${classified.skippedNoPromptCount}）`
+      : "")
   );
 
   return {
@@ -656,8 +710,8 @@ export async function generateTaskAiContentToFeishu(options: {
 
   log(
     `${summaryPrefix} 任务表 ${taskRecords.length} 条，正文为空 ${candidates.length} 条` +
-      (options.recordIds?.length ? `，本次目标 ${targetCandidates.length} 条` : "") +
-      `，可生成 ${generatableCount} 条，商品信息 ${products.length} 条`
+    (options.recordIds?.length ? `，本次目标 ${targetCandidates.length} 条` : "") +
+    `，可生成 ${generatableCount} 条，商品信息 ${products.length} 条`
   );
   if (generatable.length > 0) {
     log(`${summaryPrefix} 待生成列表（前10条）:`);
