@@ -9,6 +9,16 @@ export type CreatorInsightsGroupPoint = {
   name: string;
   playCount: number;
   salesAmount: number;
+  /** 筛选日期范围内，该店铺作品的抖店成交销额合计 */
+  periodSalesAmount: number;
+  /** 实拍作品数（飞书「类型」= 实拍） */
+  liveShotItemCount: number;
+  /** AI 作品数（飞书「类型」= AI创作） */
+  aiItemCount: number;
+  /** 筛选日期范围内，实拍作品抖店成交销额 */
+  liveShotPeriodSalesAmount: number;
+  /** 筛选日期范围内，AI 作品抖店成交销额 */
+  aiPeriodSalesAmount: number;
   interactionCount: number;
   itemCount: number;
 };
@@ -86,9 +96,67 @@ function emptyGroupPoint(name: string): CreatorInsightsGroupPoint {
     name,
     playCount: 0,
     salesAmount: 0,
+    periodSalesAmount: 0,
+    liveShotItemCount: 0,
+    aiItemCount: 0,
+    liveShotPeriodSalesAmount: 0,
+    aiPeriodSalesAmount: 0,
     interactionCount: 0,
     itemCount: 0,
   };
+}
+
+function isLiveShotCreationType(creationType: string): boolean {
+  return creationType === "实拍";
+}
+
+function isAiCreationType(creationType: string): boolean {
+  return creationType === "AI创作";
+}
+
+function enrichShopGroupsWithMetrics(
+  groups: CreatorInsightsGroupPoint[],
+  tableItems: CreatorInsightLeanRow[],
+  salesScopeItems: CreatorInsightLeanRow[],
+  salesDateRange: { start: string; end: string } | null
+): CreatorInsightsGroupPoint[] {
+  const byName = new Map<string, CreatorInsightsGroupPoint>(
+    groups.map((group) => [group.name, { ...group }])
+  );
+
+  for (const item of tableItems) {
+    const shopName = item.shopName || "未填写";
+    const current = byName.get(shopName) || emptyGroupPoint(shopName);
+    if (isLiveShotCreationType(item.creationType)) current.liveShotItemCount += 1;
+    if (isAiCreationType(item.creationType)) current.aiItemCount += 1;
+    byName.set(shopName, current);
+  }
+
+  const seenTitlesByShop = new Map<string, Set<string>>();
+  for (const item of salesScopeItems) {
+    const shopName = item.shopName || "未填写";
+    const titleKey = normalizeWorkTitleKey(item.title);
+    if (!titleKey) continue;
+
+    let seenTitles = seenTitlesByShop.get(shopName);
+    if (!seenTitles) {
+      seenTitles = new Set<string>();
+      seenTitlesByShop.set(shopName, seenTitles);
+    }
+    if (seenTitles.has(titleKey)) continue;
+    seenTitles.add(titleKey);
+
+    const amount = sumShopSalesEntries(item.shopSalesEntries, salesDateRange);
+    if (amount <= 0) continue;
+
+    const current = byName.get(shopName) || emptyGroupPoint(shopName);
+    current.periodSalesAmount += amount;
+    if (isLiveShotCreationType(item.creationType)) current.liveShotPeriodSalesAmount += amount;
+    if (isAiCreationType(item.creationType)) current.aiPeriodSalesAmount += amount;
+    byName.set(shopName, current);
+  }
+
+  return groups.map((group) => byName.get(group.name) || group);
 }
 
 function groupBy(
@@ -314,7 +382,12 @@ export function computeCreatorInsightsSummary(input: {
     withCompletion.reduce((sum, item) => sum + (item.completionRate || 0), 0) /
     Math.max(withCompletion.length, 1);
 
-  const shopGroups = groupBy(tableItems, (item) => item.shopName);
+  const shopGroups = enrichShopGroupsWithMetrics(
+    groupBy(tableItems, (item) => item.shopName),
+    tableItems,
+    salesScopeItems,
+    salesDateRange
+  );
   const workPoints = buildWorkPoints(tableItems, salesScopeItems, salesDateRange);
 
   return {
@@ -334,7 +407,10 @@ export function computeCreatorInsightsSummary(input: {
       (a, b) => b.playCount - a.playCount || a.name.localeCompare(b.name, "zh-CN")
     ),
     shopPublishRanking: [...shopGroups].sort(
-      (a, b) => b.itemCount - a.itemCount || a.name.localeCompare(b.name, "zh-CN")
+      (a, b) =>
+        b.itemCount - a.itemCount ||
+        b.periodSalesAmount - a.periodSalesAmount ||
+        a.name.localeCompare(b.name, "zh-CN")
     ),
     typeRanking: groupBy(tableItems, (item) => item.workType).sort((a, b) => b.itemCount - a.itemCount),
     dailyTrend: buildDailySeries(tableItems, chartDateRange),

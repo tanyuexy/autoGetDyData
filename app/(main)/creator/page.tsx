@@ -135,6 +135,11 @@ function truncateChartLabel(text: string, maxLen = 18) {
   return `${normalized.slice(0, maxLen - 1)}…`;
 }
 
+function truncateShopChartAxisLabel(name: string, shopCount: number): string {
+  const maxLen = shopCount > 6 ? 9 : shopCount > 4 ? 11 : 14;
+  return truncateChartLabel(name || "未分组", maxLen);
+}
+
 function percent(value: number | null) {
   if (value == null || !Number.isFinite(value)) return "-";
   return `${(value * 100).toFixed(1)}%`;
@@ -611,64 +616,231 @@ function MiniBarChart({
 }
 
 function ShopVerticalBarChart({ data, emptyText }: { data: GroupPoint[]; emptyText: string }) {
+  /** 作品柱用浅色，销额线用同色系深色，避免折线与柱体糊在一起 */
+  const SHOP_PUBLISH_BAR = {
+    liveShot: chartVerticalColor("#ccfbf1", "#5eead4"),
+    ai: chartVerticalColor("#e0e7ff", "#c4b5fd"),
+  };
+  const SHOP_PUBLISH_LINE = {
+    liveShot: "#047857",
+    ai: "#4338ca",
+  };
+
   const option = useMemo<EChartsOption | null>(() => {
     if (!data.length) return null;
-    const values = data.map((item) => item.itemCount);
-    const max = Math.max(...values, 0);
-    if (max <= 0) return null;
+    const liveShotCounts = data.map((item) => item.liveShotItemCount);
+    const aiCounts = data.map((item) => item.aiItemCount);
+    const liveShotSales = data.map((item) => item.liveShotPeriodSalesAmount);
+    const aiSales = data.map((item) => item.aiPeriodSalesAmount);
+    const maxPublish = Math.max(
+      ...data.map((item) => item.itemCount),
+      ...liveShotCounts,
+      ...aiCounts,
+      0
+    );
+    if (maxPublish <= 0) return null;
+    const shopNames = data.map((item) => item.name || "未分组");
     const denseAxis = data.length > 6;
+    const legendItems = ["实拍作品数", "AI作品数", "实拍销额", "AI销额"];
+    const lineSymbolSize = denseAxis ? 8 : 10;
+    const lineWidth = denseAxis ? 3 : 3.5;
     return {
       animation: true,
       animationDuration: 700,
-      animationEasing: 'cubicOut',
-      grid: { top: 14, right: 8, bottom: denseAxis ? 34 : 22, left: 6, containLabel: true },
+      animationEasing: "cubicOut",
+      grid: { top: 32, right: 8, bottom: denseAxis ? 18 : 6, left: 2, containLabel: false },
+      legend: {
+        top: 2,
+        left: "center",
+        itemWidth: 12,
+        itemHeight: 8,
+        itemGap: 10,
+        textStyle: { color: CREATOR_CHART_COLORS.neutralText, fontSize: 10 },
+        data: legendItems,
+      },
       tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'shadow' },
+        trigger: "axis",
+        axisPointer: { type: "cross" },
+        backgroundColor: "rgba(255,255,255,0.98)",
+        borderColor: "#e0dbd5",
+        textStyle: { color: "#2f2b28", fontSize: 12 },
         formatter(params: unknown) {
-          const row = Array.isArray(params) ? params[0] : params;
-          if (!row || typeof row !== 'object') return emptyText;
-          const datum = row as { axisValueLabel?: string; value?: number };
-          return `${datum.axisValueLabel || '未分组'}<br/>发布 ${plainNumber(Number(datum.value || 0))} 个作品`;
+          const rows = Array.isArray(params) ? params : [params];
+          const first = rows[0];
+          if (!first || typeof first !== "object") return emptyText;
+          const datum = first as { axisValueLabel?: string; dataIndex?: number };
+          const index = datum.dataIndex ?? -1;
+          const point = data[index];
+          const shop = point?.name || datum.axisValueLabel || "未分组";
+          if (!point) return emptyText;
+          const lines = [
+            shop,
+            `实拍作品数：${plainNumber(point.liveShotItemCount)} 个`,
+            `AI作品数：${plainNumber(point.aiItemCount)} 个`,
+            `发布合计：${plainNumber(point.itemCount)} 个`,
+            `实拍销额：${money(point.liveShotPeriodSalesAmount)}`,
+            `AI 销额：${money(point.aiPeriodSalesAmount)}`,
+            `销额合计：${money(point.periodSalesAmount)}`,
+          ];
+          if (point.liveShotItemCount > 0) {
+            lines.push(
+              `实拍视频均销：${money(point.liveShotPeriodSalesAmount / point.liveShotItemCount)}`
+            );
+          }
+          if (point.aiItemCount > 0) {
+            lines.push(`AI视频均销：${money(point.aiPeriodSalesAmount / point.aiItemCount)}`);
+          }
+          if (point.itemCount > 0 && point.periodSalesAmount > 0) {
+            lines.push(`单作品均销：${money(point.periodSalesAmount / point.itemCount)}`);
+          }
+          return lines.join("<br/>");
         },
       },
       xAxis: {
-        type: 'category',
-        data: data.map((item) => item.name || '未分组'),
+        type: "category",
+        data: shopNames,
+        boundaryGap: true,
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
           color: CREATOR_CHART_COLORS.axisText,
           fontSize: 10,
-          rotate: denseAxis ? 35 : 0,
-          hideOverlap: !denseAxis,
-          formatter: (value: string) => truncateChartLabel(value, denseAxis ? 6 : 8),
+          interval: 0,
+          rotate: denseAxis ? 28 : 0,
+          hideOverlap: denseAxis,
+          margin: 4,
+          align: denseAxis ? "right" : "center",
+          verticalAlign: denseAxis ? "top" : "middle",
+          formatter: (value: string) => truncateShopChartAxisLabel(value, data.length),
         },
       },
-      yAxis: {
-        type: 'value',
-        minInterval: 1,
-        axisLine: { show: false },
-        axisTick: { show: false },
-        splitLine: { lineStyle: { color: CREATOR_CHART_COLORS.gridLine } },
-        axisLabel: { color: '#8a837d', fontSize: 10 },
-      },
-      series: [{
-        type: 'bar',
-        data: values,
-        barWidth: denseAxis ? '62%' : '52%',
-        itemStyle: { color: chartVerticalColor('#fcd34d', '#d97706'), borderRadius: [4, 4, 0, 0] },
-        label: {
-          show: !denseAxis,
-          position: 'top',
-          color: '#b45309',
-          fontSize: 10,
-          formatter: ((params: any) => {
-            const value = Number(params?.value || 0);
-            return value > 0 ? plainNumber(value) : '';
-          }) as any,
+      yAxis: [
+        {
+          type: "value",
+          name: "作品数",
+          minInterval: 1,
+          min: 0,
+          max: (extent: { max: number }) => {
+            const peak = extent.max || 0;
+            if (peak <= 0) return 1;
+            return Math.ceil(peak * 1.06 + 1);
+          },
+          axisLine: { show: false },
+          axisTick: { show: false },
+          nameTextStyle: { color: CREATOR_CHART_COLORS.neutralText, fontSize: 10, padding: [0, 0, 0, 0] },
+          nameGap: 6,
+          splitLine: { lineStyle: { color: CREATOR_CHART_COLORS.gridLine } },
+          axisLabel: { color: "#8a837d", fontSize: 10, margin: 4 },
         },
-      }],
+        {
+          type: "value",
+          name: "销额",
+          min: 0,
+          max: (extent: { max: number }) => {
+            const peak = extent.max || 0;
+            if (peak <= 0) return 1;
+            return Math.ceil(peak * 1.08);
+          },
+          axisLine: { show: false },
+          axisTick: { show: false },
+          nameTextStyle: { color: "#4338ca", fontSize: 10, padding: [0, 0, 0, 0] },
+          nameGap: 6,
+          splitLine: { show: false },
+          axisLabel: {
+            color: "#4338ca",
+            fontSize: 10,
+            margin: 4,
+            formatter: (value: number) => compactNumber(value),
+          },
+        },
+      ],
+      barCategoryGap: "12%",
+      series: [
+        {
+          name: "实拍作品数",
+          type: "bar",
+          stack: "publish",
+          yAxisIndex: 0,
+          z: 1,
+          data: liveShotCounts,
+          barWidth: denseAxis ? "68%" : "56%",
+          itemStyle: {
+            color: SHOP_PUBLISH_BAR.liveShot,
+            borderColor: "rgba(4, 120, 87, 0.35)",
+            borderWidth: 1,
+          },
+        },
+        {
+          name: "AI作品数",
+          type: "bar",
+          stack: "publish",
+          yAxisIndex: 0,
+          z: 1,
+          data: aiCounts,
+          itemStyle: {
+            color: SHOP_PUBLISH_BAR.ai,
+            borderColor: "rgba(67, 56, 202, 0.35)",
+            borderWidth: 1,
+            borderRadius: [4, 4, 0, 0],
+          },
+        },
+        {
+          name: "实拍销额",
+          type: "line",
+          yAxisIndex: 1,
+          z: 4,
+          data: liveShotSales,
+          smooth: 0.35,
+          symbol: "circle",
+          symbolSize: lineSymbolSize,
+          showSymbol: true,
+          lineStyle: {
+            color: SHOP_PUBLISH_LINE.liveShot,
+            width: lineWidth,
+            type: "solid",
+            shadowColor: "rgba(4, 120, 87, 0.25)",
+            shadowBlur: 6,
+            shadowOffsetY: 2,
+          },
+          itemStyle: {
+            color: SHOP_PUBLISH_LINE.liveShot,
+            borderColor: "#fff",
+            borderWidth: 2,
+          },
+          emphasis: {
+            scale: 1.35,
+            itemStyle: { borderWidth: 2.5 },
+          },
+        },
+        {
+          name: "AI销额",
+          type: "line",
+          yAxisIndex: 1,
+          z: 5,
+          data: aiSales,
+          smooth: 0.35,
+          symbol: "diamond",
+          symbolSize: lineSymbolSize + 1,
+          showSymbol: true,
+          lineStyle: {
+            color: SHOP_PUBLISH_LINE.ai,
+            width: lineWidth,
+            type: [8, 5],
+            shadowColor: "rgba(67, 56, 202, 0.22)",
+            shadowBlur: 6,
+            shadowOffsetY: 2,
+          },
+          itemStyle: {
+            color: SHOP_PUBLISH_LINE.ai,
+            borderColor: "#fff",
+            borderWidth: 2,
+          },
+          emphasis: {
+            scale: 1.35,
+            itemStyle: { borderWidth: 2.5 },
+          },
+        },
+      ],
     };
   }, [data, emptyText]);
   if (!option) return <ChartEmpty text={emptyText} />;
@@ -1813,9 +1985,9 @@ export default function CreatorPage() {
                   <section className="creator-chart-panel creator-chart-panel-wide creator-chart-panel-publish">
                     <div className="creator-panel-title">
                       <BarChartOutlined />
-                      <span>店铺发布量</span>
+                      <span>店铺发布量与销额（实拍 / AI）</span>
                     </div>
-                    <div className="creator-chart-body creator-chart-body-wide">
+                    <div className="creator-chart-body creator-chart-body-wide creator-chart-body-publish">
                       <ShopVerticalBarChart
                         data={shopPublishRanking}
                         emptyText="暂无店铺发布数据"

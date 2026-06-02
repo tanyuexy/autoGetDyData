@@ -550,6 +550,7 @@ body:has(.ant-modal-wrap) {
   --creator-chart-accent: #d97706;
   --creator-chart-border: rgba(217, 119, 6, 0.22);
   --creator-chart-tint: rgba(217, 119, 6, 0.045);
+  padding-bottom: 2px;
 }
 
 .creator-chart-panel-work-play {
@@ -671,6 +672,11 @@ body:has(.ant-modal-wrap) {
   height: 280px;
   min-height: 280px;
   flex: none;
+}
+
+.creator-chart-body-publish {
+  height: 208px;
+  min-height: 208px;
 }
 
 .creator-chart-empty {
@@ -797,6 +803,11 @@ body:has(.ant-modal-wrap) {
     min-height: 240px;
   }
 
+  .creator-chart-body-publish {
+    height: 188px;
+    min-height: 188px;
+  }
+
   .creator-chart-body-quad {
     min-height: 260px;
   }
@@ -841,6 +852,11 @@ body:has(.ant-modal-wrap) {
   .creator-chart-body-wide {
     height: 220px;
     min-height: 220px;
+  }
+
+  .creator-chart-body-publish {
+    height: 172px;
+    min-height: 172px;
   }
 
   .creator-filter-item,
