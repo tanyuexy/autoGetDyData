@@ -1,4 +1,6 @@
 // 常见容器选择器（用于判断滑块是否出现）
+const { logWarn } = require("./shop-log");
+
 const DIALOG_SELECTORS = [
   "text=请完成下列验证后继续",
   ".captcha_verify_container",
@@ -104,7 +106,7 @@ async function solveCaptchaIfPresent(page, options = {}) {
     return true;
   }
 
-  console.warn(
+  logWarn(
     `[${tag}] 检测到滑块验证码，已禁用自动拖动；请在浏览器中手动完成验证，脚本会继续等待登录成功。`
   );
   return false;

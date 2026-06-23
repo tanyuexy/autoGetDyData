@@ -8,7 +8,7 @@ const {
   LOGIN_TIMEOUT_MS,
   SLIDER_MAX_RETRY
 } = require("./env");
-const { solveCaptchaIfPresent } = require("./captcha");
+const { solveCaptchaIfPresent, isCaptchaVisible } = require("./captcha");
 const {
   isShopPickerVisible
 } = require("./shop-picker");
@@ -21,6 +21,7 @@ const {
   isAuthenticatedStage,
   retryableGoto
 } = require("./page-utils");
+const { logWarn, logMilestone } = require("./shop-log");
 
 const PAGE_ACTIVITY_TRACKERS = new WeakMap();
 const LOGIN_STAGE_TIMEOUT_MS = Number(process.env.SHOP_LOGIN_STAGE_TIMEOUT_MS || 12000);
@@ -470,6 +471,12 @@ async function waitForLoginSettled(page, timeoutMs = 15000) {
   while (Date.now() < hardDeadline) {
     if (await isShopPickerVisible(page)) return true;
     if (await isLoggedIn(page)) return true;
+
+    // 滑块验证进行中时持续等待，避免页面 idle 被误判为登录失败
+    if (await isCaptchaVisible(page)) {
+      await page.waitForTimeout(400);
+      continue;
+    }
 
     if (Date.now() >= softDeadline) {
       const snapshot = getPageActivitySnapshot(page);
@@ -940,14 +947,16 @@ async function runShopLogin(context, account, options = {}) {
         },
         {
           verify: async () => {
-            if (!passed) throw new Error("自动滑块验证失败");
+            if (passed) return;
+            logWarn(
+              `[${tag}] 自动滑块未通过，等待手动完成验证（最多 ${Math.round(
+                LOGIN_TIMEOUT_MS / 1000
+              )}s）`
+            );
           },
-          meta: { stage: afterClickStage.stage }
+          meta: { stage: afterClickStage.stage, manualCaptchaExpected: !passed }
         }
-      ).catch((error) => {
-        logWarn(`[${tag}] 自动滑块步骤失败: ${error.message || error}`);
-        passed = false;
-      });
+      );
     } else {
       // 兜底：也许滑块在稍后才出现；让原有 solver 去做 detection + solve
       await runStep(
@@ -962,17 +971,25 @@ async function runShopLogin(context, account, options = {}) {
           });
         },
         {
+          verify: async () => {
+            if (passed) return;
+            if (await isCaptchaVisible(page)) {
+              logWarn(
+                `[${tag}] 检测到滑块，等待手动完成验证（最多 ${Math.round(
+                  LOGIN_TIMEOUT_MS / 1000
+                )}s）`
+              );
+              return;
+            }
+          },
           meta: { stage: afterClickStage.stage }
         }
-      ).catch((error) => {
-        logWarn(`[${tag}] 兜底滑块步骤失败: ${error.message || error}`);
-        passed = false;
-      });
+      );
     }
 
-    if (!passed) {
+    if (!passed && (await isCaptchaVisible(page))) {
       logWarn(
-        `[${tag}] 自动滑块失败。请在浏览器中手动完成，脚本将持续等待 ${Math.round(
+        `[${tag}] 请在浏览器中手动完成滑块验证，脚本将持续等待 ${Math.round(
           LOGIN_TIMEOUT_MS / 1000
         )}s`
       );

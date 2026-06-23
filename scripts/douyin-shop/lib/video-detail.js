@@ -31,6 +31,99 @@ function logSaved(tag, savePath) {
   logInfo(`[${tag}] 已保存 ${path.basename(savePath)}`);
 }
 
+async function hasVideoPageServerError(page) {
+  return page
+    .locator("text=服务器错误")
+    .first()
+    .isVisible({ timeout: 300 })
+    .catch(() => false);
+}
+
+async function getVideoDetailScope(page) {
+  const detail = page.locator("#videoDetail").first();
+  const visible = await detail
+    .isVisible({ timeout: 8000 })
+    .catch(() => false);
+  return visible ? detail : page;
+}
+
+async function clickExactTagPill(scope, page, label) {
+  const pills = scope.locator('div[class*="tagItem"]');
+  const count = await pills.count().catch(() => 0);
+  for (let i = 0; i < count; i += 1) {
+    const pill = pills.nth(i);
+    const text = ((await pill.innerText().catch(() => "")) || "").trim();
+    if (text !== label) continue;
+    const active = await pill
+      .evaluate((el) => /activeItem/.test(el.className))
+      .catch(() => false);
+    if (active) return true;
+    await pill.scrollIntoViewIfNeeded().catch(() => {});
+    await pill.click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(600);
+    return pill
+      .evaluate((el) => /activeItem/.test(el.className))
+      .catch(() => false);
+  }
+  return false;
+}
+
+async function isVideoFilterAreaReady(page) {
+  const detail = page.locator("#videoDetail").first();
+  const hasDetail = await detail.isVisible({ timeout: 500 }).catch(() => false);
+  if (hasDetail) {
+    const hasDownloadBtn = await detail
+      .locator('button:has-text("下载明细")')
+      .first()
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+    const hasAdPill = await detail
+      .locator('div[class*="tagItem"]')
+      .first()
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+    if (hasDownloadBtn && hasAdPill) {
+      return { ready: true, reason: "video-detail-panel" };
+    }
+  }
+
+  const hasDownloadBtn = await page
+    .locator('button:has-text("下载明细")')
+    .first()
+    .isVisible({ timeout: 500 })
+    .catch(() => false);
+  if (hasDownloadBtn) {
+    return { ready: true, reason: "download-btn" };
+  }
+
+  const hasAdContainer = await page
+    .locator("#_auto__ad_type")
+    .first()
+    .isVisible({ timeout: 500 })
+    .catch(() => false);
+  const hasAdTab = await page
+    .locator('div[role="tab"]:has-text("非投放"), div[role="tab"]:has-text("投放")')
+    .first()
+    .isVisible({ timeout: 500 })
+    .catch(() => false);
+  const hasDateTrigger = await page
+    .locator(
+      'label.ecom-radio-button-wrapper:has-text("更多"), label.ecom-radio-button-wrapper:has-text("自然日"), label.ecom-radio-button-wrapper:has-text("近7天"), label.ecom-radio-button-wrapper:has-text("近30天"), label.ecom-radio-button-wrapper:has-text("昨天")'
+    )
+    .first()
+    .isVisible({ timeout: 500 })
+    .catch(() => false);
+
+  const hasAdControl = hasAdContainer || hasAdTab;
+  if (hasDateTrigger && hasAdControl) {
+    return { ready: true, reason: "filters" };
+  }
+  return {
+    ready: false,
+    reason: `detail=${hasDetail} date=${hasDateTrigger} ad=${hasAdControl}`
+  };
+}
+
 async function waitForVideoSelfReady(page, tag, timeoutMs = 20000) {
   const started = Date.now();
   await Promise.race([
@@ -43,126 +136,168 @@ async function waitForVideoSelfReady(page, tag, timeoutMs = 20000) {
       .locator("text=视频明细")
       .first()
       .waitFor({ state: "visible", timeout: timeoutMs })
+      .catch(() => null),
+    page
+      .locator("text=自营视频")
+      .first()
+      .waitFor({ state: "visible", timeout: timeoutMs })
       .catch(() => null)
   ]);
 
+  let reloadedForServerError = false;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const hasMore = await page
-      .locator('label.ecom-radio-button-wrapper:has-text("更多")')
-      .first()
-      .isVisible({ timeout: 500 })
-      .catch(() => false);
-    const hasAdTab = await page
-      .locator('div[role="tab"]:has-text("非投放")')
-      .first()
-      .isVisible({ timeout: 500 })
-      .catch(() => false);
-    if (hasMore && hasAdTab) {
-      logStep(tag, "视频明细页筛选区已就绪", started);
+    if (await hasVideoPageServerError(page)) {
+      if (!reloadedForServerError) {
+        reloadedForServerError = true;
+        logWarn(tag, "短视频明细页出现「服务器错误」，尝试刷新页面");
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+        await page.waitForTimeout(1500);
+        await ensureVideoDetailTab(page, tag);
+        continue;
+      }
+      logWarn(tag, "短视频明细页仍为「服务器错误」");
+      return false;
+    }
+
+    const state = await isVideoFilterAreaReady(page);
+    if (state.ready) {
+      logStep(tag, `视频明细页筛选区已就绪 (${state.reason})`, started);
       return true;
     }
     await page.waitForTimeout(300);
   }
-  logWarn(tag, `视频明细页筛选区 ${timeoutMs}ms 内未全部就绪`);
+  const lastState = await isVideoFilterAreaReady(page).catch(() => ({ reason: "unknown" }));
+  logWarn(
+    tag,
+    `视频明细页筛选区 ${timeoutMs}ms 内未全部就绪 (${lastState.reason || "unknown"})`
+  );
   return false;
 }
 
 async function gotoVideoSelf(page, tag) {
   const started = Date.now();
-  const url = page.url() || "";
-  if (!url.startsWith(VIDEO_SELF_URL)) {
-    logStep(tag, `跳转至短视频明细页: ${VIDEO_SELF_URL}`);
-    try {
-      await retryableGoto(page, VIDEO_SELF_URL, {
-        waitUntil: "domcontentloaded",
-        timeout: 45000,
-        maxRetries: 2,
-        baseBackoff: 2500,
-        expectedUrlRe: /compass\.jinritemai\.com\/shop\/video\/self/
-      });
-    } catch (error) {
-      logWarn(tag, `跳转短视频明细页失败: ${error.message || error}`);
-      throw error;
+  const maxAttempts = 3;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const url = page.url() || "";
+    if (attempt === 0 && !url.startsWith(VIDEO_SELF_URL)) {
+      logStep(tag, `跳转至短视频明细页: ${VIDEO_SELF_URL}`);
+      try {
+        await retryableGoto(page, VIDEO_SELF_URL, {
+          waitUntil: "domcontentloaded",
+          timeout: 45000,
+          maxRetries: 2,
+          baseBackoff: 2500,
+          expectedUrlRe: /compass\.jinritemai\.com\/shop\/video\/self/
+        });
+      } catch (error) {
+        logWarn(tag, `跳转短视频明细页失败: ${error.message || error}`);
+        throw error;
+      }
+    } else if (attempt > 0) {
+      logWarn(tag, `短视频明细页未就绪，第 ${attempt + 1} 次重试导航`);
+      await page
+        .reload({ waitUntil: "domcontentloaded", timeout: 45000 })
+        .catch(async () => {
+          await retryableGoto(page, VIDEO_SELF_URL, {
+            waitUntil: "domcontentloaded",
+            timeout: 45000,
+            maxRetries: 1,
+            baseBackoff: 2500,
+            expectedUrlRe: /compass\.jinritemai\.com\/shop\/video\/self/
+          });
+        });
+    } else {
+      logStep(tag, `当前已在短视频明细页`);
     }
-  } else {
-    logStep(tag, `当前已在短视频明细页`);
+
+    await page.waitForLoadState("load", { timeout: 15000 }).catch(() => {});
+    await ensureVideoDetailTab(page, tag);
+
+    const ready = await waitForVideoSelfReady(page, tag, VIDEO_READY_TIMEOUT_MS);
+    if (ready) {
+      logStep(tag, `gotoVideoSelf 完成`, started);
+      return;
+    }
   }
 
-  let ready = await waitForVideoSelfReady(page, tag, VIDEO_READY_TIMEOUT_MS);
-  if (!ready) {
-    logWarn(tag, "短视频明细页未就绪，重试一次导航");
-    await retryableGoto(page, VIDEO_SELF_URL, {
-      waitUntil: "domcontentloaded",
-      timeout: 45000,
-      maxRetries: 1,
-      baseBackoff: 2500,
-      expectedUrlRe: /compass\.jinritemai\.com\/shop\/video\/self/
-    });
-    ready = await waitForVideoSelfReady(page, tag, VIDEO_READY_TIMEOUT_MS);
-  }
-  if (!ready) {
-    throw new Error(`短视频明细页筛选区未就绪（${VIDEO_READY_TIMEOUT_MS}ms）`);
-  }
-  logStep(tag, `gotoVideoSelf 完成`, started);
+  throw new Error(`短视频明细页筛选区未就绪（${VIDEO_READY_TIMEOUT_MS}ms）`);
 }
 
 /**
- * 视频明细：悬浮「更多」→ 左侧选「自然日」→ 日历里按 targetDate (YYYY/MM/DD) 精准选日。
+ * 视频明细：优先点顶部「自然日」；否则悬浮「更多」→ 左侧选「自然日」→ 日历选日。
  */
 async function selectDateRangeYesterday(page, tag, targetDate) {
   const started = Date.now();
 
-  const moreTrigger = page
+  const directNaturalDay = page
     .locator(
-      'label.ecom-radio-button-wrapper.ecom-dropdown-trigger:has-text("更多"), label.ecom-radio-button-wrapper:has-text("更多")'
+      'label.ecom-radio-button-wrapper.ecom-dropdown-trigger:has-text("自然日"), label.ecom-radio-button-wrapper:has-text("自然日")'
     )
     .first();
-  const moreVisible = await moreTrigger
-    .waitFor({ state: "visible", timeout: 8000 })
+  const directNaturalVisible = await directNaturalDay
+    .waitFor({ state: "visible", timeout: 3000 })
     .then(() => true)
     .catch(() => false);
-  if (!moreVisible) {
-    logWarn(tag, '未找到"更多"按钮，跳过日期选择');
-    return { ok: false, dataDate: null };
-  }
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await moreTrigger.hover({ timeout: 1500 }).catch(() => {});
-    await page.waitForTimeout(350);
-    const dropdownVisible = await page
-      .locator(".ecom-dorami-date-picker-quick-picker-dropdown")
-      .first()
-      .isVisible({ timeout: 500 })
-      .catch(() => false);
-    if (dropdownVisible) break;
-    if (attempt === 2) {
-      logWarn(tag, `hover "更多" 3 次后弹层仍未出现`);
-    }
-  }
-
-  const dropdown = page
-    .locator(".ecom-dorami-date-picker-quick-picker-dropdown")
-    .first();
-
-  let naturalDay = dropdown
-    .locator('li.ecom-menu-item:has-text("自然日")')
-    .first();
-  if (!(await naturalDay.isVisible({ timeout: 500 }).catch(() => false))) {
-    naturalDay = dropdown
-      .locator('span.ecom-menu-title-content:has-text("自然日")')
-      .first();
-  }
-  if (!(await naturalDay.isVisible({ timeout: 500 }).catch(() => false))) {
-    naturalDay = page.locator(':text-is("自然日")').first();
-  }
-  if (await naturalDay.isVisible({ timeout: 1500 }).catch(() => false)) {
-    await naturalDay.hover({ timeout: 1000 }).catch(() => {});
-    await naturalDay.click({ timeout: 2000 }).catch(() => {});
+  if (directNaturalVisible) {
+    await directNaturalDay.hover({ timeout: 1000 }).catch(() => {});
+    await directNaturalDay.click({ timeout: 2000 }).catch(() => {});
     await page.waitForTimeout(400);
-    logStep(tag, '已点击"自然日"分类');
+    logStep(tag, '已通过顶部「自然日」触发器打开日历');
   } else {
-    logWarn(tag, '悬浮"更多"后仍未找到"自然日"选项');
+    const moreTrigger = page
+      .locator(
+        'label.ecom-radio-button-wrapper.ecom-dropdown-trigger:has-text("更多"), label.ecom-radio-button-wrapper:has-text("更多")'
+      )
+      .first();
+    const moreVisible = await moreTrigger
+      .waitFor({ state: "visible", timeout: 8000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!moreVisible) {
+      logWarn(tag, '未找到"更多"或「自然日」日期触发器，跳过日期选择');
+      return { ok: false, dataDate: null };
+    }
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await moreTrigger.hover({ timeout: 1500 }).catch(() => {});
+      await page.waitForTimeout(350);
+      const dropdownVisible = await page
+        .locator(".ecom-dorami-date-picker-quick-picker-dropdown")
+        .first()
+        .isVisible({ timeout: 500 })
+        .catch(() => false);
+      if (dropdownVisible) break;
+      if (attempt === 2) {
+        logWarn(tag, `hover "更多" 3 次后弹层仍未出现`);
+      }
+    }
+
+    const dropdown = page
+      .locator(".ecom-dorami-date-picker-quick-picker-dropdown")
+      .first();
+
+    let naturalDay = dropdown
+      .locator('li.ecom-menu-item:has-text("自然日")')
+      .first();
+    if (!(await naturalDay.isVisible({ timeout: 500 }).catch(() => false))) {
+      naturalDay = dropdown
+        .locator('span.ecom-menu-title-content:has-text("自然日")')
+        .first();
+    }
+    if (!(await naturalDay.isVisible({ timeout: 500 }).catch(() => false))) {
+      naturalDay = page.locator(':text-is("自然日")').first();
+    }
+    if (await naturalDay.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await naturalDay.hover({ timeout: 1000 }).catch(() => {});
+      await naturalDay.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(400);
+      logStep(tag, '已点击"自然日"分类');
+    } else {
+      logWarn(tag, '悬浮"更多"后仍未找到"自然日"选项');
+    }
   }
 
   const rightPanel = page
@@ -201,6 +336,26 @@ async function selectDateRangeYesterday(page, tag, targetDate) {
 
 async function ensureVideoDetailTab(page, tag) {
   const started = Date.now();
+  const detail = page.locator("#videoDetail").first();
+  const detailVisible = await detail
+    .waitFor({ state: "visible", timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (detailVisible) {
+    await detail.scrollIntoViewIfNeeded().catch(() => {});
+    const listTab = detail.locator('div[role="tab"]:has-text("列表")').first();
+    if (await listTab.isVisible({ timeout: 1500 }).catch(() => false)) {
+      const selected = await listTab.getAttribute("aria-selected").catch(() => null);
+      if (selected !== "true") {
+        await listTab.click({ timeout: 2000 }).catch(() => {});
+        await page.waitForTimeout(400);
+      }
+    }
+    logStep(tag, "短视频明细面板已就绪", started);
+    return true;
+  }
+
   const tabSel = 'div[role="tab"]:has-text("视频明细"), :text-is("视频明细")';
   let tab = page.locator(tabSel).first();
   const visible1 = await tab.isVisible({ timeout: 2000 }).catch(() => false);
@@ -242,14 +397,18 @@ const VIDEO_STEPS_PER_DAY = 7;
 async function selectAdTypeTab(page, tag, adType) {
   const label = VIDEO_AD_LABEL[adType];
   if (!label) return false;
-  if (adType === VIDEO_AD_TYPE.NON_AD) {
-    return selectNonAdTabLegacy(page, tag);
+  const started = Date.now();
+  const scope = await getVideoDetailScope(page);
+
+  const viaTagPill = await clickExactTagPill(scope, page, label);
+  if (viaTagPill) {
+    logStep(tag, `已将投放属性切换为"${label}"`, started);
+    return true;
   }
 
-  const started = Date.now();
-  const container = page.locator("#_auto__ad_type").first();
+  const container = scope.locator("#_auto__ad_type").first();
   const hasContainer = await container
-    .waitFor({ state: "visible", timeout: 8000 })
+    .waitFor({ state: "visible", timeout: 4000 })
     .then(() => true)
     .catch(() => false);
 
@@ -268,7 +427,7 @@ async function selectAdTypeTab(page, tag, adType) {
   }
 
   if (!targetTab) {
-    const tabs = page.locator('div[role="tab"]');
+    const tabs = scope.locator('div[role="tab"]');
     const count = await tabs.count().catch(() => 0);
     for (let i = 0; i < count; i += 1) {
       const tab = tabs.nth(i);
@@ -281,7 +440,7 @@ async function selectAdTypeTab(page, tag, adType) {
   }
 
   if (!targetTab) {
-    logWarn(tag, `未找到"${label}" Tab，跳过切换`);
+    logWarn(tag, `未找到"${label}" 投放属性选项，跳过切换`);
     return false;
   }
 
@@ -293,67 +452,13 @@ async function selectAdTypeTab(page, tag, adType) {
 
   await targetTab.click({ timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(600);
-  const ok = await page
-    .evaluate((expectedLabel) => {
-      const root = document.querySelector("#_auto__ad_type");
-      const scope = root || document;
-      const tabs = scope.querySelectorAll('div[role="tab"]');
-      for (const tab of tabs) {
-        const text = (tab.textContent || "").trim();
-        if (text !== expectedLabel) continue;
-        return tab.getAttribute("aria-selected") === "true";
-      }
-      return false;
-    }, label)
+  const ok = await targetTab
+    .evaluate((el) => el.getAttribute("aria-selected") === "true")
     .catch(() => false);
   if (ok) {
     logStep(tag, `已将投放属性切换为"${label}"`, started);
   } else {
-    logWarn(tag, `点击"${label}"后未观察到 aria-selected=true 切换`);
-  }
-  return ok;
-}
-
-async function selectNonAdTabLegacy(page, tag) {
-  const started = Date.now();
-  let targetTab = page.locator('#_auto__ad_type div[role="tab"]:has-text("非投放")').first();
-  const viaContainer = await targetTab
-    .waitFor({ state: "visible", timeout: 8000 })
-    .then(() => true)
-    .catch(() => false);
-
-  if (!viaContainer) {
-    targetTab = page
-      .locator('div[role="tab"]:has-text("非投放")')
-      .first();
-    const byText = await targetTab
-      .waitFor({ state: "visible", timeout: 8000 })
-      .then(() => true)
-      .catch(() => false);
-    if (!byText) {
-      logWarn(tag, '未找到"非投放" Tab，跳过切换');
-      return false;
-    }
-  }
-
-  const selected = await targetTab.getAttribute("aria-selected").catch(() => null);
-  if (selected === "true") {
-    logStep(tag, '投放属性已为"非投放"，跳过切换', started);
-    return true;
-  }
-
-  await targetTab.click({ timeout: 3000 }).catch(() => {});
-  await page.waitForTimeout(600);
-  const ok = await page
-    .locator('div[role="tab"][aria-selected="true"]:has-text("非投放")')
-    .first()
-    .waitFor({ state: "visible", timeout: 5000 })
-    .then(() => true)
-    .catch(() => false);
-  if (ok) {
-    logStep(tag, '已将投放属性切换为"非投放"', started);
-  } else {
-    logWarn(tag, '点击"非投放"后未观察到 aria-selected=true 切换');
+    logWarn(tag, `点击"${label}"后未观察到选中态切换`);
   }
   return ok;
 }
@@ -379,7 +484,10 @@ async function clickDownloadAndSave(page, tag, saveDir, options = {}) {
   const started = Date.now();
   await fse.ensureDir(saveDir);
 
-  const allButtons = page.locator('button:has-text("下载明细")');
+  const detailBtn = page.locator('#videoDetail button:has-text("下载明细")').first();
+  const allButtons = (await detailBtn.isVisible({ timeout: 1500 }).catch(() => false))
+    ? page.locator('#videoDetail button:has-text("下载明细")')
+    : page.locator('button:has-text("下载明细")');
   const btnCount = await allButtons.count().catch(() => 0);
   if (btnCount === 0) {
     throw new Error('页面上未找到"下载明细"按钮');
@@ -463,7 +571,9 @@ async function waitForVideoDetailPanelReady(page, tag, options = {}) {
       .first()
       .isVisible({ timeout: 250 })
       .catch(() => false);
-    const downloadBtn = page.locator('button:has-text("下载明细")').last();
+    const downloadBtn = page
+      .locator('#videoDetail button:has-text("下载明细"), button:has-text("下载明细")')
+      .last();
     const btnVisible = await downloadBtn.isVisible({ timeout: 250 }).catch(() => false);
     const btnDisabled = btnVisible
       ? await downloadBtn.isDisabled({ timeout: 250 }).catch(() => false)
