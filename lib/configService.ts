@@ -6,6 +6,37 @@ import {
   FEISHU_AI_CONTENT_MAX_CONCURRENT_DEFAULT,
 } from "@/lib/feishu/aiContentConcurrency";
 import { normalizePublishMaxConcurrent, PUBLISH_MAX_CONCURRENT_DEFAULT } from "@/lib/creator-publish/publishConcurrency";
+import { parseFeishuBitableUrl } from "@/lib/feishu/parse-bitable-url";
+
+type BitableSection = {
+  baseUrl?: string;
+  appToken: string;
+  tableId: string;
+  keepRows?: number;
+};
+
+/**
+ * 用 baseUrl 解析 appToken / tableId；解析失败时回退到已存储的字段。
+ * 这样 UI 只需填一个 Base URL，脚本侧仍能拿到 appToken / tableId。
+ */
+function normalizeBitableSection(section: BitableSection | null | undefined): BitableSection {
+  const baseUrl = String(section?.baseUrl || "").trim();
+  const parsed = parseFeishuBitableUrl(baseUrl);
+  if (parsed) {
+    return {
+      ...section,
+      baseUrl,
+      appToken: parsed.appToken,
+      tableId: parsed.tableId,
+    };
+  }
+  return {
+    ...section,
+    baseUrl,
+    appToken: String(section?.appToken || "").trim(),
+    tableId: String(section?.tableId || "").trim(),
+  };
+}
 
 function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigData {
   const defaultCreatorBitable = {
@@ -53,25 +84,31 @@ function normalizeConfig(data: Partial<ConfigData> | null | undefined): ConfigDa
       },
     },
     feishu: {
-      shop: data?.feishu?.shop || { appToken: "", tableId: "" },
-      creator: creatorBitable,
-      task: data?.feishu?.task || {
-        baseUrl: "https://a5bgloffd0.feishu.cn/base/T64RbXS6wak6QqsaSqzcx0F8n4f?table=tblVym8chEalMZgl&view=vew11jDYDk",
-        appToken: "T64RbXS6wak6QqsaSqzcx0F8n4f",
-        tableId: "tblVym8chEalMZgl",
-      },
-      product: data?.feishu?.product || {
-        baseUrl:
-          "https://a5bgloffd0.feishu.cn/base/T64RbXS6wak6QqsaSqzcx0F8n4f?table=tblx4oJCulsxEomk&view=vewn3FYuwC",
-        appToken: "T64RbXS6wak6QqsaSqzcx0F8n4f",
-        tableId: "tblx4oJCulsxEomk",
-      },
-      shopInfo: data?.feishu?.shopInfo || {
-        baseUrl:
-          "https://a5bgloffd0.feishu.cn/base/T64RbXS6wak6QqsaSqzcx0F8n4f?table=tblFoYG5sTkMlP07&view=vewwECx01M",
-        appToken: "T64RbXS6wak6QqsaSqzcx0F8n4f",
-        tableId: "tblFoYG5sTkMlP07",
-      },
+      shop: normalizeBitableSection(data?.feishu?.shop || { baseUrl: "", appToken: "", tableId: "" }),
+      creator: normalizeBitableSection(creatorBitable),
+      task: normalizeBitableSection(
+        data?.feishu?.task || {
+          baseUrl: "https://a5bgloffd0.feishu.cn/base/T64RbXS6wak6QqsaSqzcx0F8n4f?table=tblVym8chEalMZgl&view=vew11jDYDk",
+          appToken: "T64RbXS6wak6QqsaSqzcx0F8n4f",
+          tableId: "tblVym8chEalMZgl",
+        }
+      ),
+      product: normalizeBitableSection(
+        data?.feishu?.product || {
+          baseUrl:
+            "https://a5bgloffd0.feishu.cn/base/T64RbXS6wak6QqsaSqzcx0F8n4f?table=tblx4oJCulsxEomk&view=vewn3FYuwC",
+          appToken: "T64RbXS6wak6QqsaSqzcx0F8n4f",
+          tableId: "tblx4oJCulsxEomk",
+        }
+      ),
+      shopInfo: normalizeBitableSection(
+        data?.feishu?.shopInfo || {
+          baseUrl:
+            "https://a5bgloffd0.feishu.cn/base/T64RbXS6wak6QqsaSqzcx0F8n4f?table=tblFoYG5sTkMlP07&view=vewwECx01M",
+          appToken: "T64RbXS6wak6QqsaSqzcx0F8n4f",
+          tableId: "tblFoYG5sTkMlP07",
+        }
+      ),
     },
   };
 }
